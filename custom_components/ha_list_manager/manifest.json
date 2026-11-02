@@ -1,0 +1,24 @@
+{
+  "domain": "ha_list_manager",
+  "name": "HA List Manager",
+  "after_dependencies": [
+    "recorder"
+  ],
+  "codeowners": [
+    "@Nisbo"
+  ],
+  "config_flow": true,
+  "dependencies": [
+    "frontend",
+    "http",
+    "lovelace",
+    "panel_custom",
+    "websocket_api"
+  ],
+  "documentation": "https://github.com/Nisbo/ha-list-manager/wiki",
+  "integration_type": "service",
+  "iot_class": "local_push",
+  "issue_tracker": "https://github.com/Nisbo/ha-list-manager/issues",
+  "single_config_entry": true,
+  "version": "1.0.0b1"
+}

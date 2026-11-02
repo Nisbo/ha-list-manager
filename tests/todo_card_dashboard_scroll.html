@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="de">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Todo: Dashboard-Scrolltest</title>
+<style>
+  :root{font:16px Arial,sans-serif;color:#eee;background:#111;--primary-color:#03a9f4;--primary-text-color:#eee;--secondary-text-color:#aaa;--divider-color:#3b3b3b;--card-background-color:#1d1d1d;--secondary-background-color:#282828;--error-color:#f44336;--warning-color:#ffb300}
+  *{box-sizing:border-box}body{margin:0;padding:16px}h1{font-size:22px;margin:140px 0 18px}main{width:min(650px,100%);margin:auto;padding-bottom:100vh}ha-card{display:block;border:1px solid #444;border-radius:12px}#results{position:fixed;z-index:20000;top:0;left:0;right:0;max-height:130px;overflow:auto;padding:9px 14px;background:#12232cee;border-bottom:1px solid #567;font-size:12px}#results button{padding:8px 16px;margin-right:12px;background:#03a9f4;color:#fff;border:0;border-radius:6px;cursor:pointer}#results ol{margin:6px 0 0;padding-left:20px}.pass{color:#7ee28b}.fail{color:#ff8c82}
+</style>
+<section id="results"><button id="start" disabled>Test starten</button><span id="status">Karte wird geladen …</span><ol id="log"></ol></section>
+<main><h1>Normale Dashboardansicht</h1><p>70 lokale Testaufgaben. Kein Home-Assistant-Backend. Der Test läuft ohne große Ansicht und erhält einen Fokus im oberen Eingabefeld.</p><div id="mount"></div></main>
+<script type="module">
+  // Provide only the HA presentation elements. All list rendering, event binding,
+  // dialogs, focus handling and backend calls use the unmodified production card.
+  customElements.define("ha-card", class extends HTMLElement {});
+  customElements.define("ha-icon", class extends HTMLElement {
+    connectedCallback() {
+      if (this.shadowRoot) return;
+      const root = this.attachShadow({mode:"open"});
+      root.innerHTML = '<style>:host{display:inline-flex;align-items:center;justify-content:center;width:var(--mdc-icon-size,24px);height:var(--mdc-icon-size,24px);flex:0 0 auto}span{font-size:18px}</style><span aria-hidden="true">◇</span>';
+    }
+  });
+  const source = new URL(new URLSearchParams(location.search).get("source") || "../custom_components/ha_list_manager/frontend/ha-list-manager-todo-card.js", location.href);
+  const status = document.querySelector("#status"), log = document.querySelector("#log"), start = document.querySelector("#start");
+  const wait = ms => new Promise(resolve => setTimeout(resolve,ms));
+  const frame = () => new Promise(resolve => requestAnimationFrame(resolve));
+  const clone = value => JSON.parse(JSON.stringify(value));
+  const check = (condition,message) => { if (!condition) throw Error(message); };
+  const list = {id:"fixture-todo",name:"Lokale Testaufgaben",list_type:"todo"};
+  const categories = [{id:"home",name:"Haushalt",scope:"list",color:"#165970",icon:"mdi:home",position:0},{id:"work",name:"Arbeit",scope:"global",color:"#604080",position:1}];
+  const labels = [{id:"urgent",name:"Dringend",scope:"list",color:"#d88400",icon:"mdi:label"}];
+  const base = Date.now() + 86400000;
+  const items = Array.from({length:70},(_,i) => ({id:`task-${i}`,name:`Aufgabe ${String(i+1).padStart(2,"0")}`,description:i%3 ? "" : "Beschreibung zur Aufgabe",quantity:1,completed:false,category_id:"home",category:null,due_at:new Date(base+i*3600000).toISOString().slice(0,19),recurrence_interval:1,recurrence_unit:"D",position:i,labels:i%4 ? [] : clone(labels)}));
+  const subscribers = new Set(), mutations = [];
+  const backend = {
+    locale:{language:"de"},language:"de",states:{},
+    connection:{subscribeMessage:async callback => {subscribers.add(callback);return () => subscribers.delete(callback);}},
+    async callWS(message) {
+      await wait(15);
+      const operation = message.type.replace(/^ha_list_manager\//,"");
+      if (operation === "lists/list") return {lists:[clone(list)]};
+      if (operation === "items/list") return {items:clone(items)};
+      if (operation === "categories/order/get") return {categories:clone(categories)};
+      if (operation === "labels/list") return {labels:clone(labels)};
+      if (operation === "chips/list") return {chips:[]};
+      if (["notifications/assignments/list","chips/important/list"].includes(operation)) return {assignments:[]};
+      if (["items/update","items/set_completed"].includes(operation)) {
+        mutations.push(clone(message));
+        const item = items.find(entry => entry.id === message.item_id);
+        check(item,"Unbekannte Testaufgabe");
+        Object.assign(item,clone(message));
+        if (message.label_ids) item.labels = labels.filter(label => message.label_ids.includes(label.id));
+        delete item.type; delete item.item_id;
+        setTimeout(() => subscribers.forEach(callback => callback({data:{list_id:list.id}})),0);
+        return {item:clone(item)};
+      }
+      throw Error(`Unerwarteter Backendaufruf: ${operation}`);
+    }
+  };
+  let card;
+  const root = () => card.shadowRoot;
+  const row = id => root().querySelector(`[data-item-id="${id}"]`);
+  const current = id => card._items.find(item => item.id === id);
+  async function settle() {
+    await wait(300);
+    for(let i=0;i<50 && (card._loading || card._busy);i++) await wait(20);
+    await frame(); await frame();
+    check(!card._loading && !card._busy,"Backend blieb beschäftigt");
+  }
+  async function position(id="task-45") {
+    const input=root().querySelector("[data-new-task]");
+    input.focus({preventScroll:true});
+    await wait(30);
+    window.scrollTo(0,window.scrollY+row(id).getBoundingClientRect().top-190);
+    await frame(); await frame();
+    check(window.scrollY>1000,"Testaufgabe liegt nicht tief genug auf der Seite");
+    check(!card._expandedView,"Test muss in der normalen Karte laufen");
+    return {id,y:window.scrollY,input,card:root().querySelector("ha-card"),row:row(id)};
+  }
+  function unchanged(before, tolerance=2) {
+    check(Math.abs(window.scrollY-before.y)<=tolerance,`Seitenscroll ${before.y} → ${window.scrollY}`);
+    check(root().querySelector("ha-card")===before.card,"ha-card wurde ersetzt");
+    check(root().querySelector("[data-new-task]")===before.input,"Eingabefeld wurde ersetzt");
+    check(row(before.id)===before.row,"Artikelzeile wurde ersetzt");
+  }
+  async function test(name,action) {
+    try { await action(); log.insertAdjacentHTML("beforeend",`<li class="pass">✓ ${name}</li>`);console.log("PASS",name);return true; }
+    catch(error) {log.insertAdjacentHTML("beforeend",`<li class="fail">✗ ${name}: ${error.message}</li>`);console.error("FAIL",name,error);card._closeDialogs();await settle();return false;}
+  }
+  async function run() {
+    start.disabled=true;log.textContent="";status.textContent="Prüfe …";
+    let passed=0,total=0;
+    const scenario=async(name,action)=>{total++;if(await test(name,action))passed++;};
+    card._config.sort_mode="manual";card._config.todo_action_behavior="click_default_long_menu";card._config.todo_default_action="done";card._render();
+    await scenario("Schnellaktion: Fokus oben, Seite unten",async()=>{
+      const before=await position();await card._execute(current(before.id),"done");await settle();unchanged(before);
+    });
+    await scenario("Fälligkeit ändern ohne Scrollsprung",async()=>{
+      const before=await position();await card._execute(current(before.id),"next");await settle();unchanged(before);
+    });
+    await scenario("Editor öffnen und speichern",async()=>{
+      const before=await position();card._openEditor(current(before.id));await frame();
+      const name=root().querySelector("[data-d-name]");name.focus({preventScroll:true});
+      name.value += " bearbeitet";name.dispatchEvent(new Event("input",{bubbles:true}));
+      await card._saveEditor();await settle();unchanged(before);
+    });
+    await scenario("Popup: Aktion ausführen",async()=>{
+      const before=await position();card._openAction(current(before.id));await frame();
+      const done=root().querySelector('input[name="todo-action"][value="done"]');done.checked=true;done.dispatchEvent(new Event("change",{bubbles:true}));
+      root().querySelector("[data-run-action]").click();await settle();unchanged(before);check(!card._actionDialog,"Aktionsdialog blieb offen");
+    });
+    await scenario("Wiederholtes Rendern: pro Klick genau ein Auftrag",async()=>{
+      const before=await position();for(let i=0;i<8;i++)card._render();unchanged(before);
+      const count=mutations.length;root().querySelector(`[data-item-action="${before.id}"]`).click();await settle();
+      check(mutations.length-count===1,`${mutations.length-count} Schreibaufrufe für einen Klick`);unchanged(before);
+    });
+    await scenario("Sortierte, fokussierte Zeile bleibt erhalten",async()=>{
+      card._config.sort_mode="due";card._render();await settle();const before=await position("task-40");
+      const button=row(before.id).querySelector("[data-edit]");button.focus({preventScroll:true});
+      await card._updateDue(current(before.id),new Date(base+90*3600000).toISOString().slice(0,19));await settle();
+      check(row(before.id)===before.row,"Sortieren ersetzte die Zeile");check(root().activeElement===button,"Sortieren verlor den Zeilenfokus");
+      check(window.scrollY>500,`Sortieren sprang zum Seitenanfang (${window.scrollY})`);
+      check(root().querySelector("ha-card")===before.card,"Sortieren ersetzte die Karte");
+      card._config.sort_mode="manual";card._render();
+    });
+    await scenario("Kategorie und Label bleiben durchsuchbar",async()=>{
+      await position();card._openEditor(current("task-45"));await frame();
+      const category=root().querySelector("[data-d-category]");category.focus({preventScroll:true});category.value="Arb";category.dispatchEvent(new Event("input",{bubbles:true}));
+      check(card._dialog.category_name==="Arb","Kategorieeingabe ging verloren");
+      check(!root().querySelector('[data-category-option="work"]').hidden,"Passende Kategorie wurde ausgeblendet");
+      root().querySelector('[data-category-option="work"]').dispatchEvent(new MouseEvent("mousedown",{bubbles:true,cancelable:true}));
+      check(card._dialog.category_id==="work","Kategorieauswahl wurde nicht übernommen");
+      const label=root().querySelector("[data-label-input]");label.focus({preventScroll:true});label.value="Dring";label.dispatchEvent(new Event("input",{bubbles:true}));
+      check(root().querySelector('[data-label-option="urgent"]'),"Labelsuchtreffer fehlt");card._closeDialogs();await settle();
+    });
+    await scenario("Teilupdates lassen keine alten Event-Handler zurück",async()=>{
+      const previousConfig={...card._config},previousChips=card._chips;
+      try {
+        card._config.allow_filter=true;card._config.filter_chips=true;card._config.show_chips=true;
+        card._chips=[{id:"fixture-chip",name:"Aufgabe Vorlage",chip_kind:"todo_template",template_data:{item_name:"Aufgabe Vorlage"}}];
+        card._input="";card._render();
+        const input=root().querySelector("[data-new-task]"),count=card._renderListeners.length;
+        const live=()=>card._renderListeners.every(entry=>entry.target===root() || root().contains(entry.target));
+        for(let i=0;i<12;i++) {
+          input.value=i%2 ? "Aufgabe" : "";input.dispatchEvent(new Event("input",{bubbles:true}));
+          check(card._renderListeners.length===count,"Listen-/Chipfilter sammelt alte Handler");
+          check(live(),"Handler verweist noch auf entfernte Listenelemente");
+        }
+        const category=root().querySelector("[data-category]");
+        for(let i=0;i<6;i++) {
+          card._toggleCategory(category.dataset.category,category);card._toggleCategory(category.dataset.category,category);
+          check(card._renderListeners.length===count && live(),"Auf-/Zuklappen sammelt alte Handler");
+        }
+        card._openEditor(current("task-45"));
+        const label=root().querySelector("[data-label-input]");label.focus({preventScroll:true});
+        const labelCount=card._renderListeners.length;
+        for(let i=0;i<12;i++) {
+          label.value=i%2 ? "Dring" : "";label.dispatchEvent(new Event("input",{bubbles:true}));
+          check(card._renderListeners.length===labelCount && live(),"Labelsuche sammelt alte Handler");
+        }
+      } finally {card._config=previousConfig;card._chips=previousChips;card._input="";card._closeDialogs();}
+    });
+    status.textContent=`${passed}/${total} bestanden`;start.disabled=false;log.lastElementChild?.scrollIntoView({block:"nearest"});
+    window.fixtureResult={passed,total};
+  }
+  try {
+    await import(source.href);
+    card=document.createElement("ha-list-manager-todo-card");
+    card.setConfig({list_id:list.id,card_id:"dashboard-scroll-fixture",title:list.name,view_mode:"mobile",content_display:"card_only",collapsible:false,sort_mode:"manual",show_share_button:false,show_chips:false,allow_filter:false,filter_chips:false,item_divider_before_spacing:10,item_divider_after_spacing:10});
+    card.hass=backend;document.querySelector("#mount").append(card);await settle();
+    window.fixture={card,backend,items,mutations,run};status.textContent="Bereit · normale Karte · lokales Backend";start.disabled=false;start.addEventListener("click",run);
+  } catch(error) {status.textContent=error.message;console.error(error);}
+</script>
+</html>

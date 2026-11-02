@@ -1,0 +1,11 @@
+{
+  "title": "HA List Manager",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Set up HA List Manager",
+        "description": "Sets up the local database and administration panel. Manage lists, products, inventory, and scanners from the panel."
+      }
+    }
+  }
+}
