@@ -219,6 +219,17 @@ def _text(value: Any, maximum: int, *, required: bool = False, code="invalid_con
     return value or None
 
 
+def _item_text(value, maximum, field, *, required=False):
+    """Keep validation limits while identifying an invalid source field safely."""
+    try:
+        return _text(value, maximum, required=required, code="invalid_item")
+    except LegacyImportError as error:
+        error.values["field"] = field
+        if isinstance(value, str) and len(value) > maximum:
+            error.values.update(length=len(value), maximum=maximum)
+        raise
+
+
 def _warning(code: str, source: str | None = None, field: str | None = None, count: int | None = None):
     result = {"code": code}
     if source:
@@ -494,6 +505,15 @@ def parse_legacy_configs(yaml_text: str, files: dict[str, Any] | None = None) ->
     return {"cards": cards, "warnings": warnings, "excluded_sources": sorted(excluded)}
 
 
+def _is_gtin(value: str) -> bool:
+    """Recognize a GS1 check digit without looking up or importing EAN data."""
+    if len(value) not in {8, 12, 13, 14} or not value.isascii() or not value.isdecimal():
+        return False
+    total = sum(int(digit) * (3 if index % 2 == 0 else 1)
+                for index, digit in enumerate(reversed(value[:-1])))
+    return (-total) % 10 == int(value[-1])
+
+
 def _legacy_name(value: str, *, allow_zero: bool = False) -> dict[str, Any]:
     offer = bool(_OFFER.search(value))
     value = _OFFER.sub(" ", value).strip()
@@ -502,22 +522,37 @@ def _legacy_name(value: str, *, allow_zero: bool = False) -> dict[str, Any]:
     value = re.sub(r"^\[\[\d+\]\]\s*", "", value).strip()
     category_match = re.match(r"^@(.+?)@\s*", value)
     category = category_match[1].strip() if category_match else None
+    # The old card uses @none@ to opt out of both explicit and rule categories.
+    uncategorized = bool(category and category.casefold() == "none")
+    if uncategorized:
+        category = None
     if category_match:
         value = value[category_match.end():]
-    quantity_match = re.match(r"^(\d+)×\s*", value) or re.search(r"\((\d+)\)$", value)
+    prefix_quantity = re.match(r"^(\d+)×\s*", value)
+    suffix_quantity = re.search(r"\((\d+)\)$", value)
+    # Old lists sometimes retain a barcode in parentheses. A checked GTIN that
+    # cannot be a supported count stays literal, rather than losing source text.
+    literal_suffix = bool(suffix_quantity and int(suffix_quantity[1]) > 1000000
+                          and _is_gtin(suffix_quantity[1]))
+    quantity_match = prefix_quantity or (None if literal_suffix else suffix_quantity)
     quantity = int(quantity_match[1]) if quantity_match else 1
     value = re.sub(r"^\d+×\s*", "", value)
-    value = re.sub(r"\s*\(\d+\)$", "", value)
+    if not literal_suffix:
+        value = re.sub(r"\s*\(\d+\)$", "", value)
     interval_match = _INTERVAL.search(value)
     interval = int(interval_match[1]) if interval_match else None
     unit = interval_match[2] if interval_match else None
     value = re.sub(r"\s*\{\{.*?\}\}\s*$", "", value).strip()
-    if not value or len(value) > 200 or not (0 if allow_zero else 1) <= quantity <= 1000000 or (interval is not None and not 1 <= interval <= 1000000):
-        raise LegacyImportError("invalid_item")
+    _item_text(value, 200, "name", required=True)
+    if not (0 if allow_zero else 1) <= quantity <= 1000000:
+        raise LegacyImportError("invalid_item", field="quantity")
+    if interval is not None and not 1 <= interval <= 1000000:
+        raise LegacyImportError("invalid_item", field="recurrence_interval")
     if category and len(category) > 100:
-        raise LegacyImportError("invalid_item")
+        raise LegacyImportError("invalid_item", field="category", length=len(category), maximum=100)
     return {"name": value, "quantity": quantity, "category": category, "position": position,
-            "recurrence_interval": interval, "recurrence_unit": unit, "offer_only": offer}
+            "recurrence_interval": interval, "recurrence_unit": unit, "offer_only": offer,
+            "_uncategorized": uncategorized, "_numeric_suffix_preserved": literal_suffix}
 
 
 def _due(value):
@@ -692,30 +727,43 @@ def build_import_plan(parsed: dict[str, Any], source_items_by_entity: dict[str, 
         if inventory:
             warnings.append(_warning("inventory_simple", entity))
         omitted_descriptions = 0
+        numeric_suffixes = 0
         items, source_uids = [], set()
         for index, source_item in enumerate(source_items):
-            if not isinstance(source_item, dict):
-                raise LegacyImportError("invalid_item")
-            uid = _text(source_item.get("uid"), 255, required=True, code="invalid_item")
-            if uid in source_uids:
-                raise LegacyImportError("invalid_item")
-            source_uids.add(uid)
-            summary = _text(source_item.get("summary", source_item.get("name")), 1000, required=True, code="invalid_item")
-            item = _legacy_name(summary, allow_zero=inventory)
-            description = _text(source_item.get("description"), 2000, code="invalid_item")
-            if _is_excluded_metadata(description, allow_inventory=inventory):
-                raise LegacyImportError("unsupported_source")
-            if inventory:
-                if description and not _is_inventory_metadata(description):
-                    omitted_descriptions += 1
-                description = None
-            status = source_item.get("status", "completed" if source_item.get("completed") else "needs_action")
-            if not isinstance(status, str) or status not in {"completed", "needs_action"}:
-                raise LegacyImportError("invalid_item")
-            category = item["category"] or _category_for(item["name"], categories)
-            saved = by_category.get(category.casefold()) if category else None
+            field = "entry"
+            try:
+                if not isinstance(source_item, dict):
+                    raise LegacyImportError("invalid_item")
+                uid = _item_text(source_item.get("uid"), 255, "uid", required=True)
+                if uid in source_uids:
+                    raise LegacyImportError("invalid_item", field="uid")
+                source_uids.add(uid)
+                summary = _item_text(source_item.get("summary", source_item.get("name")), 1000, "summary", required=True)
+                item = _legacy_name(summary, allow_zero=inventory)
+                numeric_suffixes += int(item.pop("_numeric_suffix_preserved"))
+                description = _item_text(source_item.get("description"), 2000, "description")
+                if _is_excluded_metadata(description, allow_inventory=inventory):
+                    raise LegacyImportError("unsupported_source")
+                if inventory:
+                    if description and not _is_inventory_metadata(description):
+                        omitted_descriptions += 1
+                    description = None
+                status = source_item.get("status", "completed" if source_item.get("completed") else "needs_action")
+                if not isinstance(status, str) or status not in {"completed", "needs_action"}:
+                    raise LegacyImportError("invalid_item", field="status")
+                uncategorized = item.pop("_uncategorized")
+                category = None if uncategorized else item["category"] or _category_for(item["name"], categories)
+                saved = by_category.get(category.casefold()) if category else None
+                field = "due"
+                due_at = None if inventory else _due(source_item.get("due"))
+            except LegacyImportError as error:
+                if error.code == "invalid_item":
+                    error.values.update(source=entity, index=index + 1)
+                    error.values.setdefault("field", field)
+                    error.translation_key = "import.item_too_long" if "maximum" in error.values else "import.item_field_invalid"
+                raise
             item.update({"source_uid": uid, "description": description, "category": saved["name"] if saved else category,
-                         "category_saved": saved is not None, "due_at": None if inventory else _due(source_item.get("due")),
+                         "category_saved": saved is not None, "due_at": due_at,
                          "completed": status == "completed", "position": item["position"] if item["position"] is not None else index,
                          "offer_only": bool(item["offer_only"] and group["list_type"] == "shopping")})
             if group["list_type"] != "todo":
@@ -732,6 +780,8 @@ def build_import_plan(parsed: dict[str, Any], source_items_by_entity: dict[str, 
         for card in cards:
             for value in card["chips"]:
                 chip_item = _legacy_name(value, allow_zero=inventory)
+                uncategorized = chip_item.pop("_uncategorized")
+                numeric_suffixes += int(chip_item.pop("_numeric_suffix_preserved"))
                 chip_key = " ".join(chip_item["name"].split()).casefold()
                 if chip_key in chip_seen:
                     warnings.append(_warning("duplicate_chip", entity, "chips"))
@@ -740,7 +790,7 @@ def build_import_plan(parsed: dict[str, Any], source_items_by_entity: dict[str, 
                 template = None
                 if group["list_type"] == "todo":
                     template = {"item_name": chip_item["name"], "description": None,
-                                "category_name": chip_item["category"] or _category_for(chip_item["name"], categories),
+                                "category_name": None if uncategorized else chip_item["category"] or _category_for(chip_item["name"], categories),
                                 "category_id": None, "label_ids": [], "due_mode": "none", "add_mode": "direct",
                                 "recurrence_interval": chip_item["recurrence_interval"], "recurrence_unit": chip_item["recurrence_unit"]}
                 else:
@@ -751,11 +801,13 @@ def build_import_plan(parsed: dict[str, Any], source_items_by_entity: dict[str, 
                         category["rules"].append(chip_item["name"])
                         category["legacy_rules"].append(chip_item["name"])
                     missing_category = category_name and (not category or (existing_category and existing_category.casefold() != category_name.casefold()))
-                    if missing_category or chip_item["quantity"] != 1 or chip_item["offer_only"] or chip_item["recurrence_interval"]:
+                    if missing_category or (uncategorized and existing_category) or chip_item["quantity"] != 1 or chip_item["offer_only"] or chip_item["recurrence_interval"]:
                         warnings.append(_warning("chip_metadata", entity, "chips"))
                 chips.append({"name": chip_item["name"], "chip_kind": "todo_template" if template else "entry", "icon": None, "color": None, "template_data": template})
         if len(chips) > MAX_CHIPS:
             raise LegacyImportError("invalid_chip")
+        if numeric_suffixes:
+            warnings.append(_warning("numeric_suffix_preserved", entity, count=numeric_suffixes))
         for category in categories:
             del category["legacy_rules"]
         if sum(len(category["rules"]) for category in categories) > MAX_RULES:

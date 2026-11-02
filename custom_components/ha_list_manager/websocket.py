@@ -271,8 +271,18 @@ async def _legacy_import_response(connection, msg, operation):
     try:
         result = await operation
     except LegacyImportError as error:
+        values = error.values
+        field_key = {
+            "entry": "import.field_entry", "uid": "import.field_uid",
+            "summary": "import.field_summary", "name": "import.field_name",
+            "description": "import.field_description", "category": "import.field_category",
+            "quantity": "import.field_quantity", "recurrence_interval": "import.field_interval",
+            "status": "import.field_status", "due": "import.field_due",
+        }.get(values.get("field"))
+        if field_key:
+            values = {**values, "field": localized_text(field_key)}
         _send_error(connection, msg["id"], error.code,
-                    localized_text(error.translation_key, **error.values))
+                    localized_text(error.translation_key, **values))
     except DuplicateListNameError:
         _send_error(connection, msg["id"], "target_exists", localized_text("import.target_exists"))
     except BackupError:

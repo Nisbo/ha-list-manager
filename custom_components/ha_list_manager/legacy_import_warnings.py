@@ -66,6 +66,7 @@ _EXISTING_MESSAGES = {
     "shared_source": "adjusted",
     "option_adjusted": "adjusted",
     "chip_metadata": "review",
+    "numeric_suffix_preserved": "review",
 }
 
 

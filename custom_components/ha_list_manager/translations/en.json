@@ -438,7 +438,20 @@
     "import_reason_inventory_merged": "Entries with the same name and category are combined into one item. Its stock is the sum of the original quantities; EAN variants are no longer separate.",
     "import_reason_inventory_visibility": "A combined item includes visible and hidden entries. The new item remains visible and its stock includes all combined quantities.",
     "import_reason_inventory_description": "Free-form descriptions are not copied by the simplified inventory import. It copies only name, stock and category; the source-list description remains unchanged.",
-    "import_reason_transfers": "The old transfer queues and their transfer rules are excluded from this import. Automatic replenishment is configured separately in the backend afterwards."
+    "import_reason_transfers": "The old transfer queues and their transfer rules are excluded from this import. Automatic replenishment is configured separately in the backend afterwards.",
+    "import_item_too_long": "Source {source}, entry {index}: “{field}” has {length} characters; the maximum is {maximum}. Check this field in the source list. No data has been imported.",
+    "import_item_field_invalid": "Source {source}, entry {index}: “{field}” is invalid or empty. Check this entry in the source list.",
+    "import_field_entry": "Entry format",
+    "import_field_uid": "Entry identifier",
+    "import_field_summary": "Title including legacy markers",
+    "import_field_name": "Name without markers",
+    "import_field_description": "Description",
+    "import_field_category": "Category",
+    "import_field_quantity": "Quantity",
+    "import_field_interval": "Repeat interval",
+    "import_field_status": "Completion status",
+    "import_field_due": "Due date",
+    "import_warning_numeric_suffix_preserved": "{source}: For {count} entries, the barcode suffix in parentheses is kept as part of the name. It is not used as the quantity; without a separate quantity, 1 is imported. Check quantities in the preview."
   },
   "config_panel": {
     "backup": {
@@ -3162,6 +3175,12 @@
     },
     "import_invalid_import_type": {
       "message": "This list type does not match the selected card. An old shopping list can explicitly be imported as simplified inventory."
+    },
+    "import_item_too_long": {
+      "message": "Source {source}, entry {index}: “{field}” has {length} characters; the maximum is {maximum}. Check this field in the source list. No data has been imported."
+    },
+    "import_item_field_invalid": {
+      "message": "Source {source}, entry {index}: “{field}” is invalid or empty. Check this entry in the source list."
     }
   }
 }

@@ -70,7 +70,7 @@ function haListManagerPanelTextRequest(hass, message) {
   return hass.callWS(message.type?.startsWith("ha_list_manager/") ? { ...message, language: haListManagerPanelTextLanguage(hass) } : message);
 }
 
-const PANEL_VERSION = "1.0.0b1";
+const PANEL_VERSION = "1.0.0b2";
 const GROUP_PICKER_RESULT_LIMIT = 100;
 const API = "ha_list_manager";
 const ITEMS_EVENT = "ha_list_manager_items_changed";
@@ -4376,9 +4376,26 @@ class HaListManagerPanel extends HTMLElement {
   async _copyLegacyImportYaml() {
     const state = this._legacyImport, input = this.shadowRoot.querySelector("[data-legacy-result-yaml]");
     if (!input) return;
+    const result = state.result;
     state.feedbackTarget = "result"; state.error = ""; state.status = "";
-    try { await navigator.clipboard.writeText(input.value); state.status = haListManagerPanelText("legacy_import.copied", {}, this._hass); }
-    catch (_error) { input.focus(); input.select(); state.error = haListManagerPanelText("legacy_import.copy_failed", {}, this._hass); }
+    let copied = false;
+    if (navigator.clipboard?.writeText) {
+      try { await navigator.clipboard.writeText(input.value); copied = true; }
+      catch (_error) { /* Fall back to the selected textarea when access is denied. */ }
+    }
+    if (state.result !== result || this.shadowRoot.querySelector("[data-legacy-result-yaml]") !== input) return;
+    if (!copied) {
+      // Plain HTTP HA instances have no Clipboard API. Keep this fallback
+      // synchronous on the button click so the browser still sees a user action.
+      const previousFocus = this.shadowRoot.activeElement;
+      input.focus({ preventScroll: true }); input.select();
+      input.setSelectionRange?.(0, input.value.length);
+      try { copied = document.execCommand?.("copy") === true; }
+      catch (_error) { /* Leave the YAML selected for manual copying. */ }
+      if (copied && previousFocus !== input) previousFocus?.focus({ preventScroll: true });
+    }
+    if (copied) state.status = haListManagerPanelText("legacy_import.copied", {}, this._hass);
+    else state.error = haListManagerPanelText("legacy_import.copy_failed", {}, this._hass);
     this._updateLegacyImport();
   }
 

@@ -438,7 +438,20 @@
     "import_reason_inventory_merged": "Einträge mit gleichem Namen und derselben Kategorie werden zu einem Artikel zusammengefasst. Sein Bestand ist die Summe der ursprünglichen Mengen; die EAN-Varianten sind danach nicht mehr getrennt.",
     "import_reason_inventory_visibility": "Eine Zusammenfassung enthält sichtbare und ausgeblendete Einträge. Der neue Artikel bleibt sichtbar; sein Bestand enthält alle zusammengefassten Mengen.",
     "import_reason_inventory_description": "Freie Beschreibungen werden beim vereinfachten Inventarimport nicht übernommen. Dieser übernimmt nur Name, Bestand und Kategorie; die Beschreibung in der Quellliste bleibt unverändert.",
-    "import_reason_transfers": "Die alten Transferlisten und ihre Übertragungsregeln sind vom aktuellen Import ausgeschlossen. Automatische Nachbestellung wird danach separat im Backend eingerichtet."
+    "import_reason_transfers": "Die alten Transferlisten und ihre Übertragungsregeln sind vom aktuellen Import ausgeschlossen. Automatische Nachbestellung wird danach separat im Backend eingerichtet.",
+    "import_item_too_long": "Quelle {source}, Eintrag {index}: „{field}“ hat {length} Zeichen; erlaubt sind höchstens {maximum}. Bitte dieses Feld in der Quellliste prüfen. Es wurden keine Daten übernommen.",
+    "import_item_field_invalid": "Quelle {source}, Eintrag {index}: „{field}“ ist ungültig oder leer. Bitte diesen Eintrag in der Quellliste prüfen.",
+    "import_field_entry": "Eintragsformat",
+    "import_field_uid": "Eintragskennung",
+    "import_field_summary": "Titel einschließlich alter Markierungen",
+    "import_field_name": "Name ohne Markierungen",
+    "import_field_description": "Beschreibung",
+    "import_field_category": "Kategorie",
+    "import_field_quantity": "Anzahl",
+    "import_field_interval": "Wiederholungsintervall",
+    "import_field_status": "Erledigt-Status",
+    "import_field_due": "Fälligkeit",
+    "import_warning_numeric_suffix_preserved": "{source}: Bei {count} Einträgen bleibt der Barcode-Zusatz in Klammern Teil des Namens. Er wird nicht als Anzahl verwendet; ohne separate Mengenangabe wird 1 übernommen. Bitte die Mengen in der Vorschau prüfen."
   },
   "config_panel": {
     "backup": {
@@ -3162,6 +3175,12 @@
     },
     "import_invalid_import_type": {
       "message": "Dieser Listentyp passt nicht zur gewählten Karte. Eine bisherige Einkaufsliste kann ausdrücklich als vereinfachtes Inventar übernommen werden."
+    },
+    "import_item_too_long": {
+      "message": "Quelle {source}, Eintrag {index}: „{field}“ hat {length} Zeichen; erlaubt sind höchstens {maximum}. Bitte dieses Feld in der Quellliste prüfen. Es wurden keine Daten übernommen."
+    },
+    "import_item_field_invalid": {
+      "message": "Quelle {source}, Eintrag {index}: „{field}“ ist ungültig oder leer. Bitte diesen Eintrag in der Quellliste prüfen."
     }
   }
 }

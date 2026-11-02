@@ -215,12 +215,24 @@ class LegacyImportManager:
                 "warnings": self._warnings(plan["warnings"], draft["parsed"]["cards"], plan["lists"], choices), "can_import": bool(lists), "include_items": include_items}
 
     def _cards_yaml(self, plan, result):
+        registry = er.async_get(self.hass)
         configs = []
         for row, record in zip(plan["lists"], result["lists"], strict=True):
+            unique_id = f"{'inventory' if row['list_type'] == 'inventory' else 'list'}_{record['list_id']}"
+            entity_id = registry.async_get_entity_id("sensor", DOMAIN, unique_id)
+            if entity_id is None:
+                # Reserve the actual HA ID before the asynchronous sensor setup.
+                # HA handles name collisions, and the sensor reuses this unique ID.
+                entity_id = registry.async_get_or_create(
+                    "sensor", DOMAIN, unique_id,
+                    config_entry=self.runtime.config_entry,
+                    suggested_object_id=record["name"], original_name=record["name"],
+                    has_entity_name=False,
+                ).entity_id
             for view in row["cards"]:
                 config = {
                     "type": f"custom:ha-list-manager-{row['list_type']}-card",
-                    "list_id": record["list_id"],
+                    "entity": entity_id,
                     **view["options"],
                 }
                 if view["title"]:
@@ -255,8 +267,9 @@ class LegacyImportManager:
                         result = await database.async_import_legacy(job["plan"], plan_id)
                     else:
                         result = {**result, "replayed": True}
+                    cards_yaml = self._cards_yaml(job["plan"], result)
                     # A retried committed operation may still need entity registration.
                     self.hass.bus.async_fire(EVENT_LISTS_CHANGED, {"list_id": None})
-                return {**result, "cards_yaml": self._cards_yaml(job["plan"], result), "backup": job["backup"], "include_items": job["include_items"]}
+                return {**result, "cards_yaml": cards_yaml, "backup": job["backup"], "include_items": job["include_items"]}
             finally:
                 job["running"] = False
