@@ -84,6 +84,12 @@ and enter:
 Then follow steps 3–6 above. This is an integration that includes its dashboard
 cards; do not add it as a Dashboard/Frontend-only repository.
 
+Selecting a beta under **Download another version** does not enable beta update
+tracking. Enable the repository's HACS pre-release switch as well. Otherwise,
+while no stable release exists, HACS can show a short commit ID as the latest
+version instead of `1.0.0b1`. Refresh the repository information after enabling
+the switch.
+
 ### Manual installation
 
 1. Download the `ha-list-manager-1.0.0b1.zip` asset from the
@@ -94,7 +100,8 @@ cards; do not add it as a Dashboard/Frontend-only repository.
    **Settings → Devices & services → Add integration**.
 
 Only the `custom_components/ha_list_manager` directory belongs in the HA
-installation. Do not copy the whole repository, its tests or development tools.
+installation. The repository also contains this README, HACS metadata and
+license information.
 
 ## First steps
 
@@ -147,16 +154,15 @@ Use the backup panel and keep a copy outside the HA machine. The initial databas
 schema for this release is **1**.
 
 Install later beta updates through HACS, restart HA and refresh open dashboards.
-See the [release notes](https://github.com/Nisbo/ha-list-manager/releases) and
-[roadmap](ROADMAP.md) for changes and deliberately deferred features.
+See the [release notes](https://github.com/Nisbo/ha-list-manager/releases)
+for changes.
 
-## Feedback and development
+## Feedback
 
 Report reproducible problems in [GitHub Issues](https://github.com/Nisbo/ha-list-manager/issues).
 Include your HA version, HA List Manager version, affected workflow and steps to
 reproduce the problem. Use screenshots or relevant logs where useful; remove
 credentials and private data before posting.
 
-For the implementation notes and test commands, see [Development](docs/Development.md).
 Licensed under the [MIT License](LICENSE). The bundled PDF library has its own
 [license notice](custom_components/ha_list_manager/frontend/PDF-LIB-LICENSE.md).
