@@ -318,7 +318,7 @@
     "backend_label_assignment_unknown": "Unknown label assignment",
     "backend_product_category_assignment_unknown": "Unknown product category assignment",
     "backend_assignment_word_required": "An assignment rule must contain at least one word",
-    "backend_notify_plain_text_only": "Notify entities only support plain text in this integration",
+    "backend_notify_plain_text_only": "This notify target only supports plain text here. HTML and Markdown are available for Telegram bot entities.",
     "backend_recurrence_interval_range": "The recurrence interval must be between 1 and 1,000,000",
     "backend_recurrence_unit_invalid": "The recurrence unit must be H, D or M",
     "backend_description_too_long": "The description is too long",
@@ -451,7 +451,7 @@
     "import_field_interval": "Repeat interval",
     "import_field_status": "Completion status",
     "import_field_due": "Due date",
-    "import_warning_numeric_suffix_preserved": "{source}: For {count} entries, the barcode suffix in parentheses is kept as part of the name. It is not used as the quantity; without a separate quantity, 1 is imported. Check quantities in the preview."
+    "import_warning_numeric_suffix_preserved": "{source}: For {count} entries, the barcode suffix in parentheses is kept as part of the name. It is not used as the quantity; without a separate quantity, 1 is imported. In the import preview, expand “Entries” and check the quantities there."
   },
   "config_panel": {
     "backup": {
@@ -780,7 +780,7 @@
       "initial_stock_action_mode": "Sets which stock action mode is active when the card loads.",
       "numeric_series_requirement": "Multiple data series can only be shown together in the chart when all values are numeric. The list view continues to show all values.",
       "chip_product_link": "With a link, the chip adds this exact product. Without a link, products are searched by chip name; if multiple products share the name, a selection is shown.",
-      "separate_delivery_methods": "Mobile app, Ntfy and persistent targets are managed under their own delivery methods.",
+      "separate_delivery_methods": "Device notifications, Ntfy and HA notifications are managed under their own delivery methods.",
       "notification_delay": "The wait time restarts after the latest matching saved change. 0 sends immediately.",
       "category_name_assignment": "New items are assigned to this category based on their names.",
       "no_list_exceptions": "No exceptions yet. Without an exception, the matching list type or global default is used.",
@@ -793,7 +793,7 @@
       "fixed_list_product_assignments": "Products from the product database with a fixed assignment to this list.",
       "inventory_product_category_default": "Product default for this inventory list: “{p0}”. A selected inventory category overrides this default only in this list.",
       "scan_mode_qr_code": "Scan a code with an active scanner. The code selects this inventory as the target and sets the corresponding stock action mode.",
-      "notify_entity_delivery": "Sends through a Notify entity. Depending on the target, this may be a device push notification, SMS, chat message or display on a device. Length and preview depend on the target device or service.",
+      "notify_entity_delivery": "Sends to the notify entity of a device or connected service. Available targets and message length depend on the integration.",
       "manual_shortage_calculation": "Always transfers minimum minus stock, rather than the fixed restock quantity. Example: stock 5 and minimum 6 result in 1 item manually, even if the automatic fixed quantity is 6. Active restock locks also apply manually; with “Fixed quantity”, a successful manual transfer sets the lock again. Resetting alone transfers nothing.",
       "group_restock_rule_priority": "The group rule applies while items belong to this group. Saved individual rules for its members are retained and apply again when the group is dissolved.",
       "auto_save_inventory_browser_chip": "Automatically saves a chip in this browser after a successful inventory action. Because inventory items are always database products, “Create browser chips for database products” must also be enabled.",
@@ -825,11 +825,13 @@
       "camera_scan_input_button": "Shows the button in the input row to scan an EAN using the device camera.",
       "backend_scanner_target_button": "Shows the button in the mode selector to set this inventory list as the target for a backend scanner.",
       "product_image_visibility": "Shows product images or a placeholder in items and product suggestions.",
-      "classic_notify_services": "Shows separately configured classic Notify services, such as email or Telegram. Supported text formats and maximum length depend on the service.",
+      "classic_notify_services": "For separately configured legacy notify services, such as email. Supported formats depend on the service.",
       "item_dividers": "Shows a horizontal divider between items.",
       "include_shared_dishes": "Offer centrally managed dishes as shared quick entries in this list.",
       "max_value": "Filters larger values from all data series in the backend query. The boundary value itself remains visible.",
-      "min_value": "Filters out smaller numbers from all series in the backend query. The threshold itself remains visible."
+      "min_value": "Filters out smaller numbers from all series in the backend query. The threshold itself remains visible.",
+      "telegram_formats": "Telegram: plain text, HTML or Markdown is explicitly set for this destination, overriding the bot’s default format.",
+      "telegram_delivery": "Choose the intended chat of your configured Telegram bot. Plain text, HTML and Markdown are available for every Telegram destination."
     },
     "history": {
       "add_sample": "Add reading",
@@ -2242,15 +2244,19 @@
       "notify_service": "Notify service",
       "ntfy_target": "Ntfy target",
       "send_to_label": "Send to:",
-      "separate_notify_service": "Separate Notify service (email, Telegram …)",
+      "separate_notify_service": "Legacy notify service (e.g. email)",
       "delivery_target": "Delivery target",
       "edit_target": "Edit delivery target",
       "central_management_help": "Create and test delivery targets centrally and assign them to lists.",
       "full_list": "Full list",
-      "no_notify_service": "No separate notification service such as email or Telegram has been configured yet.",
+      "no_notify_service": "No legacy notify services configured.",
       "persistent_target": "HA notification area (persistent)",
       "assigned_list": "Assigned to {count} list",
-      "assigned_lists": "Assigned to {count} lists"
+      "assigned_lists": "Assigned to {count} lists",
+      "entity_target": "Notify entity (devices, services)",
+      "telegram_target": "Telegram chat",
+      "search_telegram_chats": "Search Telegram chats",
+      "no_telegram_chat": "No matching Telegram chat entity found"
     },
     "errors": {
       "stock_integer_required": "Stock and minimum stock must be non-negative integers.",
@@ -2709,7 +2715,7 @@
       "message": "Unsupported notification provider: {provider}"
     },
     "backend_notify_plain_text_only": {
-      "message": "Notify entities only support plain text in this integration"
+      "message": "This notify target only supports plain text here. HTML and Markdown are available for Telegram bot entities."
     },
     "backend_offers_shopping_only": {
       "message": "Offer marking is only available for shopping lists"

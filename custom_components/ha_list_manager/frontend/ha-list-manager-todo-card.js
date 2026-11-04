@@ -81,7 +81,7 @@ function haListManagerTodoCardTextRequest(hass, message) {
 
 const HA_LM_API = "ha_list_manager";
 const HA_LM_ITEMS_EVENT = "ha_list_manager_items_changed";
-const CARD_VERSION = "1.0.0b2";
+const CARD_VERSION = "1.0.0b3";
 
 const esc = (value) => String(value ?? "").replace(/[&<>'"]/g, (char) => ({
   "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;",

@@ -13,6 +13,7 @@ from typing import Any
 
 from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.event import async_call_later
 
 from .localization import async_prepare, system_text as localized_text
@@ -27,6 +28,9 @@ from .models import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+_TELEGRAM_MARKDOWN_ESCAPES = str.maketrans(
+    {character: f"\\{character}" for character in r"\_*[]()~`>#+-=|{}.!"}
+)
 
 
 class NotificationManager:
@@ -184,8 +188,10 @@ class NotificationManager:
                 )
                 return
             changes = self._decode_changes(batch)
+            telegram = self._is_telegram_profile(assignment.profile)
             change_message = self._format_changes(
-                changes, assignment, assignment.profile.message_format
+                changes, assignment, assignment.profile.message_format,
+                telegram=telegram,
             )
             message = ""
             if assignment.automatic_mode in {"changes", "changes_and_full"}:
@@ -193,10 +199,13 @@ class NotificationManager:
             if assignment.automatic_mode in {"full", "changes_and_full"}:
                 items = await self._database.async_list_items(list_id)
                 full = self._format_list(
-                    list_record, items, assignment.profile.message_format
+                    list_record, items, assignment.profile.message_format,
+                    telegram=telegram,
                 )
                 if message:
                     separator = "<hr>" if assignment.profile.message_format == "html" else "\n\n---\n\n"
+                    if telegram and assignment.profile.message_format == "markdown":
+                        separator = "\n\n—\n\n"
                     message += separator + full
                 else:
                     message = full
@@ -465,6 +474,8 @@ class NotificationManager:
         changes: dict[str, dict[str, Any]],
         assignment: ListNotificationAssignmentRecord,
         message_format: str,
+        *,
+        telegram: bool = False,
     ) -> str:
         groups: dict[str, list[str]] = defaultdict(list)
         labels = {
@@ -539,17 +550,27 @@ class NotificationManager:
             if lines:
                 lines.append("")
             heading = labels[event_name]
-            lines.append(f"**{heading}**" if markdown else f"{heading}:")
-            lines.extend(f"- {text}" for text in entries)
+            if markdown and telegram:
+                lines.append(f"*{cls._telegram_markdown_text(heading)}*")
+                lines.extend(f"\\- {cls._telegram_markdown_text(text)}" for text in entries)
+            else:
+                lines.append(f"**{heading}**" if markdown else f"{heading}:")
+                lines.extend(f"- {text}" for text in entries)
         return "\n".join(lines)
 
     async def async_test(self, profile: NotificationProfileRecord) -> None:
         """Send a small test message without requiring a list assignment."""
         await async_prepare(self._hass)
+        message = localized_text("backend.test_notification_sent")
+        if self._is_telegram_profile(profile):
+            if profile.message_format == "html":
+                message = escape(message)
+            elif profile.message_format == "markdown":
+                message = self._telegram_markdown_text(message)
         await self._async_send(
             profile,
             profile.title or "HA List Manager",
-            localized_text("backend.test_notification_sent"),
+            message,
         )
 
     async def async_send_list(
@@ -575,12 +596,41 @@ class NotificationManager:
         items = await self._database.async_list_items(list_id)
         sent: list[str] = []
         for profile in profiles:
-            message = self._format_list(list_record, items, profile.message_format)
+            message = self._format_list(
+                list_record, items, profile.message_format,
+                telegram=self._is_telegram_profile(profile),
+            )
             await self._async_send(
                 profile, profile.title or list_record.name, message
             )
             sent.append(profile.id)
         return sent
+
+    def _is_telegram_profile(self, profile: NotificationProfileRecord) -> bool:
+        if profile.provider != "notify_entity":
+            return False
+        entry = er.async_get(self._hass).async_get(profile.target)
+        return entry is not None and entry.platform == "telegram_bot"
+
+    @staticmethod
+    def _telegram_markdown_text(text: str) -> str:
+        """Keep user text literal in Telegram's MarkdownV2 dialect."""
+        return text.translate(_TELEGRAM_MARKDOWN_ESCAPES)
+
+    @staticmethod
+    def _telegram_html(message: str) -> str:
+        """Translate our email-style markup to Telegram's supported HTML tags."""
+        replacements = {
+            "<h2>": "<b>", "</h2>": "</b>\n",
+            "<h3>": "<b>", "</h3>": "</b>\n",
+            "<ul>": "", "</ul>": "\n",
+            "<li>": "• ", "</li>": "\n",
+            "<br>": "\n", "<small>": "", "</small>": "",
+            "<hr>": "\n—\n", "&times;": "×",
+        }
+        for original, replacement in replacements.items():
+            message = message.replace(original, replacement)
+        return message.strip()
 
     async def _async_send(
         self, profile: NotificationProfileRecord, title: str, message: str
@@ -592,7 +642,14 @@ class NotificationManager:
             )
             return
         if profile.provider == "notify_entity":
+            telegram = self._is_telegram_profile(profile)
+            if not telegram and profile.message_format != "plain":
+                raise HomeAssistantError(localized_text("backend.notify_plain_text_only"))
             if profile.click_url:
+                if telegram:
+                    raise HomeAssistantError(
+                        localized_text("backend.open_path_companion_only")
+                    )
                 object_id = profile.target.partition(".")[2]
                 mobile_service = f"mobile_app_{object_id}"
                 if not self._hass.services.has_service("notify", mobile_service):
@@ -609,6 +666,22 @@ class NotificationManager:
                             "clickAction": profile.click_url,
                         },
                     },
+                    blocking=True,
+                )
+                return
+            if telegram:
+                parse_mode = "plain_text" if profile.message_format == "plain" else profile.message_format
+                if parse_mode == "markdown":
+                    parse_mode = "markdownv2"
+                if parse_mode == "html":
+                    title = escape(title)
+                    message = self._telegram_html(message)
+                elif parse_mode == "markdownv2":
+                    title = self._telegram_markdown_text(title)
+                await self._hass.services.async_call(
+                    "telegram_bot", "send_message",
+                    {"entity_id": profile.target, "title": title,
+                     "message": message, "parse_mode": parse_mode},
                     blocking=True,
                 )
                 return
@@ -642,7 +715,8 @@ class NotificationManager:
 
     @classmethod
     def _format_list(
-        cls, list_record: ListRecord, items: list[ListItemRecord], message_format: str
+        cls, list_record: ListRecord, items: list[ListItemRecord], message_format: str,
+        *, telegram: bool = False,
     ) -> str:
         active = [item for item in items if not item.completed]
         grouped: dict[tuple[str, str] | None, list[ListItemRecord]] = defaultdict(list)
@@ -711,21 +785,28 @@ class NotificationManager:
                     )
                 sections.append(f"<h3>{escape(category)}</h3><ul>{rows}</ul>")
             return f"<h2>{escape(list_record.name)}</h2>{''.join(sections)}"
-        lines = [list_record.name]
         markdown = message_format == "markdown"
+        telegram_markdown = markdown and telegram
+        render_text = cls._telegram_markdown_text if telegram_markdown else str
+        lines = [render_text(list_record.name)]
         for category_key, category_items in grouped.items():
             category = category_names[category_key]
-            lines.extend(["", f"**{category}**" if markdown else category])
+            if telegram_markdown:
+                heading = f"*{render_text(category)}*"
+            else:
+                heading = f"**{category}**" if markdown else category
+            lines.extend(["", heading])
             if list_record.list_type == "todo":
                 for item in category_items:
                     details = todo_details(item)
                     detail_text = f" — {' · '.join(details)}" if details else ""
-                    lines.append(f"- {item.name}{detail_text}")
+                    prefix = "\\- " if telegram_markdown else "- "
+                    lines.append(prefix + render_text(item.name + detail_text))
             else:
-                lines.extend(
-                    f"- {item.name}{f' × {item.quantity}' if item.quantity != 1 else ''}{offer_suffix if item.offer_only else ''}"
-                    for item in category_items
-                )
+                for item in category_items:
+                    text = f"{item.name}{f' × {item.quantity}' if item.quantity != 1 else ''}{offer_suffix if item.offer_only else ''}"
+                    prefix = "\\- " if telegram_markdown else "- "
+                    lines.append(prefix + render_text(text))
         if not active:
-            lines.extend(["", localized_text("backend.list_empty")])
+            lines.extend(["", render_text(localized_text("backend.list_empty"))])
         return "\n".join(lines)

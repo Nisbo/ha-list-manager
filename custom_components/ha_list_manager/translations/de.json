@@ -318,7 +318,7 @@
     "backend_label_assignment_unknown": "Unbekannte Labelzuordnung",
     "backend_product_category_assignment_unknown": "Unbekannte Produktkategoriezuordnung",
     "backend_assignment_word_required": "Eine Zuordnungsregel muss mindestens ein Wort enthalten",
-    "backend_notify_plain_text_only": "Notify-Entitäten unterstützen in dieser Integration nur Klartext",
+    "backend_notify_plain_text_only": "Dieses Notify-Ziel unterstützt hier nur Klartext. HTML und Markdown sind für Telegram-Bot-Entitäten verfügbar.",
     "backend_recurrence_interval_range": "Das Wiederholungsintervall muss zwischen 1 und 1.000.000 liegen",
     "backend_recurrence_unit_invalid": "Die Wiederholungseinheit muss H, D oder M sein",
     "backend_description_too_long": "Die Beschreibung ist zu lang",
@@ -451,7 +451,7 @@
     "import_field_interval": "Wiederholungsintervall",
     "import_field_status": "Erledigt-Status",
     "import_field_due": "Fälligkeit",
-    "import_warning_numeric_suffix_preserved": "{source}: Bei {count} Einträgen bleibt der Barcode-Zusatz in Klammern Teil des Namens. Er wird nicht als Anzahl verwendet; ohne separate Mengenangabe wird 1 übernommen. Bitte die Mengen in der Vorschau prüfen."
+    "import_warning_numeric_suffix_preserved": "{source}: Bei {count} Einträgen bleibt der Barcode-Zusatz in Klammern Teil des Namens. Er wird nicht als Anzahl verwendet; ohne separate Mengenangabe wird 1 übernommen. In der Importvorschau „Einträge“ aufklappen und dort die Mengen prüfen."
   },
   "config_panel": {
     "backup": {
@@ -780,7 +780,7 @@
       "initial_stock_action_mode": "Legt fest, welcher Buchungsmodus beim Laden der Karte aktiv ist.",
       "numeric_series_requirement": "Mehrere Datenreihen können im Diagramm nur gemeinsam angezeigt werden, wenn alle Werte numerisch sind. Die Listenansicht zeigt weiterhin alle Werte.",
       "chip_product_link": "Mit einer Verknüpfung fügt der Chip genau dieses Produkt hinzu. Ohne Verknüpfung wird anhand des Chipnamens gesucht; bei mehreren gleichnamigen Produkten erscheint eine Auswahl.",
-      "separate_delivery_methods": "Mobile-App-, Ntfy- und persistente Ziele werden in ihren eigenen Versandarten verwaltet.",
+      "separate_delivery_methods": "Geräte-Benachrichtigungen, Ntfy und HA-Benachrichtigungen werden in ihren eigenen Versandarten verwaltet.",
       "notification_delay": "Nach der letzten passenden, gespeicherten Änderung startet die Wartezeit neu. 0 sendet sofort.",
       "category_name_assignment": "Neue Einträge werden anhand ihres Namens dieser Kategorie zugeordnet.",
       "no_list_exceptions": "Noch keine Ausnahme. Ohne Ausnahme wird der passende Listentyp- oder globale Standard verwendet.",
@@ -793,7 +793,7 @@
       "fixed_list_product_assignments": "Produkte aus der Produktdatenbank mit einer festen Zuordnung zu dieser Liste.",
       "inventory_product_category_default": "Produktvorgabe für diese Inventarliste: „{p0}“. Eine ausgewählte Inventarkategorie überschreibt diese Vorgabe nur in dieser Liste.",
       "scan_mode_qr_code": "Scanne einen Code mit einem aktiven Scanner. Der Code wählt dieses Inventar als Ziel und stellt den jeweiligen Buchungsmodus ein.",
-      "notify_entity_delivery": "Sendet über eine Notify-Entität. Je nach Ziel kann das eine Geräte-Push-Nachricht, SMS, Chat-Nachricht oder Anzeige auf einem Gerät sein. Länge und Vorschau hängen vom Zielgerät beziehungsweise Dienst ab.",
+      "notify_entity_delivery": "Sendet an eine Notify-Entität eines Geräts oder angebundenen Dienstes. Verfügbare Ziele und Nachrichtenlänge hängen von der jeweiligen Integration ab.",
       "manual_shortage_calculation": "Sie überträgt immer Minimum minus Bestand, nicht die feste Nachbestellmenge. Beispiel: Bestand 5 und Minimum 6 ergeben manuell 1 Artikel, auch wenn die automatische feste Menge 6 beträgt. Aktive Nachbestellsperren gelten auch manuell; bei „Feste Menge“ setzt eine erfolgreiche manuelle Übertragung die Sperre erneut. Zurücksetzen allein überträgt nichts.",
       "group_restock_rule_priority": "Solange Artikel zu dieser Gruppe gehören, gilt die Gruppenregel. Gespeicherte Einzelregeln der Mitglieder bleiben erhalten und greifen wieder, wenn die Gruppe aufgelöst wird.",
       "auto_save_inventory_browser_chip": "Speichert nach einer erfolgreichen Inventaraktion automatisch einen Chip in diesem Browser. Da Inventarartikel immer Datenbankprodukte sind, muss dafür zusätzlich „Browserchips für Datenbankprodukte erstellen“ aktiviert sein.",
@@ -825,11 +825,13 @@
       "camera_scan_input_button": "Zeigt in der Eingabezeile den Button zum Scannen einer EAN mit der Gerätekamera.",
       "backend_scanner_target_button": "Zeigt in der Modusauswahl den Button, mit dem diese Inventarliste als Ziel für einen Backend-Scanner festgelegt wird.",
       "product_image_visibility": "Zeigt Produktbilder beziehungsweise einen Platzhalter in Artikeln und Produktvorschlägen.",
-      "classic_notify_services": "Zeigt separat eingerichtete klassische Notify-Dienste, beispielsweise E-Mail oder Telegram. Unterstützte Textformate und maximale Länge hängen vom jeweiligen Dienst ab.",
+      "classic_notify_services": "Für separat eingerichtete klassische Notify-Dienste, beispielsweise E-Mail. Unterstützte Formate hängen vom jeweiligen Dienst ab.",
       "item_dividers": "Zeigt zwischen den Artikeln eine horizontale Trennlinie an.",
       "include_shared_dishes": "Zentrale Gerichte als gemeinsame Schnelleingaben in dieser Liste anbieten.",
       "max_value": "Blendet größere Zahlen bei allen Datenreihen bereits in der Backend-Abfrage aus. Die Grenze selbst bleibt sichtbar.",
-      "min_value": "Blendet kleinere Zahlen bei allen Datenreihen bereits in der Backend-Abfrage aus. Die Grenze selbst bleibt sichtbar."
+      "min_value": "Blendet kleinere Zahlen bei allen Datenreihen bereits in der Backend-Abfrage aus. Die Grenze selbst bleibt sichtbar.",
+      "telegram_formats": "Telegram: Text, HTML oder Markdown wird für dieses Versandziel ausdrücklich gesetzt und überschreibt die Formatvorgabe des Bots.",
+      "telegram_delivery": "Wähle den gewünschten Chat deines eingerichteten Telegram-Bots. Text, HTML und Markdown stehen für jedes Telegram-Versandziel zur Verfügung."
     },
     "history": {
       "add_sample": "Messwert ergänzen",
@@ -2242,15 +2244,19 @@
       "notify_service": "Notify-Dienst",
       "ntfy_target": "Ntfy-Ziel",
       "send_to_label": "Senden an:",
-      "separate_notify_service": "Separater Notify-Dienst (E-Mail, Telegram …)",
+      "separate_notify_service": "Klassischer Notify-Dienst (z. B. E-Mail)",
       "delivery_target": "Versandziel",
       "edit_target": "Versandziel bearbeiten",
       "central_management_help": "Versandziele zentral anlegen, testen und Listen zuordnen.",
       "full_list": "Vollständige Liste",
-      "no_notify_service": "Es ist noch kein separater Notify-Dienst wie E-Mail oder Telegram eingerichtet.",
+      "no_notify_service": "Keine klassischen Notify-Dienste eingerichtet.",
       "persistent_target": "HA-Benachrichtigungsbereich (persistent)",
       "assigned_list": "{count} Liste zugeordnet",
-      "assigned_lists": "{count} Listen zugeordnet"
+      "assigned_lists": "{count} Listen zugeordnet",
+      "entity_target": "Notify-Entität (Geräte, Dienste)",
+      "telegram_target": "Telegram-Chat",
+      "search_telegram_chats": "Telegram-Chats durchsuchen",
+      "no_telegram_chat": "Keine passende Telegram-Chat-Entität gefunden"
     },
     "errors": {
       "stock_integer_required": "Bestand und Mindestbestand müssen ganze, nicht negative Zahlen sein.",
@@ -2709,7 +2715,7 @@
       "message": "Dieser Benachrichtigungsanbieter wird nicht unterstützt: {provider}"
     },
     "backend_notify_plain_text_only": {
-      "message": "Notify-Entitäten unterstützen in dieser Integration nur Klartext"
+      "message": "Dieses Notify-Ziel unterstützt hier nur Klartext. HTML und Markdown sind für Telegram-Bot-Entitäten verfügbar."
     },
     "backend_offers_shopping_only": {
       "message": "Angebotskennzeichnung ist nur für Einkaufslisten verfügbar"

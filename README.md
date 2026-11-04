@@ -5,7 +5,7 @@ with a shared product database, dashboard cards and an administration panel.
 A separate history card adds long-term recording for selected HA entities.
 
 > [!IMPORTANT]
-> **Beta release: 1.0.0b2.** This is a pre-release for testing before the stable release.
+> **Beta release: 1.0.0b3.** This is a pre-release for testing before the stable release.
 > Back up your Home Assistant configuration and important data before testing.
 > Please report problems with the installed version and steps to reproduce them.
 
@@ -72,7 +72,7 @@ restricted to administrators. See the [permissions guide](https://github.com/Nis
 2. Click the blue button above, select your Home Assistant instance and open
    **HA List Manager** in HACS. Confirm adding the repository if requested.
 3. Open the HACS download dialog, choose a different version and select
-   **1.0.0b2**. Download it and **restart Home Assistant**.
+   **1.0.0b3**. Download it and **restart Home Assistant**.
 4. Open **Settings → Devices & services → Add integration**, search for
    **HA List Manager**, and complete setup.
 5. Open **HA List Manager** in the sidebar to create your lists, then add their
@@ -92,7 +92,7 @@ cards; do not add it as a Dashboard/Frontend-only repository.
 ### Manual installation
 
 1. Download the installation archive
-   [`ha-list-manager-1.0.0b2.zip`](https://github.com/Nisbo/ha-list-manager/releases/download/1.0.0b2/ha-list-manager-1.0.0b2.zip).
+   [`ha-list-manager-1.0.0b3.zip`](https://github.com/Nisbo/ha-list-manager/releases/download/1.0.0b3/ha-list-manager-1.0.0b3.zip).
 2. Extract it into your HA configuration directory so the result is
    `<config>/custom_components/ha_list_manager/manifest.json`.
 3. Restart Home Assistant and add **HA List Manager** under

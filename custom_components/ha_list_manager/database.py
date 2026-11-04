@@ -7694,45 +7694,16 @@ WHERE registry_entry_id IS NOT NULL;
         return re.fullmatch(expression, normalized_name) is not None
 
     @staticmethod
-    def _category_rules_overlap(first: str, second: str) -> bool:
-        """Return whether two simple asterisk patterns can match one name."""
-        left = " ".join(first.casefold().split())
-        right = " ".join(second.casefold().split())
-        pending = [(0, 0)]
-        visited: set[tuple[int, int]] = set()
-        while pending:
-            left_index, right_index = pending.pop()
-            state = (left_index, right_index)
-            if state in visited:
-                continue
-            visited.add(state)
-            if left_index == len(left) and right_index == len(right):
-                return True
-
-            left_star = left_index < len(left) and left[left_index] == "*"
-            right_star = right_index < len(right) and right[right_index] == "*"
-            if left_star:
-                pending.append((left_index + 1, right_index))
-            if right_star:
-                pending.append((left_index, right_index + 1))
-
-            left_symbol = None if left_index == len(left) else (
-                None if left_star else left[left_index]
-            )
-            right_symbol = None if right_index == len(right) else (
-                None if right_star else right[right_index]
-            )
-            if left_index == len(left) or right_index == len(right):
-                continue
-            if left_star and right_star:
-                continue
-            if left_star:
-                pending.append((left_index, right_index + 1))
-            elif right_star:
-                pending.append((left_index + 1, right_index))
-            elif left_symbol == right_symbol:
-                pending.append((left_index + 1, right_index + 1))
-        return False
+    def _category_rules_conflict(first: str, second: str) -> bool:
+        """Detect direct text conflicts without inventing combined item names."""
+        # Arbitrary pattern intersection would reject every pair of contains
+        # rules: '*Sauce*' and '*Erdbeeren*' could both match 'Erdbeeren Sauce'.
+        # Compare the rules' own literal text instead; real combined names use
+        # the normal category priority when they are added.
+        return (
+            HaListManagerDatabase._category_rule_matches(first, second.replace("*", ""))
+            or HaListManagerDatabase._category_rule_matches(second, first.replace("*", ""))
+        )
 
     @staticmethod
     def _ensure_category_rules_unique_in_scope(
@@ -7743,7 +7714,7 @@ WHERE registry_entry_id IS NOT NULL;
         list_type: str | None,
         list_id: str | None,
     ) -> None:
-        """Reject ambiguous rules on two categories in one scope bucket."""
+        """Reject direct rule conflicts on two categories in one scope bucket."""
         if not patterns:
             return
         rows = connection.execute(
@@ -7760,7 +7731,7 @@ WHERE registry_entry_id IS NOT NULL;
         ).fetchall()
         for pattern in patterns:
             for row in rows:
-                if HaListManagerDatabase._category_rules_overlap(
+                if HaListManagerDatabase._category_rules_conflict(
                     pattern, row["pattern"]
                 ):
                     raise ValueError(
@@ -7837,6 +7808,8 @@ WHERE registry_entry_id IS NOT NULL;
             WHERE (categories.scope = 'list' AND categories.list_id = ?)
                OR (categories.scope = 'list_type' AND categories.list_type = ? AND ?)
                OR (categories.scope = 'global' AND ?)
+            ORDER BY categories.position, categories.name COLLATE NOCASE,
+                     categories.id, rules.position
             """,
             (
                 list_id,
@@ -8000,8 +7973,6 @@ WHERE registry_entry_id IS NOT NULL;
             raise ValueError(localized_text("backend.notification_provider_unsupported", provider=provider))
         if message_format not in {"plain", "markdown", "html"}:
             raise ValueError(localized_text("backend.message_format_unsupported", format=message_format))
-        if provider == "notify_entity" and message_format != "plain":
-            raise ValueError(localized_text("backend.notify_plain_text_only"))
         if provider in {"persistent", "ntfy"} and message_format == "html":
             raise ValueError(localized_text("backend.provider_html_unsupported", provider=provider))
 

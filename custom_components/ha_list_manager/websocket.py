@@ -13,6 +13,7 @@ from homeassistant.auth.permissions.const import POLICY_READ
 from homeassistant.components import websocket_api
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers import entity_registry as er
 from homeassistant.util import dt as dt_util
 
 from .localization import (
@@ -721,8 +722,8 @@ async def websocket_list_notification_profiles(
     )
 
 
-def _notification_profile_values(msg: dict[str, Any]) -> dict[str, Any]:
-    return {
+def _notification_profile_values(hass: HomeAssistant, msg: dict[str, Any]) -> dict[str, Any]:
+    values = {
         "name": _clean_text(msg["name"], maximum=100, required=True),
         "provider": msg["provider"],
         "target": _clean_text(msg["target"], maximum=255, required=True),
@@ -731,6 +732,11 @@ def _notification_profile_values(msg: dict[str, Any]) -> dict[str, Any]:
         "message_format": msg["message_format"],
         "enabled": msg.get("enabled", True),
     }
+    if values["provider"] == "notify_entity" and values["message_format"] != "plain":
+        entity = er.async_get(hass).async_get(values["target"])
+        if entity is None or entity.platform != "telegram_bot":
+            raise ValueError(localized_text("backend.notify_plain_text_only"))
+    return values
 
 
 @websocket_api.require_admin
@@ -751,7 +757,7 @@ async def websocket_create_notification_profile(
     """Create a reusable notification destination."""
     try:
         record = await _runtime(hass).database.async_create_notification_profile(
-            **_notification_profile_values(msg)
+            **_notification_profile_values(hass, msg)
         )
     except ValueError as error:
         _send_input_error(connection, msg, error)
@@ -781,7 +787,7 @@ async def websocket_update_notification_profile(
     """Update a reusable notification destination."""
     try:
         record = await _runtime(hass).database.async_update_notification_profile(
-            msg["profile_id"], **_notification_profile_values(msg)
+            msg["profile_id"], **_notification_profile_values(hass, msg)
         )
     except ValueError as error:
         _send_input_error(connection, msg, error)
