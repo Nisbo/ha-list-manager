@@ -70,7 +70,7 @@ function haListManagerPanelTextRequest(hass, message) {
   return hass.callWS(message.type?.startsWith("ha_list_manager/") ? { ...message, language: haListManagerPanelTextLanguage(hass) } : message);
 }
 
-const PANEL_VERSION = "1.0.0b3";
+const PANEL_VERSION = "1.0.0b4";
 const GROUP_PICKER_RESULT_LIMIT = 100;
 const API = "ha_list_manager";
 const ITEMS_EVENT = "ha_list_manager_items_changed";
@@ -2141,10 +2141,11 @@ class HaListManagerPanel extends HTMLElement {
         <img src="${this._escape(this._openFoodFactsImageUrl(this._dialog.record.image_url, "400"))}" alt="${haListManagerPanelText("products.image_alt", {p0:(this._escape(this._dialog.record.name))}, this._hass)}">
       </section></div>`;
     }
-    if (["delete-list", "delete-item", "delete-product", "delete-category", "delete-label", "delete-chip", "delete-dish", "delete-inventory", "delete-inventory-group", "delete-scanner", "delete-notification"].includes(this._dialog.kind)) {
+    if (["delete-list", "delete-item", "delete-product", "delete-category", "delete-label", "delete-chip", "delete-dish", "delete-inventory", "delete-inventory-group", "delete-scanner", "delete-notification", "delete-category-rule"].includes(this._dialog.kind)) {
       const isList = this._dialog.kind === "delete-list";
       const isProduct = this._dialog.kind === "delete-product";
       const isCategory = this._dialog.kind === "delete-category";
+      const isCategoryRule = this._dialog.kind === "delete-category-rule";
       const isLabel = this._dialog.kind === "delete-label";
       const isChip = this._dialog.kind === "delete-chip";
       const isDish = this._dialog.kind === "delete-dish";
@@ -2153,13 +2154,14 @@ class HaListManagerPanel extends HTMLElement {
       const isScanner = this._dialog.kind === "delete-scanner";
       const isNotification = this._dialog.kind === "delete-notification";
       const isBringList = isList && this._dialog.record.list_type === "bring";
-      const label = isList ? haListManagerPanelText("ui.list", {}, this._hass) : isProduct ? haListManagerPanelText("ui.product", {}, this._hass) : isCategory ? haListManagerPanelText("ui.category", {}, this._hass) : isLabel ? haListManagerPanelText("ui.label", {}, this._hass) : isChip ? haListManagerPanelText("ui.chip", {}, this._hass) : isDish ? haListManagerPanelText("ui.dish", {}, this._hass) : isInventory ? haListManagerPanelText("ui.inventory_assignment", {}, this._hass) : isInventoryGroup ? haListManagerPanelText("inventory.group", {}, this._hass) : isScanner ? haListManagerPanelText("ui.scanner", {}, this._hass) : isNotification ? haListManagerPanelText("notifications.delivery_target", {}, this._hass) : haListManagerPanelText("ui.entry", {}, this._hass);
+      const label = isList ? haListManagerPanelText("ui.list", {}, this._hass) : isProduct ? haListManagerPanelText("ui.product", {}, this._hass) : isCategory ? haListManagerPanelText("ui.category", {}, this._hass) : isCategoryRule ? haListManagerPanelText("ui.rule", {}, this._hass) : isLabel ? haListManagerPanelText("ui.label", {}, this._hass) : isChip ? haListManagerPanelText("ui.chip", {}, this._hass) : isDish ? haListManagerPanelText("ui.dish", {}, this._hass) : isInventory ? haListManagerPanelText("ui.inventory_assignment", {}, this._hass) : isInventoryGroup ? haListManagerPanelText("inventory.group", {}, this._hass) : isScanner ? haListManagerPanelText("ui.scanner", {}, this._hass) : isNotification ? haListManagerPanelText("notifications.delivery_target", {}, this._hass) : haListManagerPanelText("ui.entry", {}, this._hass);
       const linkedChipCount = this._dialog.linked_chip_count;
       const productChipNotice = isProduct && linkedChipCount
         ? (linkedChipCount === 1 ? (" " + haListManagerPanelText("chips.product_unlinked_one", {count: linkedChipCount}, this._hass)) : (" " + haListManagerPanelText("chips.product_unlinked_many", {count: linkedChipCount}, this._hass)))
         : "";
       return `<div class="dialog-backdrop" data-close-dialog><section class="dialog" role="dialog" aria-modal="true" data-dialog-panel>
-        ${this._dialogHeader(isInventoryGroup ? haListManagerPanelText("inventory.confirm_dissolve_group", {}, this._hass) : haListManagerPanelText("ui.confirm_delete_named", {p0:(label)}, this._hass))}<p>${isInventoryGroup ? haListManagerPanelText("ui.dissolve_group_warning", {p0:(this._escape(this._dialog.record.name))}, this._hass) : isBringList ? haListManagerPanelText("bring.unlink_effect", {p0:(this._escape(this._dialog.record.name))}, this._hass) : haListManagerPanelText("ui.confirm_permanent_remove_named", {p0:(this._escape(isInventory ? this._dialog.record.product.name : this._dialog.record.name)), p1:(isList ? (" " + haListManagerPanelText("ui.delete_list_items_warning", {}, this._hass)) : isCategory ? (" " + haListManagerPanelText("categories.delete_assignment_impact", {}, this._hass)) : isInventory ? (" " + haListManagerPanelText("inventory.product_record_kept", {}, this._hass)) : productChipNotice)}, this._hass)}</p>
+        ${this._dialogHeader(isInventoryGroup ? haListManagerPanelText("inventory.confirm_dissolve_group", {}, this._hass) : haListManagerPanelText("ui.confirm_delete_named", {p0:(label)}, this._hass))}<p>${isInventoryGroup ? haListManagerPanelText("ui.dissolve_group_warning", {p0:(this._escape(this._dialog.record.name))}, this._hass) : isBringList ? haListManagerPanelText("bring.unlink_effect", {p0:(this._escape(this._dialog.record.name))}, this._hass) : haListManagerPanelText("ui.confirm_permanent_remove_named", {p0:(this._escape(isInventory ? this._dialog.record.product.name : this._dialog.record.name)), p1:(isList ? (" " + haListManagerPanelText("ui.delete_list_items_warning", {}, this._hass)) : isCategory ? (" " + haListManagerPanelText("categories.delete_assignment_impact", {}, this._hass)) : isCategoryRule ? (" " + haListManagerPanelText("categories.delete_rule_impact", {}, this._hass)) : isInventory ? (" " + haListManagerPanelText("inventory.product_record_kept", {}, this._hass)) : productChipNotice)}, this._hass)}</p>
+        ${this._dialogError()}
         <div class="dialog-actions"><button class="ha-button destructive" data-confirm-delete ${this._busy ? "disabled" : ""}>${this._busy ? haListManagerPanelText("ui.processing", {}, this._hass) : isInventoryGroup ? haListManagerPanelText("ui.dissolve_group", {}, this._hass) : haListManagerPanelText("ui.delete", {}, this._hass)}</button><button class="ha-button" data-cancel-dialog>${haListManagerPanelText("ui.cancel", {}, this._hass)}</button></div>
       </section></div>`;
     }
@@ -4984,10 +4986,12 @@ class HaListManagerPanel extends HTMLElement {
   }
 
   _deleteCategoryRule(index) {
-    const patterns = this._categoryRules
-      .filter((_rule, ruleIndex) => ruleIndex !== index)
-      .map((rule) => rule.pattern);
-    this._replaceCategoryRules(patterns);
+    const rule = this._categoryRules[index];
+    if (this._busy || !rule || !this._selectedCategoryId) return;
+    this._openDeleteDialog("delete-category-rule", {
+      name: rule.pattern,
+      category_id: this._selectedCategoryId,
+    });
   }
 
   _saveCategoryRulesBulk() {
@@ -6163,6 +6167,13 @@ class HaListManagerPanel extends HTMLElement {
   async _confirmDelete() {
     if (this._busy) return;
     const { kind, record } = this._dialog;
+    if (kind === "delete-category-rule") {
+      if (record.category_id !== this._selectedCategoryId) return this._closeDialog();
+      return this._replaceCategoryRules(
+        this._categoryRules.filter((rule) => rule.pattern !== record.name).map((rule) => rule.pattern),
+        true,
+      );
+    }
     await this._runDialogAction(async () => {
       if (kind === "delete-list") {
         await haListManagerPanelTextRequest(this._hass, { type: `${API}/lists/delete`, list_id: record.id });

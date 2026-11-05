@@ -831,7 +831,8 @@
       "max_value": "Filters larger values from all data series in the backend query. The boundary value itself remains visible.",
       "min_value": "Filters out smaller numbers from all series in the backend query. The threshold itself remains visible.",
       "telegram_formats": "Telegram: plain text, HTML or Markdown is explicitly set for this destination, overriding the bot’s default format.",
-      "telegram_delivery": "Choose the intended chat of your configured Telegram bot. Plain text, HTML and Markdown are available for every Telegram destination."
+      "telegram_delivery": "Choose the intended chat of your configured Telegram bot. Plain text, HTML and Markdown are available for every Telegram destination.",
+      "label_grouping": "Adds a toolbar button to switch between categories and labels. An entry with multiple labels appears in each label group; all copies use the same entry. The initial view applies until a choice is saved for this card in this browser."
     },
     "history": {
       "add_sample": "Add reading",
@@ -1913,7 +1914,14 @@
       "package_volume_example": "e.g. 1.25 l",
       "ean_example": "e.g. 4062139025398",
       "dashboard_path_example": "e.g. /dashboard-groceries/groceries",
-      "beta": "Beta"
+      "beta": "Beta",
+      "label_grouping": "Switchable label grouping",
+      "label_grouping_disabled": "Disabled",
+      "label_grouping_categories": "Enabled – initially categories",
+      "label_grouping_labels": "Enabled – initially labels",
+      "group_by_categories": "Group by categories",
+      "group_by_labels": "Group by labels",
+      "all_labels_count": "{p0} all labels"
     },
     "scanner": {
       "active_then_default": "Active card, then default target",
@@ -2219,6 +2227,7 @@
       "available": "Available categories",
       "all_matches_assigned": "All matching products are already assigned to a category in this list.",
       "delete_assignment_impact": "Affected product assignments will be removed. Linked list entries automatically switch to the next matching product category; without a matching default, they are placed under General.",
+      "delete_rule_impact": "Only this automatic assignment rule is removed. Existing items and products are retained.",
       "order_local_global_dynamic": "This list → Global → Dynamic",
       "order_dynamic_global_local": "Dynamic → Global → This list",
       "order_global_local_dynamic": "Global → This list → Dynamic",
@@ -2259,6 +2268,7 @@
       "no_telegram_chat": "No matching Telegram chat entity found"
     },
     "errors": {
+      "list_load_failed": "Could not load the list.",
       "stock_integer_required": "Stock and minimum stock must be non-negative integers.",
       "select_fixed_list_action": "Please select a fixed list and action.",
       "select_inventory_list": "Please select an inventory list.",

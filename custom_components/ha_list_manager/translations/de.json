@@ -831,7 +831,8 @@
       "max_value": "Blendet größere Zahlen bei allen Datenreihen bereits in der Backend-Abfrage aus. Die Grenze selbst bleibt sichtbar.",
       "min_value": "Blendet kleinere Zahlen bei allen Datenreihen bereits in der Backend-Abfrage aus. Die Grenze selbst bleibt sichtbar.",
       "telegram_formats": "Telegram: Text, HTML oder Markdown wird für dieses Versandziel ausdrücklich gesetzt und überschreibt die Formatvorgabe des Bots.",
-      "telegram_delivery": "Wähle den gewünschten Chat deines eingerichteten Telegram-Bots. Text, HTML und Markdown stehen für jedes Telegram-Versandziel zur Verfügung."
+      "telegram_delivery": "Wähle den gewünschten Chat deines eingerichteten Telegram-Bots. Text, HTML und Markdown stehen für jedes Telegram-Versandziel zur Verfügung.",
+      "label_grouping": "Ergänzt einen Button in der Optionsleiste zum Wechseln zwischen Kategorien und Labels. Ein Eintrag mit mehreren Labels erscheint in jeder Label-Gruppe; alle Ansichten verwenden denselben Eintrag. Die Startansicht gilt, bis für diese Karte in diesem Browser eine Auswahl gespeichert wurde."
     },
     "history": {
       "add_sample": "Messwert ergänzen",
@@ -1913,7 +1914,14 @@
       "package_volume_example": "z. B. 1,25 l",
       "ean_example": "z. B. 4062139025398",
       "dashboard_path_example": "z. B. /dashboard-einkauf/einkaufsliste",
-      "beta": "Beta"
+      "beta": "Beta",
+      "label_grouping": "Umschaltbare Label-Gruppierung",
+      "label_grouping_disabled": "Deaktiviert",
+      "label_grouping_categories": "Aktiviert – zunächst Kategorien",
+      "label_grouping_labels": "Aktiviert – zunächst Labels",
+      "group_by_categories": "Nach Kategorien gruppieren",
+      "group_by_labels": "Nach Labels gruppieren",
+      "all_labels_count": "Alle Labels {p0}"
     },
     "scanner": {
       "active_then_default": "Aktive Karte, danach Standardziel",
@@ -2219,6 +2227,7 @@
       "available": "Verfügbare Kategorien",
       "all_matches_assigned": "Alle passenden Produkte sind in dieser Liste bereits einer Kategorie zugeordnet.",
       "delete_assignment_impact": "Betroffene Produktzuordnungen werden entfernt. Verknüpfte Listeneinträge wechseln automatisch zur nächsten passenden Produktkategorie; ohne passenden Standard werden sie unter Allgemein eingeordnet.",
+      "delete_rule_impact": "Nur diese automatische Zuordnungsregel wird entfernt. Vorhandene Einträge und Produkte bleiben erhalten.",
       "order_local_global_dynamic": "Diese Liste → Global → Dynamisch",
       "order_dynamic_global_local": "Dynamisch → Global → Diese Liste",
       "order_global_local_dynamic": "Global → Diese Liste → Dynamisch",
@@ -2259,6 +2268,7 @@
       "no_telegram_chat": "Keine passende Telegram-Chat-Entität gefunden"
     },
     "errors": {
+      "list_load_failed": "Die Liste konnte nicht geladen werden.",
       "stock_integer_required": "Bestand und Mindestbestand müssen ganze, nicht negative Zahlen sein.",
       "select_fixed_list_action": "Bitte eine feste Liste und Aktion auswählen.",
       "select_inventory_list": "Bitte eine Inventarliste auswählen.",

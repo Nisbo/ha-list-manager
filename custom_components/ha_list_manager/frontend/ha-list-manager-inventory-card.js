@@ -147,7 +147,7 @@ function inventoryState(entry) {
   return "stock-normal";
 }
 
-const CARD_VERSION = "1.0.0b3";
+const CARD_VERSION = "1.0.0b4";
 const PICKER_RESULT_LIMIT = 100;
 const MODES = (hass = null) => ({
   add: { label: haListManagerInventoryCardText("ui.stock_in", {}, hass), icon: "mdi:package-variant-plus", color: "var(--success-color,#2e7d32)", help: haListManagerInventoryCardText("inventory.stock_in_activated", {}, hass) },
@@ -299,6 +299,11 @@ class HaListManagerInventoryCard extends HTMLElement {
           { name: "show_hidden_button", selector: { boolean: {} }, default: true },
           { name: "show_details_button", selector: { boolean: {} }, default: true },
           { name: "show_category_toggle_button", selector: { boolean: {} }, default: true },
+          { name: "label_grouping", selector: { select: { mode: "dropdown", options: [
+            { value: "disabled", label: haListManagerInventoryCardText("ui.label_grouping_disabled", {}, hass) },
+            { value: "categories", label: haListManagerInventoryCardText("ui.label_grouping_categories", {}, hass) },
+            { value: "labels", label: haListManagerInventoryCardText("ui.label_grouping_labels", {}, hass) },
+          ] } }, default: "disabled" },
           { name: "show_label_filter_button", selector: { boolean: {} }, default: true },
           { name: "show_category_filter_button", selector: { boolean: {} }, default: true },
           { name: "show_group_button", selector: { boolean: {} }, default: true },
@@ -340,7 +345,7 @@ class HaListManagerInventoryCard extends HTMLElement {
       ],
       computeLabel: (schema, localize) => {
         if (typeof localize === "function") return HaListManagerInventoryCard.getConfigForm({ ...(hass || {}), localize }).computeLabel(schema);
-        return ({ entity: haListManagerInventoryCardText("ui.inventory_list", {}, hass), title: haListManagerInventoryCardText("ui.title", {}, hass), title_icon: haListManagerInventoryCardText("ui.title_icon", {}, hass), title_icon_color_rgb: haListManagerInventoryCardText("ui.title_icon_color", {}, hass), content_display: haListManagerInventoryCardText("ui.show_content", {}, hass), collapsible: haListManagerInventoryCardText("ui.list_collapsible", {}, hass), view_mode: haListManagerInventoryCardText("ui.appearance", {}, hass), input_row_position: haListManagerInventoryCardText("ui.input_row_position", {}, hass), show_quantity_box: haListManagerInventoryCardText("ui.show_amount_field", {}, hass), show_submit_button: haListManagerInventoryCardText("ui.show_transaction_button", {}, hass), allow_filter: haListManagerInventoryCardText("ui.filter_items_typing", {}, hass), allow_suggestions: haListManagerInventoryCardText("products.show_suggestions", {}, hass), show_camera_scan_button: haListManagerInventoryCardText("scanner.show_camera", {}, hass), show_mode_toggle: haListManagerInventoryCardText("ui.show_mode_selector", {}, hass), mode_panel_expanded: haListManagerInventoryCardText("inventory.mode_picker_initially_open", {}, hass), show_scanner_target_button: haListManagerInventoryCardText("ui.show_scanner_target_button", {}, hass), default_action: haListManagerInventoryCardText("inventory.initial_mode", {}, hass), mode_timeout: haListManagerInventoryCardText("ui.mode_reset_seconds", {}, hass), quantity_position: haListManagerInventoryCardText("ui.stock_display_position", {}, hass), show_plus_minus: haListManagerInventoryCardText("shopping.show_quantity_buttons", {}, hass), show_images: haListManagerInventoryCardText("ui.show_product_images", {}, hass), show_details_default: haListManagerInventoryCardText("products.details_initially_visible", {}, hass), show_hidden_default: haListManagerInventoryCardText("ui.show_hidden_items_default", {}, hass), group_categories: haListManagerInventoryCardText("categories.group_by_category", {}, hass), show_category_count: haListManagerInventoryCardText("ui.show_category_item_counts", {}, hass), category_sort: haListManagerInventoryCardText("ui.category_sort_order", {}, hass), show_item_dividers: haListManagerInventoryCardText("ui.show_dividers", {}, hass), item_divider_before_spacing: haListManagerInventoryCardText("ui.divider_top_spacing", {}, hass), item_divider_after_spacing: haListManagerInventoryCardText("ui.divider_bottom_spacing", {}, hass), item_font_size: haListManagerInventoryCardText("ui.entry_text_size", {}, hass), category_font_scale: haListManagerInventoryCardText("categories.name_size", {}, hass), option_row_position: haListManagerInventoryCardText("ui.toolbar_position", {}, hass), show_stock_filter_button: haListManagerInventoryCardText("ui.show_stock_filter", {}, hass), show_hidden_button: haListManagerInventoryCardText("ui.show_hidden_items_toggle", {}, hass), show_details_button: haListManagerInventoryCardText("ui.show_product_details_toggle", {}, hass), show_category_toggle_button: haListManagerInventoryCardText("categories.show_collapse_control", {}, hass), show_label_filter_button: haListManagerInventoryCardText("ui.show_label_filter", {}, hass), show_category_filter_button: haListManagerInventoryCardText("ui.show_category_filter", {}, hass), show_group_button: haListManagerInventoryCardText("ui.show_group_action", {}, hass), show_product_database_button: haListManagerInventoryCardText("products.show_database", {}, hass), show_pdf_export_button: haListManagerInventoryCardText("ui.show_pdf_export", {}, hass), show_restock_flag: haListManagerInventoryCardText("ui.show_restock_flag", {}, hass), show_chips: haListManagerInventoryCardText("chips.show", {}, hass), show_chip_popup_button: haListManagerInventoryCardText("ui.show_chip_input_button", {}, hass), show_browser_chips: haListManagerInventoryCardText("ui.use_browser_chips", {}, hass), browser_chips_for_products: haListManagerInventoryCardText("chips.create_browser_product_chips", {}, hass), allow_save_browser_chips: haListManagerInventoryCardText("ui.allow_permanent_save", {}, hass), filter_chips: haListManagerInventoryCardText("ui.filter_chips_typing", {}, hass), category_chip_layout: haListManagerInventoryCardText("chips.category_appearance", {}, hass), category_chip_colors: haListManagerInventoryCardText("ui.grouped_chips_category_color", {}, hass), show_important_chips: haListManagerInventoryCardText("chips.show_important", {}, hass), chips_limit: haListManagerInventoryCardText("ui.initial_visible_chips", {}, hass), chips_position: haListManagerInventoryCardText("ui.position", {}, hass), chip_color_mode: haListManagerInventoryCardText("ui.color_display", {}, hass), chip_color_global_rgb: haListManagerInventoryCardText("ui.global_chip_color", {}, hass), chip_color_list_type_rgb: haListManagerInventoryCardText("chips.inventory_color", {}, hass), chip_color_list_rgb: haListManagerInventoryCardText("chips.list_color", {}, hass), chip_color_browser_rgb: haListManagerInventoryCardText("ui.browser_chip_color", {}, hass), important_chip_color_rgb: haListManagerInventoryCardText("ui.important_chip_color", {}, hass) })[schema.name] || schema.label || schema.name;
+        return ({ label_grouping: haListManagerInventoryCardText("ui.label_grouping", {}, hass), entity: haListManagerInventoryCardText("ui.inventory_list", {}, hass), title: haListManagerInventoryCardText("ui.title", {}, hass), title_icon: haListManagerInventoryCardText("ui.title_icon", {}, hass), title_icon_color_rgb: haListManagerInventoryCardText("ui.title_icon_color", {}, hass), content_display: haListManagerInventoryCardText("ui.show_content", {}, hass), collapsible: haListManagerInventoryCardText("ui.list_collapsible", {}, hass), view_mode: haListManagerInventoryCardText("ui.appearance", {}, hass), input_row_position: haListManagerInventoryCardText("ui.input_row_position", {}, hass), show_quantity_box: haListManagerInventoryCardText("ui.show_amount_field", {}, hass), show_submit_button: haListManagerInventoryCardText("ui.show_transaction_button", {}, hass), allow_filter: haListManagerInventoryCardText("ui.filter_items_typing", {}, hass), allow_suggestions: haListManagerInventoryCardText("products.show_suggestions", {}, hass), show_camera_scan_button: haListManagerInventoryCardText("scanner.show_camera", {}, hass), show_mode_toggle: haListManagerInventoryCardText("ui.show_mode_selector", {}, hass), mode_panel_expanded: haListManagerInventoryCardText("inventory.mode_picker_initially_open", {}, hass), show_scanner_target_button: haListManagerInventoryCardText("ui.show_scanner_target_button", {}, hass), default_action: haListManagerInventoryCardText("inventory.initial_mode", {}, hass), mode_timeout: haListManagerInventoryCardText("ui.mode_reset_seconds", {}, hass), quantity_position: haListManagerInventoryCardText("ui.stock_display_position", {}, hass), show_plus_minus: haListManagerInventoryCardText("shopping.show_quantity_buttons", {}, hass), show_images: haListManagerInventoryCardText("ui.show_product_images", {}, hass), show_details_default: haListManagerInventoryCardText("products.details_initially_visible", {}, hass), show_hidden_default: haListManagerInventoryCardText("ui.show_hidden_items_default", {}, hass), group_categories: haListManagerInventoryCardText("categories.group_by_category", {}, hass), show_category_count: haListManagerInventoryCardText("ui.show_category_item_counts", {}, hass), category_sort: haListManagerInventoryCardText("ui.category_sort_order", {}, hass), show_item_dividers: haListManagerInventoryCardText("ui.show_dividers", {}, hass), item_divider_before_spacing: haListManagerInventoryCardText("ui.divider_top_spacing", {}, hass), item_divider_after_spacing: haListManagerInventoryCardText("ui.divider_bottom_spacing", {}, hass), item_font_size: haListManagerInventoryCardText("ui.entry_text_size", {}, hass), category_font_scale: haListManagerInventoryCardText("categories.name_size", {}, hass), option_row_position: haListManagerInventoryCardText("ui.toolbar_position", {}, hass), show_stock_filter_button: haListManagerInventoryCardText("ui.show_stock_filter", {}, hass), show_hidden_button: haListManagerInventoryCardText("ui.show_hidden_items_toggle", {}, hass), show_details_button: haListManagerInventoryCardText("ui.show_product_details_toggle", {}, hass), show_category_toggle_button: haListManagerInventoryCardText("categories.show_collapse_control", {}, hass), show_label_filter_button: haListManagerInventoryCardText("ui.show_label_filter", {}, hass), show_category_filter_button: haListManagerInventoryCardText("ui.show_category_filter", {}, hass), show_group_button: haListManagerInventoryCardText("ui.show_group_action", {}, hass), show_product_database_button: haListManagerInventoryCardText("products.show_database", {}, hass), show_pdf_export_button: haListManagerInventoryCardText("ui.show_pdf_export", {}, hass), show_restock_flag: haListManagerInventoryCardText("ui.show_restock_flag", {}, hass), show_chips: haListManagerInventoryCardText("chips.show", {}, hass), show_chip_popup_button: haListManagerInventoryCardText("ui.show_chip_input_button", {}, hass), show_browser_chips: haListManagerInventoryCardText("ui.use_browser_chips", {}, hass), browser_chips_for_products: haListManagerInventoryCardText("chips.create_browser_product_chips", {}, hass), allow_save_browser_chips: haListManagerInventoryCardText("ui.allow_permanent_save", {}, hass), filter_chips: haListManagerInventoryCardText("ui.filter_chips_typing", {}, hass), category_chip_layout: haListManagerInventoryCardText("chips.category_appearance", {}, hass), category_chip_colors: haListManagerInventoryCardText("ui.grouped_chips_category_color", {}, hass), show_important_chips: haListManagerInventoryCardText("chips.show_important", {}, hass), chips_limit: haListManagerInventoryCardText("ui.initial_visible_chips", {}, hass), chips_position: haListManagerInventoryCardText("ui.position", {}, hass), chip_color_mode: haListManagerInventoryCardText("ui.color_display", {}, hass), chip_color_global_rgb: haListManagerInventoryCardText("ui.global_chip_color", {}, hass), chip_color_list_type_rgb: haListManagerInventoryCardText("chips.inventory_color", {}, hass), chip_color_list_rgb: haListManagerInventoryCardText("chips.list_color", {}, hass), chip_color_browser_rgb: haListManagerInventoryCardText("ui.browser_chip_color", {}, hass), important_chip_color_rgb: haListManagerInventoryCardText("ui.important_chip_color", {}, hass) })[schema.name] || schema.label || schema.name;
       },
       computeHelper: (schema, localize) => {
         if (typeof localize === "function") return HaListManagerInventoryCard.getConfigForm({ ...(hass || {}), localize }).computeHelper(schema);
@@ -380,6 +385,7 @@ class HaListManagerInventoryCard extends HTMLElement {
         if (schema.name === "show_hidden_button") return haListManagerInventoryCardText("help.hidden_items_toggle", {}, hass);
         if (schema.name === "show_details_button") return haListManagerInventoryCardText("help.product_details_toggle", {}, hass);
         if (schema.name === "show_category_toggle_button") return haListManagerInventoryCardText("help.inventory_category_toggle", {}, hass);
+        if (schema.name === "label_grouping") return haListManagerInventoryCardText("help.label_grouping", {}, hass);
         if (schema.name === "show_label_filter_button") return haListManagerInventoryCardText("help.label_multiselect_filter", {}, hass);
         if (schema.name === "show_category_filter_button") return haListManagerInventoryCardText("help.inventory_category_multiselect", {}, hass);
         if (schema.name === "show_group_button") return haListManagerInventoryCardText("help.inventory_group_action", {}, hass);
@@ -407,7 +413,7 @@ class HaListManagerInventoryCard extends HTMLElement {
       },
     };
   }
-  static getStubConfig(hass = null) { return { title: haListManagerInventoryCardText("ui.inventory", {}, hass), title_icon: "mdi:package-variant-closed", content_display: "card_and_large", collapsible: true, view_mode: "auto", input_row_position: "top", show_quantity_box: true, show_submit_button: true, allow_filter: true, allow_suggestions: true, show_camera_scan_button: true, show_mode_toggle: true, mode_panel_expanded: true, show_scanner_target_button: true, default_action: "add", mode_timeout: 0, quantity_position: "end", show_plus_minus: true, show_images: true, show_details_default: true, show_hidden_default: false, group_categories: true, show_category_count: true, category_sort: "alphabetical", show_item_dividers: true, item_divider_before_spacing: 10, item_divider_after_spacing: 10, item_font_size: 16, category_font_scale: 110, option_row_position: "top", show_stock_filter_button: true, show_hidden_button: true, show_details_button: true, show_category_toggle_button: true, show_label_filter_button: true, show_category_filter_button: true, show_group_button: true, show_product_database_button: true, show_pdf_export_button: false, show_restock_flag: true, show_chips: true, show_chip_popup_button: true, show_browser_chips: true, browser_chips_for_products: false, allow_save_browser_chips: true, filter_chips: true, category_chip_layout: "none", category_chip_colors: true, show_important_chips: true, chips_limit: 8, chips_position: "auto", chip_color_mode: "scope_fallback", chip_color_global_rgb: [96, 125, 139], chip_color_list_type_rgb: [3, 169, 244], chip_color_list_rgb: [67, 160, 71], chip_color_browser_rgb: [121, 85, 72], important_chip_color_rgb: [244, 67, 54] }; }
+  static getStubConfig(hass = null) { return { title: haListManagerInventoryCardText("ui.inventory", {}, hass), title_icon: "mdi:package-variant-closed", content_display: "card_and_large", collapsible: true, view_mode: "auto", input_row_position: "top", show_quantity_box: true, show_submit_button: true, allow_filter: true, allow_suggestions: true, show_camera_scan_button: true, show_mode_toggle: true, mode_panel_expanded: true, show_scanner_target_button: true, default_action: "add", mode_timeout: 0, quantity_position: "end", show_plus_minus: true, show_images: true, show_details_default: true, show_hidden_default: false, group_categories: true, label_grouping: "disabled", show_category_count: true, category_sort: "alphabetical", show_item_dividers: true, item_divider_before_spacing: 10, item_divider_after_spacing: 10, item_font_size: 16, category_font_scale: 110, option_row_position: "top", show_stock_filter_button: true, show_hidden_button: true, show_details_button: true, show_category_toggle_button: true, show_label_filter_button: true, show_category_filter_button: true, show_group_button: true, show_product_database_button: true, show_pdf_export_button: false, show_restock_flag: true, show_chips: true, show_chip_popup_button: true, show_browser_chips: true, browser_chips_for_products: false, allow_save_browser_chips: true, filter_chips: true, category_chip_layout: "none", category_chip_colors: true, show_important_chips: true, chips_limit: 8, chips_position: "auto", chip_color_mode: "scope_fallback", chip_color_global_rgb: [96, 125, 139], chip_color_list_type_rgb: [3, 169, 244], chip_color_list_rgb: [67, 160, 71], chip_color_browser_rgb: [121, 85, 72], important_chip_color_rgb: [244, 67, 54] }; }
 
   setConfig(config) {
     this._config = { ...HaListManagerInventoryCard.getStubConfig(this._hass), ...config };
@@ -422,6 +428,7 @@ class HaListManagerInventoryCard extends HTMLElement {
     if (!MODES(this._hass)[this._config.default_action]) this._config.default_action = "add";
     if (!["beginning", "end", "controls"].includes(this._config.quantity_position)) this._config.quantity_position = "end";
     if (!["alphabetical", "global_list_dynamic", "list_global_dynamic", "position"].includes(this._config.category_sort)) this._config.category_sort = "alphabetical";
+    if (!["disabled", "categories", "labels"].includes(this._config.label_grouping)) this._config.label_grouping = "disabled";
     if (!["card_and_large", "card_only", "large_only"].includes(this._config.content_display)) this._config.content_display = "card_and_large";
     if (!["top", "bottom"].includes(this._config.input_row_position)) this._config.input_row_position = "top";
     if (!["top", "bottom"].includes(this._config.option_row_position)) this._config.option_row_position = "top";
@@ -451,12 +458,14 @@ class HaListManagerInventoryCard extends HTMLElement {
   set hass(value) {
     const first = !this._hass;
     this._hass = value;
+    if (this.isConnected) this._watchConnection();
     const translationsChanged = haListManagerInventoryCardTextUpdateTranslations(this, this._hass);
     this._restoreInventoryUndo();
     if (first) { this._subscribe(); this._load(); } else if (this._loadedListId !== this._listId()) this._load(true);
     if (translationsChanged) this._render();
   }
   connectedCallback() {
+    this._watchConnection();
     this._mode = this._config.default_action || "add";
     this._clearModeTimer();
     this._restoreInventoryUndo();
@@ -467,7 +476,7 @@ class HaListManagerInventoryCard extends HTMLElement {
     // while detached. Always refresh the active scanner target on reconnect.
     this._load(true);
   }
-  disconnectedCallback() { this._loadRequestId += 1; this._loading = false; this._loadingListId = null; clearTimeout(this._undoTimer); clearTimeout(this._undoCountdownTimer); this._lastInventoryBooking = null; this._setExpandedView(false); this._unsubscribes.forEach((unsubscribe) => unsubscribe()); this._unsubscribes = []; this._clearModeTimer(); this._stopCameraScan(); }
+  disconnectedCallback() { this._watchConnection(null); this._loadRequestId += 1; this._loading = false; this._loadingListId = null; clearTimeout(this._undoTimer); clearTimeout(this._undoCountdownTimer); this._lastInventoryBooking = null; this._setExpandedView(false); this._unsubscribes.forEach((unsubscribe) => unsubscribe()); this._unsubscribes = []; this._clearModeTimer(); this._stopCameraScan(); }
   getCardSize() { return this._config.content_display === "large_only" ? 1 : Math.max(3, Math.ceil(this._entries.length * 0.75) + 2); }
 
   _listId() {
@@ -476,6 +485,29 @@ class HaListManagerInventoryCard extends HTMLElement {
 
   _cardIdentity() {
     return this._config.card_id || this._config.entity || this._listId() || "inventory";
+  }
+
+  _groupingKey() { return `ha-list-manager:inventory-grouping:${encodeURIComponent(this._cardIdentity())}`; }
+  _groupingEnabled() { return ["categories", "labels"].includes(this._config.label_grouping); }
+  _groupingMode() {
+    if (!this._groupingEnabled()) return "categories";
+    const key = this._groupingKey();
+    if (this._groupingPreference?.key === key) return this._groupingPreference.mode;
+    try {
+      const saved = localStorage.getItem(key);
+      if (["categories", "labels"].includes(saved)) return saved;
+    } catch (_error) { /* The configured default also works without storage. */ }
+    return this._config.label_grouping;
+  }
+  _toggleGrouping() {
+    if (!this._groupingEnabled()) return;
+    const key = this._groupingKey();
+    const mode = this._groupingMode() === "labels" ? "categories" : "labels";
+    this._groupingPreference = { key, mode };
+    try { localStorage.setItem(key, mode); } catch (_error) {}
+    this._categoryMenuOpen = false;
+    this._labelMenuOpen = false;
+    this._render();
   }
 
   _browserChipStorageKey(listId = this._listId()) { return `ha-list-manager:inventory-browser-chips:${encodeURIComponent(listId || this._cardIdentity())}`; }
@@ -761,12 +793,12 @@ class HaListManagerInventoryCard extends HTMLElement {
   }
 
   _allCategoriesExpanded(groups = this._groups()) {
-    const categoryGroups = this._groupCategories ? groups.filter(({ flat, units }) => !flat && units.length) : [];
+    const categoryGroups = groups.filter(({ flat, units }) => !flat && units.length);
     return categoryGroups.length > 0 && categoryGroups.every(({ key, category }) => !this._isCategoryCollapsed(category?.id || key || "__uncategorized__"));
   }
 
   _toggleAllCategories() {
-    const groups = this._groupCategories ? this._groups().filter(({ flat, units }) => !flat && units.length) : [];
+    const groups = this._groups().filter(({ flat, units }) => !flat && units.length);
     if (!groups.length) return;
     const collapse = this._allCategoriesExpanded(groups);
     try {
@@ -777,6 +809,16 @@ class HaListManagerInventoryCard extends HTMLElement {
       });
     } catch (_error) { /* Storage may be disabled. */ }
     this._render();
+  }
+
+  _watchConnection(connection = this._hass?.connection) {
+    if (this._watchedConnection === connection) return;
+    this._watchedConnection?.removeEventListener?.("ready", this._onConnectionReady);
+    this._watchedConnection = connection;
+    this._onConnectionReady ||= () => {
+      if (this.isConnected) this._load(true);
+    };
+    connection?.addEventListener?.("ready", this._onConnectionReady);
   }
 
   async _subscribe() {
@@ -807,7 +849,7 @@ class HaListManagerInventoryCard extends HTMLElement {
 
   async _load(force = false) {
     const listId = this._listId();
-    if (!this._hass || !listId || (this._loading && !force && this._loadingListId === listId) || (!force && this._loadedListId === listId)) return;
+    if (!this._hass || !listId || this._hass.connection?.connected === false || (this._loading && !force && this._loadingListId === listId) || (!force && this._loadedListId === listId)) return;
     this._loadBrowserChips(listId);
     const requestId = ++this._loadRequestId;
     this._loadingListId = listId;
@@ -840,7 +882,10 @@ class HaListManagerInventoryCard extends HTMLElement {
       catch (_error) { if (requestId === this._loadRequestId && listId === this._listId()) this._chipCategories = new Map(); }
       if (requestId === this._loadRequestId && listId === this._listId()) this._loadedListId = listId;
     } catch (error) {
-      if (requestId === this._loadRequestId && listId === this._listId()) this._error = error?.message || haListManagerInventoryCardText("errors.inventory_load_failed", {}, this._hass);
+      // Interrupted reads are refreshed by HA's next ready event.
+      if (requestId === this._loadRequestId && listId === this._listId() && error !== 3 && error?.error?.code !== 3) {
+        this._error = error?.message || error?.error?.message || (typeof error === "string" ? error : haListManagerInventoryCardText("errors.inventory_load_failed", {}, this._hass));
+      }
     } finally {
       if (requestId === this._loadRequestId) {
         this._loading = false;
@@ -2201,7 +2246,27 @@ class HaListManagerInventoryCard extends HTMLElement {
 
   _groups() {
     const units = this._displayUnits().filter((unit) => this._passesFilter(unit));
-    if (!this._groupCategories) return [{ category: null, units, flat: true }];
+    if (this._groupingMode() === "labels") {
+      const groups = new Map();
+      for (const unit of units) {
+        const entries = unit.kind === "group" ? unit.group.members : [unit.entry];
+        const labels = new Map(entries.flatMap((entry) => entry.product?.labels || [])
+          .filter((label) => label.id).map((label) => [label.id, label]));
+        const definitions = labels.size ? [...labels.values()].map((label) => ({
+          ...label, id: `__label__:${label.id}`, icon: label.icon || "mdi:label-outline",
+        })) : [{ id: "__unlabeled__", name: haListManagerInventoryCardText("ui.without_label", {}, this._hass), icon: "mdi:label-off-outline" }];
+        for (const category of definitions) {
+          const key = category.id;
+          if (!groups.has(key)) groups.set(key, { key, category, units: [] });
+          groups.get(key).units.push(unit);
+        }
+      }
+      return [...groups.values()].sort((a, b) => {
+        if (a.key === "__unlabeled__" || b.key === "__unlabeled__") return a.key === b.key ? 0 : a.key === "__unlabeled__" ? -1 : 1;
+        return a.category.name.localeCompare(b.category.name, haListManagerInventoryCardTextLocale(this._hass), { sensitivity: "base", numeric: true });
+      });
+    }
+    if (!this._groupCategories && !this._groupingEnabled()) return [{ category: null, units, flat: true }];
     const groups = new Map();
     for (const unit of units) {
       const category = this._unitCategory(unit);
@@ -2471,17 +2536,20 @@ class HaListManagerInventoryCard extends HTMLElement {
     const labelChoice = (key, name, icon = "mdi:label-outline", color = "") => `<label class="category-choice label-filter-choice" style="${color ? `--label-color:${escapeHtml(color)}` : ""}"><input type="checkbox" data-label-choice="${escapeHtml(key)}" ${this._selectedLabelIds === null || this._selectedLabelIds.has(key) ? "checked" : ""}><ha-icon icon="${escapeHtml(icon)}"></ha-icon><span>${escapeHtml(name)}</span></label>`;
     const labelChoices = labelChoice("__unlabeled__", haListManagerInventoryCardText("ui.without_label", {}, this._hass), "mdi:label-off-outline") + [...this._labels].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" })).map((label) => labelChoice(label.id, label.name, label.icon || "mdi:label-outline", label.color || "")).join("");
     const filterLabel = ({ all: haListManagerInventoryCardText("ui.all", {}, this._hass), zero: haListManagerInventoryCardText("ui.zero_stock", {}, this._hass), zero_one: haListManagerInventoryCardText("inventory.stock_zero_to_one", {}, this._hass), minimum: haListManagerInventoryCardText("ui.at_or_below_minimum_stock", {}, this._hass), below: "< Mindestbestand" })[this._filter] || haListManagerInventoryCardText("ui.all", {}, this._hass);
-    const categoryGroups = this._groupCategories ? this._groups().filter(({ flat, units }) => !flat && units.length) : [];
+    const categoryGroups = this._groups().filter(({ flat, units }) => !flat && units.length);
     const allCategoriesExpanded = this._allCategoriesExpanded(categoryGroups);
-    const categoryToggleLabel = haListManagerInventoryCardText("ui.all_categories_count", {p0:(allCategoriesExpanded ? haListManagerInventoryCardText("ui.collapse_lowercase", {}, this._hass) : haListManagerInventoryCardText("ui.expand_lowercase", {}, this._hass))}, this._hass);
+    const categoryToggleLabel = haListManagerInventoryCardText(this._groupingMode() === "labels" ? "ui.all_labels_count" : "ui.all_categories_count", {p0:(allCategoriesExpanded ? haListManagerInventoryCardText("ui.collapse_lowercase", {}, this._hass) : haListManagerInventoryCardText("ui.expand_lowercase", {}, this._hass))}, this._hass);
     const categoryToggle = this._config.show_category_toggle_button === false ? "" : `<button type="button" class="tool-button" data-toggle-categories aria-expanded="${allCategoriesExpanded}" aria-label="${categoryToggleLabel}" title="${categoryToggleLabel}" ${categoryGroups.length ? "" : "disabled"}><ha-icon icon="mdi:unfold-${allCategoriesExpanded ? "less" : "more"}-horizontal"></ha-icon></button>`;
+    const labelsGrouped = this._groupingMode() === "labels";
+    const groupingLabel = haListManagerInventoryCardText(labelsGrouped ? "ui.group_by_categories" : "ui.group_by_labels", {}, this._hass);
+    const groupingToggle = this._groupingEnabled() ? `<button type="button" class="tool-button ${labelsGrouped ? "active" : ""}" data-toggle-grouping aria-pressed="${labelsGrouped}" aria-label="${escapeHtml(groupingLabel)}" title="${escapeHtml(groupingLabel)}"><ha-icon icon="mdi:${labelsGrouped ? "label-multiple-outline" : "shape-outline"}"></ha-icon></button>` : "";
     const pendingButton = this._pendingScans.length ? `<button class="tool-button text-button pending-scans-button" data-open-pending-scans><ha-icon icon="mdi:barcode-scan"></ha-icon><span>${haListManagerInventoryCardText("scanner.open_scan_count", {p0:(this._pendingScans.length)}, this._hass)}</span></button>` : "";
     const stockFilter = this._config.show_stock_filter_button === false ? "" : `<label class="filter ${this._filter !== "all" ? "active" : ""}" title="${haListManagerInventoryCardText("inventory.stock_filter_value", {p0:(escapeHtml(filterLabel))}, this._hass)}"><ha-icon icon="mdi:filter-variant"></ha-icon><select data-filter aria-label="${haListManagerInventoryCardText("inventory.stock_filter_value", {p0:(escapeHtml(filterLabel))}, this._hass)}"><option value="all">${haListManagerInventoryCardText("ui.all", {}, this._hass)}</option><option value="zero">${haListManagerInventoryCardText("ui.zero_stock", {}, this._hass)}</option><option value="zero_one">${haListManagerInventoryCardText("inventory.stock_zero_to_one", {}, this._hass)}</option><option value="minimum">${haListManagerInventoryCardText("ui.at_or_below_minimum_stock", {}, this._hass)}</option><option value="below">${haListManagerInventoryCardText("ui.below_minimum_stock", {}, this._hass)}</option></select></label>`;
     const hiddenToggle = this._config.show_hidden_button === false ? "" : `<button class="tool-button ${this._showHidden ? "active" : ""}" data-toggle-hidden title="${haListManagerInventoryCardText("ui.hidden_items", {}, this._hass)}"><ha-icon icon="mdi:eye-off-outline"></ha-icon></button>`;
     const detailsToggle = this._config.show_details_button === false ? "" : `<button class="tool-button ${this._showDetails ? "active" : ""}" data-toggle-details title="${haListManagerInventoryCardText("ui.show_product_details", {}, this._hass)}"><ha-icon icon="mdi:text-box-outline"></ha-icon></button>`;
     const labelFilter = this._config.show_label_filter_button === false ? "" : `<div class="label-filter"><button type="button" class="tool-button text-button toolbar-filter-button ${this._selectedLabelIds !== null ? "active" : ""}" data-toggle-label-menu aria-label="${escapeHtml(labelFilterLabel)}" title="${escapeHtml(labelFilterLabel)}"><ha-icon icon="mdi:label-multiple-outline"></ha-icon><span>${escapeHtml(labelFilterLabel)}</span><ha-icon class="filter-menu-chevron" icon="mdi:menu-down"></ha-icon></button>${this._labelMenuOpen ? `<div class="label-menu"><div class="category-menu-actions"><button type="button" data-label-all>${haListManagerInventoryCardText("ui.select_all", {}, this._hass)}</button><button type="button" data-label-none>${haListManagerInventoryCardText("ui.select_none", {}, this._hass)}</button></div><div class="category-choice-list">${labelChoices}</div></div>` : ""}</div>`;
-    const categoryFilter = this._config.show_category_filter_button === false ? "" : `<div class="category-filter"><button type="button" class="tool-button text-button toolbar-filter-button ${this._selectedCategoryIds !== null ? "active" : ""}" data-toggle-category-menu aria-label="${escapeHtml(categoryLabel)}" title="${escapeHtml(categoryLabel)}"><ha-icon icon="mdi:shape-outline"></ha-icon><span>${escapeHtml(categoryLabel)}</span><ha-icon class="filter-menu-chevron" icon="mdi:menu-down"></ha-icon></button>${this._categoryMenuOpen ? `<div class="category-menu"><div class="category-menu-actions"><button type="button" data-category-all>${haListManagerInventoryCardText("ui.select_all", {}, this._hass)}</button><button type="button" data-category-none>${haListManagerInventoryCardText("ui.select_none", {}, this._hass)}</button></div><div class="category-choice-list">${choices}</div><label class="category-choice category-group-choice"><input type="checkbox" data-flat-categories ${!this._groupCategories ? "checked" : ""}><ha-icon icon="mdi:format-list-bulleted"></ha-icon><span>${haListManagerInventoryCardText("ui.no_category_grouping", {}, this._hass)}</span></label></div>` : ""}</div>`;
-    const tools = `${stockFilter}${hiddenToggle}${detailsToggle}${categoryToggle}${pendingButton}`;
+    const categoryFilter = this._config.show_category_filter_button === false ? "" : `<div class="category-filter"><button type="button" class="tool-button text-button toolbar-filter-button ${this._selectedCategoryIds !== null ? "active" : ""}" data-toggle-category-menu aria-label="${escapeHtml(categoryLabel)}" title="${escapeHtml(categoryLabel)}"><ha-icon icon="mdi:shape-outline"></ha-icon><span>${escapeHtml(categoryLabel)}</span><ha-icon class="filter-menu-chevron" icon="mdi:menu-down"></ha-icon></button>${this._categoryMenuOpen ? `<div class="category-menu"><div class="category-menu-actions"><button type="button" data-category-all>${haListManagerInventoryCardText("ui.select_all", {}, this._hass)}</button><button type="button" data-category-none>${haListManagerInventoryCardText("ui.select_none", {}, this._hass)}</button></div><div class="category-choice-list">${choices}</div>${this._groupingEnabled() ? "" : `<label class="category-choice category-group-choice"><input type="checkbox" data-flat-categories ${!this._groupCategories ? "checked" : ""}><ha-icon icon="mdi:format-list-bulleted"></ha-icon><span>${haListManagerInventoryCardText("ui.no_category_grouping", {}, this._hass)}</span></label>`}</div>` : ""}</div>`;
+    const tools = `${stockFilter}${hiddenToggle}${detailsToggle}${categoryToggle}${groupingToggle}${pendingButton}`;
     const filters = `${labelFilter}${categoryFilter}`;
     return tools || filters ? `<div class="toolbar">${tools ? `<div class="tools">${tools}</div>` : ""}${filters ? `<div class="toolbar-filters">${filters}</div>` : ""}</div>` : "";
   }
@@ -2968,6 +3036,7 @@ class HaListManagerInventoryCard extends HTMLElement {
     this.shadowRoot.querySelector("[data-toggle-details]")?.addEventListener("click", () => { this._showDetails = !this._showDetails; this._render(); });
     this.shadowRoot.querySelectorAll("[data-toggle-group-selection]").forEach((button) => button.addEventListener("click", () => { this._headerMenuOpen = false; this._groupSelectionMode = !this._groupSelectionMode; this._selectedEntryIds.clear(); this._render(); }));
     this.shadowRoot.querySelector("[data-toggle-categories]")?.addEventListener("click", () => this._toggleAllCategories());
+    this.shadowRoot.querySelector("[data-toggle-grouping]")?.addEventListener("click", () => this._toggleGrouping());
     this.shadowRoot.querySelector("[data-cancel-group-selection]")?.addEventListener("click", () => { this._groupSelectionMode = false; this._selectedEntryIds.clear(); this._render(); });
     this.shadowRoot.querySelector("[data-create-group]")?.addEventListener("click", () => this._openGroupDialog(null, [...this._selectedEntryIds]));
     this.shadowRoot.querySelectorAll("[data-open-products]").forEach((button) => button.addEventListener("click", () => { this._headerMenuOpen = false; history.pushState(null, "", "/ha_list_manager/products"); window.dispatchEvent(new Event("popstate")); }));

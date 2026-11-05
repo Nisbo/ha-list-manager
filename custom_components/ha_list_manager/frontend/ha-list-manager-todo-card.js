@@ -81,7 +81,7 @@ function haListManagerTodoCardTextRequest(hass, message) {
 
 const HA_LM_API = "ha_list_manager";
 const HA_LM_ITEMS_EVENT = "ha_list_manager_items_changed";
-const CARD_VERSION = "1.0.0b3";
+const CARD_VERSION = "1.0.0b4";
 
 const esc = (value) => String(value ?? "").replace(/[&<>'"]/g, (char) => ({
   "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;",
@@ -158,7 +158,7 @@ class HaListManagerTodoCard extends HTMLElement {
       show_chips: true, show_chip_popup_button: true, filter_chips: true, show_important_chips: true,
       category_chip_layout: "none", category_chip_colors: true, important_chip_color_rgb: [244, 67, 54], chips_position: "auto",
       show_descriptions: true, show_labels: true, show_item_dividers: true, item_divider_before_spacing: 10, item_divider_after_spacing: 10, item_font_size: 16, category_font_scale: 110,
-      acknowledged: "show", sort_mode: "due", category_sort: "alphabetical",
+      acknowledged: "show", sort_mode: "due", category_sort: "alphabetical", label_grouping: "disabled",
       show_category_count: true, show_title_info: true, show_title_info_icon: true,
       show_title_exclamation_mark: true, show_cat_next_due: true,
       show_cat_exclamation_mark: true, cat_double_sized_icon: true,
@@ -183,7 +183,7 @@ class HaListManagerTodoCard extends HTMLElement {
       category_chip_colors: haListManagerTodoCardText("chips.use_category_color", {}, hass), important_chip_color_rgb: haListManagerTodoCardText("ui.important_template_color", {}, hass), chips_position: haListManagerTodoCardText("ui.template_position", {}, hass),
       show_clear_button: haListManagerTodoCardText("ui.delete_completed_tasks", {}, hass), show_share_button: haListManagerTodoCardText("ui.show_share_button", {}, hass), show_pdf_export_button: haListManagerTodoCardText("ui.show_pdf_export", {}, hass), show_descriptions: haListManagerTodoCardText("todo.show_descriptions", {}, hass), show_item_dividers: haListManagerTodoCardText("ui.show_dividers", {}, hass), item_divider_before_spacing: haListManagerTodoCardText("ui.divider_top_spacing", {}, hass), item_divider_after_spacing: haListManagerTodoCardText("ui.divider_bottom_spacing", {}, hass), item_font_size: haListManagerTodoCardText("ui.entry_text_size", {}, hass), category_font_scale: haListManagerTodoCardText("categories.name_size", {}, hass), show_labels: haListManagerTodoCardText("ui.show_labels", {}, hass),
       acknowledged: haListManagerTodoCardText("ui.completed_tasks", {}, hass), sort_mode: haListManagerTodoCardText("ui.sort_tasks", {}, hass),
-      category_sort: haListManagerTodoCardText("ui.category_sort_order", {}, hass), show_category_count: haListManagerTodoCardText("ui.show_category_task_count", {}, hass),
+      label_grouping: haListManagerTodoCardText("ui.label_grouping", {}, hass), category_sort: haListManagerTodoCardText("ui.category_sort_order", {}, hass), show_category_count: haListManagerTodoCardText("ui.show_category_task_count", {}, hass),
       show_title_info: haListManagerTodoCardText("ui.show_next_due_below_title", {}, hass),
       show_title_info_icon: haListManagerTodoCardText("ui.show_due_calendar_icon", {}, hass),
       show_title_exclamation_mark: haListManagerTodoCardText("todo.show_title_warning", {}, hass),
@@ -214,6 +214,11 @@ class HaListManagerTodoCard extends HTMLElement {
           { name: "input_row_position", selector: dropdown([{ value: "top", label: haListManagerTodoCardText("ui.top", {}, hass) }, { value: "bottom", label: haListManagerTodoCardText("ui.bottom", {}, hass) }]), default: "top" },
           { name: "option_row_position", selector: dropdown([{ value: "top", label: haListManagerTodoCardText("ui.top", {}, hass) }, { value: "bottom", label: haListManagerTodoCardText("ui.bottom", {}, hass) }]), default: "bottom" },
           { name: "show_category_toggle_button", selector: { boolean: {} }, default: true },
+          { name: "label_grouping", selector: dropdown([
+            { value: "disabled", label: haListManagerTodoCardText("ui.label_grouping_disabled", {}, hass) },
+            { value: "categories", label: haListManagerTodoCardText("ui.label_grouping_categories", {}, hass) },
+            { value: "labels", label: haListManagerTodoCardText("ui.label_grouping_labels", {}, hass) },
+          ]), default: "disabled" },
           { name: "show_input_mask", selector: { boolean: {} }, default: true },
           { name: "show_submit_button", selector: { boolean: {} }, default: true },
           { name: "show_clear_button", selector: { boolean: {} }, default: true },
@@ -288,6 +293,7 @@ class HaListManagerTodoCard extends HTMLElement {
         input_row_position: haListManagerTodoCardText("help.todo_input_row_position", {}, hass),
         option_row_position: haListManagerTodoCardText("help.todo_toolbar_position", {}, hass),
         show_category_toggle_button: haListManagerTodoCardText("help.expand_all_categories_button", {}, hass),
+        label_grouping: haListManagerTodoCardText("help.label_grouping", {}, hass),
         show_input_mask: haListManagerTodoCardText("help.task_input_visibility", {}, hass),
         show_submit_button: haListManagerTodoCardText("help.todo_add_button", {}, hass),
         show_clear_button: haListManagerTodoCardText("help.delete_completed_tasks_button", {}, hass),
@@ -344,19 +350,22 @@ class HaListManagerTodoCard extends HTMLElement {
     this._config.item_divider_after_spacing = normalizeAppearanceNumber(this._config.item_divider_after_spacing, 10, 0, 32);
     this._config.item_font_size = normalizeAppearanceNumber(this._config.item_font_size, 16, 12, 24);
     this._config.category_font_scale = normalizeAppearanceNumber(this._config.category_font_scale, 110, 80, 160);
+    if (!["disabled", "categories", "labels"].includes(this._config.label_grouping)) this._config.label_grouping = "disabled";
     if (!["card_and_large", "card_only", "large_only"].includes(this._config.content_display)) this._config.content_display = "card_and_large";
     if (this._expandedView && this._config.content_display === "card_only") this._setExpandedView(false);
     this._render(); this._load(); this._restartTimer();
   }
   set hass(value) {
     this._hass = value;
+    if (this.isConnected) this._watchConnection();
     const translationsChanged = haListManagerTodoCardTextUpdateTranslations(this, this._hass);
     this._subscribe();
     if (!this._list) this._load(true);
     if (translationsChanged) this._render();
   }
-  connectedCallback() { this._render(); this._subscribe(); this._load(true); this._restartTimer(); }
+  connectedCallback() { this._watchConnection(); this._render(); this._subscribe(); this._load(true); this._restartTimer(); }
   disconnectedCallback() {
+    this._watchConnection(null);
     this._setExpandedView(false);
     this._unsubscribe?.();
     this._unsubscribe = null;
@@ -370,6 +379,29 @@ class HaListManagerTodoCard extends HTMLElement {
   getCardSize() { return this._config.content_display === "large_only" ? 1 : Math.max(3, Math.ceil(this._visibleItems().length * .55) + 2); }
   _listId() { return this._hass?.states?.[this._config.entity]?.attributes?.list_id || this._config.list_id || null; }
   _identity() { return this._config.card_id || this._config.entity || this._listId() || "todo"; }
+  _groupingKey() { return `ha-list-manager:todo-grouping:${encodeURIComponent(this._identity())}`; }
+  _groupingMode() {
+    if (!["categories", "labels"].includes(this._config.label_grouping)) return "categories";
+    const key = this._groupingKey();
+    if (this._groupingOverride?.key === key) return this._groupingOverride.mode;
+    try {
+      const stored = localStorage.getItem(key);
+      if (["categories", "labels"].includes(stored)) return stored;
+    } catch (_error) {}
+    return this._config.label_grouping;
+  }
+  _toggleGrouping() {
+    if (!["categories", "labels"].includes(this._config.label_grouping)) return;
+    const mode = this._groupingMode() === "labels" ? "categories" : "labels";
+    const key = this._groupingKey();
+    this._groupingOverride = { key, mode };
+    try { localStorage.setItem(key, mode); } catch (_error) {}
+    this._expandedScrollAnchor = null;
+    this._render();
+  }
+  _groupToggleLabel(action) {
+    return haListManagerTodoCardText(this._groupingMode() === "labels" ? "ui.all_labels_count" : "ui.all_categories_count", { p0: action }, this._hass);
+  }
   _filterKey() { return `ha-list-manager:todo-filter:${encodeURIComponent(this._identity())}`; }
   _activeFilter() { try { return localStorage.getItem(this._filterKey()) || this._config.todo_filter || "all"; } catch (_e) { return this._config.todo_filter || "all"; } }
   _listCollapseKey() { return `ha-list-manager:todo-list:${encodeURIComponent(this._identity())}`; }
@@ -471,17 +503,21 @@ class HaListManagerTodoCard extends HTMLElement {
     });
   }
   _toggleExpandedView(event) { event?.preventDefault(); event?.stopPropagation(); this._setExpandedView(!this._expandedView); }
-  _rememberExpandedScroll(itemId = null) {
+  _rememberExpandedScroll(itemId = null, sourceRow = null) {
     if (!this._expandedView) return;
     const card = this.shadowRoot?.querySelector("ha-card");
     if (!card || !Number.isFinite(card.scrollTop)) return;
     this._expandedScrollTop = card.scrollTop;
-    const row = itemId
-      ? [...this.shadowRoot.querySelectorAll("[data-item-id]")].find((element) => element.dataset.itemId === itemId)
-      : null;
+    const rows = itemId ? [...this.shadowRoot.querySelectorAll("[data-item-id]")].filter((element) => element.dataset.itemId === itemId) : [];
+    const activeRow = this.shadowRoot.activeElement?.closest?.("[data-item-id]");
+    const previousGroup = this._expandedScrollAnchor?.itemId === itemId ? this._expandedScrollAnchor.categoryId : null;
+    const previousRow = rows.find((element) => previousGroup != null && element.closest?.(".category")?.dataset.categoryId === previousGroup);
+    const focusedRow = rows.includes(activeRow) ? activeRow : null;
+    const row = rows.includes(sourceRow) ? sourceRow : ((this._dialog || this._actionDialog) ? previousRow || focusedRow : focusedRow || previousRow) || rows[0];
     if (row) {
       this._expandedScrollAnchor = {
         itemId,
+        categoryId: row.closest?.(".category")?.dataset.categoryId ?? null,
         offset: row.getBoundingClientRect().top - card.getBoundingClientRect().top,
       };
     }
@@ -498,7 +534,7 @@ class HaListManagerTodoCard extends HTMLElement {
       if (!card) return;
       if (restoreScrollTop) card.scrollTop = scrollTop;
       const row = anchor
-        ? [...this.shadowRoot.querySelectorAll("[data-item-id]")].find((element) => element.dataset.itemId === anchor.itemId)
+        ? [...this.shadowRoot.querySelectorAll("[data-item-id]")].find((element) => element.dataset.itemId === anchor.itemId && (anchor.categoryId == null || element.closest?.(".category")?.dataset.categoryId === anchor.categoryId))
         : null;
       if (row) {
         const offset = row.getBoundingClientRect().top - card.getBoundingClientRect().top;
@@ -561,15 +597,25 @@ class HaListManagerTodoCard extends HTMLElement {
     if (toggle) {
       const action = collapse ? haListManagerTodoCardText("ui.expand_lowercase", {}, this._hass) : haListManagerTodoCardText("ui.collapse_lowercase", {}, this._hass);
       toggle.setAttribute("aria-expanded", String(!collapse));
-      toggle.setAttribute("aria-label", haListManagerTodoCardText("ui.all_categories_count", {p0:(action)}, this._hass));
-      toggle.setAttribute("title", haListManagerTodoCardText("ui.all_categories_count", {p0:(action)}, this._hass));
+      toggle.setAttribute("aria-label", this._groupToggleLabel(action));
+      toggle.setAttribute("title", this._groupToggleLabel(action));
       toggle.querySelector("ha-icon")?.setAttribute("icon", `mdi:unfold-${collapse ? "more" : "less"}-horizontal`);
       const label = toggle.querySelector("span");
-      if (label) label.textContent = haListManagerTodoCardText("ui.all_categories_count", {p0:(action)}, this._hass);
+      if (label) label.textContent = this._groupToggleLabel(action);
     }
   }
   _restartTimer() { clearInterval(this._refreshTimer); this._refreshTimer = setInterval(() => { if (document.visibilityState === "visible" && !this._dialog && !this._actionDialog) this._refreshDueText(); }, Math.max(1, Number(this._config.list_reload_time) || 10) * 1000); }
   _refreshDueText() { this.shadowRoot?.querySelectorAll("[data-due-id]").forEach((node) => { const item = this._items.find((entry) => entry.id === node.dataset.dueId); if (item) node.innerHTML = this._dueHtml(item); }); }
+
+  _watchConnection(connection = this._hass?.connection) {
+    if (this._watchedConnection === connection) return;
+    this._watchedConnection?.removeEventListener?.("ready", this._onConnectionReady);
+    this._watchedConnection = connection;
+    this._onConnectionReady ||= () => {
+      if (this.isConnected) this._load(true);
+    };
+    connection?.addEventListener?.("ready", this._onConnectionReady);
+  }
 
   async _subscribe() {
     if (!this._hass || this._unsubscribe || this._subscribePromise) return;
@@ -586,7 +632,7 @@ class HaListManagerTodoCard extends HTMLElement {
   }
   async _load(force = false) {
     const id = this._listId();
-    if (!this._hass || !id || (this._loading && !force)) return;
+    if (!this._hass || !id || this._hass.connection?.connected === false || (this._loading && !force)) return;
     const requestId = ++this._loadRequestId;
     this._loading = true;
     this._error = "";
@@ -611,7 +657,11 @@ class HaListManagerTodoCard extends HTMLElement {
       this._notificationAssignments = notifications.assignments || [];
       this._importantChipKeys = new Set((importantChips.assignments || []).map((entry) => `${entry.target_type}:${entry.target_id}`));
     } catch (error) {
-      if (requestId === this._loadRequestId) this._error = error?.message || String(error);
+      // HA rejects interrupted reads with its connection-lost envelope (code 3).
+      // Keep the cached list; the native ready event requests fresh data.
+      if (requestId === this._loadRequestId && error !== 3 && error?.error?.code !== 3) {
+        this._error = error?.message || error?.error?.message || (typeof error === "string" ? error : haListManagerTodoCardText("errors.list_load_failed", {}, this._hass));
+      }
     } finally {
       if (requestId === this._loadRequestId) {
         this._loading = false;
@@ -708,13 +758,27 @@ class HaListManagerTodoCard extends HTMLElement {
   }
   _categoryRank(category) { if (category.uncategorized) return -1; if (this._config.category_sort === "position") return Number(category.position ?? 999999); if (this._config.category_sort === "global_list_dynamic") return category.dynamic ? 2 : category.scope === "global" ? 0 : 1; if (this._config.category_sort === "list_global_dynamic") return category.dynamic ? 2 : category.scope === "list" ? 0 : 1; return 0; }
   _groups() {
-    const groups = new Map(); for (const item of this._visibleItems()) { const category = this._categoryFor(item); if (!groups.has(category.id)) groups.set(category.id, { category, items: [] }); groups.get(category.id).items.push(item); }
-    return [...groups.values()].sort((a, b) => this._categoryRank(a.category) - this._categoryRank(b.category) || a.category.name.localeCompare(b.category.name, haListManagerTodoCardTextLocale(this._hass), { sensitivity: "base", numeric: true }));
+    const groups = new Map();
+    const byLabels = this._groupingMode() === "labels";
+    // Each label view keeps the original record and its backend identity.
+    for (const item of this._visibleItems()) {
+      const labels = byLabels ? [...new Map((item.labels || []).filter((label) => label?.id && label.name).map((label) => [label.id, label])).values()] : [];
+      const categories = !byLabels ? [this._categoryFor(item)] : labels.length
+        ? labels.map((label) => ({ ...label, id: `__label__:${label.id}`, icon: label.icon || "mdi:label-outline", label: true }))
+        : [{ id: "__unlabeled__", name: haListManagerTodoCardText("ui.without_label", {}, this._hass), icon: "mdi:label-off-outline", uncategorized: true, label: true }];
+      for (const category of categories) {
+        if (!groups.has(category.id)) groups.set(category.id, { category, items: [] });
+        groups.get(category.id).items.push(item);
+      }
+    }
+    return [...groups.values()].sort((a, b) => (byLabels
+      ? Number(Boolean(b.category.uncategorized)) - Number(Boolean(a.category.uncategorized))
+      : this._categoryRank(a.category) - this._categoryRank(b.category)) || a.category.name.localeCompare(b.category.name, haListManagerTodoCardTextLocale(this._hass), { sensitivity: "base", numeric: true }));
   }
   _nextDue(items, includeDue = false) { return items.filter((item) => !item.completed && this._due(item) && (includeDue || !this._isDue(item))).sort((a, b) => this._due(a) - this._due(b))[0] || null; }
 
-  _openEditor(item = null, name = "") {
-    this._rememberExpandedScroll(item?.id);
+  _openEditor(item = null, name = "", sourceRow = null) {
+    this._rememberExpandedScroll(item?.id, sourceRow);
     const interval = this._interval(item); const due = item?.due_at || "";
     const savedCategory = item?.category_id ? this._categories.find((entry) => entry.id === item.category_id) : null;
     this._dialog = { item, name: item ? this._name(item) : name, description: item?.description || "", category_id: item?.category_id || null, category_name: savedCategory?.name || item?.category || "", due_date: due ? due.slice(0, 10) : "", due_time: due.includes("T") ? due.slice(11, 16) : "", interval_value: interval?.value || "", interval_unit: interval?.unit || "D", label_ids: item?.labels?.map((label) => label.id) || [] };
@@ -768,23 +832,24 @@ class HaListManagerTodoCard extends HTMLElement {
       this._input = ""; this._closeDialogs(); await this._load(true);
     } catch (error) { this._error = error?.message || String(error); } finally { this._busy = false; this._render(); }
   }
-  async _setCompleted(item, completed) { if (this._busy) return false; this._rememberExpandedScroll(item.id); try { await haListManagerTodoCardTextRequest(this._hass, { type: `${HA_LM_API}/items/set_completed`, item_id: item.id, completed }); await this._load(true); return true; } catch (error) { this._error = error?.message || String(error); this._render(); return false; } }
+  async _setCompleted(item, completed, sourceRow = null) { if (this._busy) return false; this._rememberExpandedScroll(item.id, sourceRow); try { await haListManagerTodoCardTextRequest(this._hass, { type: `${HA_LM_API}/items/set_completed`, item_id: item.id, completed }); await this._load(true); return true; } catch (error) { this._error = error?.message || String(error); this._render(); return false; } }
   _advanceDue(item, fromNow) {
     const interval = this._interval(item); if (!interval) return null; const base = fromNow ? new Date() : this._due(item); if (!base) return null; const next = new Date(base);
     const add = () => { if (interval.unit === "H") next.setHours(next.getHours() + interval.value); else if (interval.unit === "D") next.setDate(next.getDate() + interval.value); else next.setMonth(next.getMonth() + interval.value); };
     add(); if (!fromNow) while (next <= new Date()) add(); return this._dateOnly(item) && interval.unit !== "H" ? next.toISOString().slice(0, 10) : `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, "0")}-${String(next.getDate()).padStart(2, "0")}T${String(next.getHours()).padStart(2, "0")}:${String(next.getMinutes()).padStart(2, "0")}:00`;
   }
-  async _updateDue(item, dueAt, completed = item.completed) { this._rememberExpandedScroll(item.id); await haListManagerTodoCardTextRequest(this._hass, { type: `${HA_LM_API}/items/update`, item_id: item.id, name: this._name(item), description: item.description, quantity: 1, category_id: item.category_id, category: item.category_id ? null : item.category, due_at: dueAt, recurrence_interval: item.recurrence_interval ?? this._interval(item)?.value ?? null, recurrence_unit: item.recurrence_unit ?? this._interval(item)?.unit ?? null, completed, label_ids: item.labels?.map((label) => label.id) || [] }); await this._load(true); }
+  async _updateDue(item, dueAt, completed = item.completed, sourceRow = null) { this._rememberExpandedScroll(item.id, sourceRow); await haListManagerTodoCardTextRequest(this._hass, { type: `${HA_LM_API}/items/update`, item_id: item.id, name: this._name(item), description: item.description, quantity: 1, category_id: item.category_id, category: item.category_id ? null : item.category, due_at: dueAt, recurrence_interval: item.recurrence_interval ?? this._interval(item)?.value ?? null, recurrence_unit: item.recurrence_unit ?? this._interval(item)?.unit ?? null, completed, label_ids: item.labels?.map((label) => label.id) || [] }); await this._load(true); }
   _available(item, action) { if (action === "remove") return Boolean(item.due_at); if (["next", "now"].includes(action)) return Boolean(item.due_at && this._interval(item)); return true; }
-  async _execute(item, action) {
+  async _execute(item, action, sourceRow = null) {
+    if (sourceRow) this._rememberExpandedScroll(item.id, sourceRow);
     if (!this._available(item, action)) { this._actionDialog = { item, action: this._fallbackAction(item) }; this._lock(); this._render(); return; }
     try {
-      if (action === "done") { const changed = await this._setCompleted(item, !item.completed); if (changed && this._actionDialog) this._closeDialogs(); }
-      else if (action === "edit") this._openEditor(item);
+      if (action === "done") { const changed = await this._setCompleted(item, !item.completed, sourceRow); if (changed && this._actionDialog) this._closeDialogs(); }
+      else if (action === "edit") this._openEditor(item, "", sourceRow);
       else if (action === "delete") { this._confirmation = { type: "delete", item }; this._actionDialog = null; this._render(); }
       else if (action === "template") { this._openTemplateDialog(item); }
-      else if (action === "remove") { await this._updateDue(item, null, item.completed); this._closeDialogs(); }
-      else if (action === "next" || action === "now") { await this._updateDue(item, this._advanceDue(item, action === "now"), false); this._closeDialogs(); }
+      else if (action === "remove") { await this._updateDue(item, null, item.completed, sourceRow); this._closeDialogs(); }
+      else if (action === "next" || action === "now") { await this._updateDue(item, this._advanceDue(item, action === "now"), false, sourceRow); this._closeDialogs(); }
     } catch (error) { this._error = error?.message || String(error); this._render(); }
   }
   _openTemplateDialog(item) {
@@ -818,7 +883,7 @@ class HaListManagerTodoCard extends HTMLElement {
     finally { this._busy = false; this._render(); }
   }
   _fallbackAction(item) { return this._available(item, this._config.todo_default_action) ? this._config.todo_default_action : "done"; }
-  _openAction(item) { this._rememberExpandedScroll(item.id); this._actionDialog = { item, action: this._fallbackAction(item) }; this._lock(); this._render(); }
+  _openAction(item, sourceRow = null) { this._rememberExpandedScroll(item.id, sourceRow); this._actionDialog = { item, action: this._fallbackAction(item) }; this._lock(); this._render(); }
   async _deleteItem(item) { try { await haListManagerTodoCardTextRequest(this._hass, { type: `${HA_LM_API}/items/delete`, item_id: item.id }); this._closeDialogs(); await this._load(true); } catch (error) { this._error = error?.message || String(error); this._render(); } }
   async _clearCompleted() { const completed = this._items.filter((item) => item.completed); try { for (const item of completed) await haListManagerTodoCardTextRequest(this._hass, { type: `${HA_LM_API}/items/delete`, item_id: item.id }); this._closeDialogs(); await this._load(true); } catch (error) { this._error = error?.message || String(error); this._render(); } }
   async _sendList(profileIds = null) {
@@ -1112,12 +1177,17 @@ class HaListManagerTodoCard extends HTMLElement {
       ? `<button type="button" class="${activeFilter !== "all" ? "active" : ""}" data-open-filter aria-label="${haListManagerTodoCardText("ui.filter_value", {p0:(esc(FILTERS(this._hass)[activeFilter] || haListManagerTodoCardText("ui.all", {}, this._hass)))}, this._hass)}" title="${haListManagerTodoCardText("ui.filter_value", {p0:(esc(FILTERS(this._hass)[activeFilter] || haListManagerTodoCardText("ui.all", {}, this._hass)))}, this._hass)}"><ha-icon icon="mdi:filter-variant"></ha-icon><span>${esc(FILTERS(this._hass)[activeFilter] || haListManagerTodoCardText("ui.filter", {}, this._hass))}</span></button>`
       : "";
     const categoryToggle = this._config.show_category_toggle_button !== false && groups.length
-      ? `<button type="button" data-toggle-categories aria-expanded="${allExpanded}" aria-label="${haListManagerTodoCardText("ui.all_categories_count", {p0:(allExpanded ? haListManagerTodoCardText("ui.collapse_lowercase", {}, this._hass) : haListManagerTodoCardText("ui.expand_lowercase", {}, this._hass))}, this._hass)}" title="${haListManagerTodoCardText("ui.all_categories_count", {p0:(allExpanded ? haListManagerTodoCardText("ui.collapse_lowercase", {}, this._hass) : haListManagerTodoCardText("ui.expand_lowercase", {}, this._hass))}, this._hass)}"><ha-icon icon="mdi:unfold-${allExpanded ? "less" : "more"}-horizontal"></ha-icon><span>${haListManagerTodoCardText("ui.all_categories_count", {p0:(allExpanded ? haListManagerTodoCardText("ui.collapse_lowercase", {}, this._hass) : haListManagerTodoCardText("ui.expand_lowercase", {}, this._hass))}, this._hass)}</span></button>`
+      ? `<button type="button" data-toggle-categories aria-expanded="${allExpanded}" aria-label="${this._groupToggleLabel(allExpanded ? haListManagerTodoCardText("ui.collapse_lowercase", {}, this._hass) : haListManagerTodoCardText("ui.expand_lowercase", {}, this._hass))}" title="${this._groupToggleLabel(allExpanded ? haListManagerTodoCardText("ui.collapse_lowercase", {}, this._hass) : haListManagerTodoCardText("ui.expand_lowercase", {}, this._hass))}"><ha-icon icon="mdi:unfold-${allExpanded ? "less" : "more"}-horizontal"></ha-icon><span>${this._groupToggleLabel(allExpanded ? haListManagerTodoCardText("ui.collapse_lowercase", {}, this._hass) : haListManagerTodoCardText("ui.expand_lowercase", {}, this._hass))}</span></button>`
       : "";
     const clear = this._config.show_clear_button
       ? `<button type="button" data-clear-completed ${completed ? "" : "disabled"} title="${haListManagerTodoCardText("ui.delete_completed_tasks", {}, this._hass)}"><ha-icon icon="mdi:delete-sweep-outline"></ha-icon><span>${haListManagerTodoCardText("ui.delete_completed_count", {p0:(completed ? ` (${completed})` : "")}, this._hass)}</span></button>`
       : "";
-    return filter || categoryToggle || clear ? `<div class="option-row">${filter}${categoryToggle}${clear}</div>` : "";
+    const labelsActive = this._groupingMode() === "labels";
+    const groupingLabel = haListManagerTodoCardText(labelsActive ? "ui.group_by_categories" : "ui.group_by_labels", {}, this._hass);
+    const grouping = ["categories", "labels"].includes(this._config.label_grouping)
+      ? `<button type="button" class="${labelsActive ? "active" : ""}" data-toggle-grouping aria-pressed="${labelsActive}" aria-label="${groupingLabel}" title="${groupingLabel}"><ha-icon icon="${labelsActive ? "mdi:label-multiple-outline" : "mdi:shape-outline"}"></ha-icon><span>${groupingLabel}</span></button>`
+      : "";
+    return filter || categoryToggle || grouping || clear ? `<div class="option-row">${filter}${categoryToggle}${grouping}${clear}</div>` : "";
   }
   _labelsHtml(item) { if (!this._config.show_labels || !item.labels?.length) return ""; return `<span class="item-labels">${item.labels.map((label) => `<span class="item-label" style="${label.color ? `--label-color:${esc(label.color)}` : ""}"><ha-icon icon="${esc(label.icon || "mdi:label-outline")}"></ha-icon>${esc(label.name)}</span>`).join("")}</span>`; }
   _categoryIcon(category) {
@@ -1135,7 +1205,7 @@ class HaListManagerTodoCard extends HTMLElement {
   _itemHtml(item) { const draggable = this._config.sort_mode === "manual"; const interval = this._intervalText(item); return `<div class="item ${item.completed ? "completed" : ""} ${this._status(item)}" data-item-id="${esc(item.id)}" ${draggable ? "draggable=true" : ""}>${draggable ? `<ha-icon class="drag" icon="mdi:drag-vertical"></ha-icon>` : ""}<button class="check" data-item-action="${esc(item.id)}" aria-label="${haListManagerTodoCardText("ui.actions", {}, this._hass)}"><ha-icon icon="${item.completed ? "mdi:checkbox-marked" : "mdi:checkbox-blank-outline"}"></ha-icon></button><button class="item-main" data-edit="${esc(item.id)}"><span class="item-name-row"><strong>${esc(this._name(item))}</strong>${interval ? `<span class="interval">${esc(interval)}</span>` : ""}</span>${this._config.show_descriptions && item.description ? `<small>${esc(item.description)}</small>` : ""}<span class="due-holder" data-due-id="${esc(item.id)}">${this._dueHtml(item)}</span>${this._labelsHtml(item)}</button></div>`; }
   _contentHtml() {
     const groups = this._groups(); if (!this._list) return `<div class="empty">${haListManagerTodoCardText("errors.select_todo_list", {}, this._hass)}</div>`; if (!groups.length) return `<div class="empty"><ha-icon icon="mdi:checkbox-marked-circle-outline"></ha-icon><span>${this._items.length ? haListManagerTodoCardText("todo.no_filter_matches", {}, this._hass) : haListManagerTodoCardText("ui.no_tasks_yet", {}, this._hass)}</span></div>`;
-    return groups.map(({ category, items }) => { const collapsed = this._collapsed(category.id); const next = this._nextDue(items); const due = items.some((item) => this._isDue(item)); const notDue = items.filter((item) => item.completed || (this._due(item) && !this._isDue(item))).length; const style = category.color ? `--category-color:${esc(category.color)}` : ""; const icon = this._categoryIcon(category); const iconHint = icon.missing ? ` title="${esc(haListManagerTodoCardText("ui.unavailable_icon", {icon: icon.requested}, this._hass))}" aria-label="${esc(haListManagerTodoCardText("ui.missing_icon_replacement", {icon: icon.requested}, this._hass))}"` : ""; return `<section class="category" data-category-id="${esc(category.id)}" style="${style}"><button class="category-head ${category.color ? "colored" : ""}" data-category="${esc(category.id)}" aria-expanded="${collapsed ? "false" : "true"}"><span class="category-icon ${this._config.cat_double_sized_icon && this._config.show_cat_next_due && next ? "large" : ""}"${iconHint}><ha-icon icon="${esc(icon.icon)}"></ha-icon></span><span class="category-title"><strong>${esc(category.name)}</strong>${this._config.show_cat_next_due && next ? `<small>${this._config.show_title_info_icon ? `<ha-icon icon="mdi:calendar-clock"></ha-icon>` : ""}${esc(this._formatDue(next))}</small>` : ""}</span>${this._config.show_category_count ? `<span class="count">${notDue}/${items.length}</span>` : ""}${this._config.show_cat_exclamation_mark && due ? `<span class="warning" aria-label="${haListManagerTodoCardText("todo.due_tasks", {}, this._hass)}">⚠</span>` : ""}<ha-icon icon="mdi:chevron-${collapsed ? "down" : "up"}"></ha-icon></button>${collapsed ? "" : `<div class="items">${items.map((item) => this._itemHtml(item)).join("")}</div>`}</section>`; }).join("");
+    return groups.map(({ category, items }) => { const collapsed = this._collapsed(category.id); const next = this._nextDue(items); const due = items.some((item) => this._isDue(item)); const notDue = items.filter((item) => item.completed || (this._due(item) && !this._isDue(item))).length; const style = category.color ? `--category-color:${esc(category.color)}` : ""; const icon = this._categoryIcon(category); const iconHint = icon.missing ? ` title="${esc(haListManagerTodoCardText("ui.unavailable_icon", {icon: icon.requested}, this._hass))}" aria-label="${esc(haListManagerTodoCardText("ui.missing_icon_replacement", {icon: icon.requested}, this._hass))}"` : ""; return `<section class="category" data-category-id="${esc(category.id)}" style="${style}"><button class="category-head ${category.color ? "colored" : ""}" data-category="${esc(category.id)}" aria-expanded="${collapsed ? "false" : "true"}"><span class="category-icon ${this._config.cat_double_sized_icon && this._config.show_cat_next_due && next ? "large" : ""}"${iconHint}><ha-icon icon="${esc(icon.icon)}"></ha-icon></span><span class="category-title"><strong>${esc(category.name)}</strong>${this._config.show_cat_next_due && next ? `<small>${this._config.show_title_info_icon ? `<ha-icon icon="mdi:calendar-clock"></ha-icon>` : ""}${esc(this._formatDue(next))}</small>` : ""}</span>${this._config.show_cat_exclamation_mark && due ? `<span class="warning" aria-label="${haListManagerTodoCardText("todo.due_tasks", {}, this._hass)}">⚠</span>` : ""}${this._config.show_category_count ? `<span class="count">${notDue}/${items.length}</span>` : ""}<ha-icon icon="mdi:chevron-${collapsed ? "down" : "up"}"></ha-icon></button>${collapsed ? "" : `<div class="items">${items.map((item) => this._itemHtml(item)).join("")}</div>`}</section>`; }).join("");
   }
   _categoryOptions() { return this._categories.slice().sort((a, b) => a.name.localeCompare(b.name, haListManagerTodoCardTextLocale(this._hass), { sensitivity: "base" })).map((category) => { const icon = this._categoryIcon(category); const hint = icon.missing ? ` title="${esc(haListManagerTodoCardText("ui.unavailable_icon", {icon: icon.requested}, this._hass))}"` : ""; return `<button type="button" data-category-option="${esc(category.id)}"><span class="category-option-icon" style="${category.color ? `--category-color:${esc(category.color)}` : ""}"${hint}><ha-icon icon="${esc(icon.icon)}"></ha-icon></span><span><strong>${esc(category.name)}</strong><small>${category.scope === "global" ? haListManagerTodoCardText("ui.global", {}, this._hass) : category.dynamic ? haListManagerTodoCardText("ui.dynamic", {}, this._hass) : haListManagerTodoCardText("ui.this_list", {}, this._hass)}</small></span></button>`; }).join(""); }
   _selectedLabelsHtml(d) { const selected = this._labels.filter((label) => d.label_ids?.includes(label.id)); return selected.length ? `<div class="selected-labels">${selected.map((label) => `<button type="button" class="selected-label" data-remove-label="${esc(label.id)}" style="${label.color ? `--label-color:${esc(label.color)}` : ""}"><ha-icon icon="${esc(label.icon || "mdi:label-outline")}"></ha-icon><span>${esc(label.name)}</span><ha-icon class="remove-label" icon="mdi:close"></ha-icon></button>`).join("")}</div>` : ""; }
@@ -1218,6 +1288,7 @@ class HaListManagerTodoCard extends HTMLElement {
     const active = this.shadowRoot.activeElement;
     const focusAttr = active?.getAttributeNames?.().find((name) => name.startsWith("data-"));
     const focusValue = focusAttr ? active.getAttribute(focusAttr) : null;
+    const focusCategory = active?.closest?.(".category")?.dataset.categoryId;
     const supportsSelection = active?.tagName === "TEXTAREA"
       || (active?.tagName === "INPUT" && ["text", "search", "url", "tel", "password", "email"].includes(active.type));
     const selection = supportsSelection ? [active.selectionStart, active.selectionEnd] : null;
@@ -1267,7 +1338,7 @@ class HaListManagerTodoCard extends HTMLElement {
     this._bind();
     if (focusAttr) {
       const next = [...this.shadowRoot.querySelectorAll(`[${focusAttr}]`)]
-        .find((element) => element.getAttribute(focusAttr) === focusValue);
+        .find((element) => element.getAttribute(focusAttr) === focusValue && (focusCategory == null || element.closest?.(".category")?.dataset.categoryId === focusCategory));
       if (next && this.shadowRoot.activeElement !== next) next.focus({ preventScroll: true });
       if (selection && next?.setSelectionRange) next.setSelectionRange(selection[0], selection[1]);
     }
@@ -1390,7 +1461,7 @@ class HaListManagerTodoCard extends HTMLElement {
   }
   _bindContent(root = this.shadowRoot, bindCategories = true) {
     if (bindCategories) root.querySelectorAll("[data-category]").forEach((button) => this._listen(button, "click", () => this._toggleCategory(button.dataset.category, button)));
-    root.querySelectorAll("[data-edit]").forEach((button) => this._listen(button, "click", () => { const item = this._items.find((entry) => entry.id === button.dataset.edit); if (item) this._openEditor(item); }));
+    root.querySelectorAll("[data-edit]").forEach((button) => this._listen(button, "click", () => { const item = this._items.find((entry) => entry.id === button.dataset.edit); if (item) this._openEditor(item, "", button.closest("[data-item-id]")); }));
     root.querySelectorAll("[data-item-action]").forEach((button) => {
       const item = this._items.find((entry) => entry.id === button.dataset.itemAction);
       if (!item) return;
@@ -1398,8 +1469,8 @@ class HaListManagerTodoCard extends HTMLElement {
       this._listen(button, "click", (event) => {
         if (Date.now() < this._suppressActionClickUntil) { event.preventDefault(); event.stopPropagation(); return; }
         const behavior = this._config.todo_action_behavior;
-        if (behavior === "click_default_long_menu") this._execute(item, this._config.todo_default_action);
-        else this._openAction(item);
+        if (behavior === "click_default_long_menu") this._execute(item, this._config.todo_default_action, button.closest("[data-item-id]"));
+        else this._openAction(item, button.closest("[data-item-id]"));
       });
       this._listen(button, "pointerdown", (event) => {
         if (typeof event.button === "number" && event.button !== 0) return;
@@ -1408,8 +1479,8 @@ class HaListManagerTodoCard extends HTMLElement {
         if (!["click_menu_long_default", "click_default_long_menu"].includes(behavior)) return;
         this._pressTimer = setTimeout(() => {
           this._suppressActionClickUntil = Date.now() + 900;
-          if (behavior === "click_menu_long_default") this._execute(item, this._config.todo_default_action);
-          else this._openAction(item);
+          if (behavior === "click_menu_long_default") this._execute(item, this._config.todo_default_action, button.closest("[data-item-id]"));
+          else this._openAction(item, button.closest("[data-item-id]"));
         }, 600);
       });
       ["pointerup", "pointercancel", "pointerleave"].forEach((type) => this._listen(button, type, cancel));
@@ -1484,6 +1555,7 @@ class HaListManagerTodoCard extends HTMLElement {
     this._bindContent(root);
     this._listen(root.querySelector("[data-open-filter]"), "click", () => this._openFilterPortal()); this._listen(root.querySelector("[data-clear-completed]"), "click", () => { this._confirmation = { type: "clear" }; this._lock(); this._render(); });
     this._listen(root.querySelector("[data-toggle-categories]"), "click", () => this._toggleAllCategories());
+    this._listen(root.querySelector("[data-toggle-grouping]"), "click", () => this._toggleGrouping());
     root.querySelectorAll("[data-close]").forEach((button) => this._listen(button, "click", () => this._closeDialogs())); this._listen(root.querySelector("[data-d-name]"), "input", (event) => { this._dialog.name = event.target.value; }); this._listen(root.querySelector("[data-d-description]"), "input", (event) => { this._dialog.description = event.target.value; }); this._listen(root.querySelector("[data-d-date]"), "input", (event) => { this._dialog.due_date = event.target.value; const time = root.querySelector("[data-d-time]"); if (time) time.disabled = !event.target.value; }); this._listen(root.querySelector("[data-d-time]"), "input", (event) => { this._dialog.due_time = event.target.value; }); this._listen(root.querySelector("[data-d-interval]"), "input", (event) => { this._dialog.interval_value = event.target.value; }); this._listen(root.querySelector("[data-d-unit]"), "change", (event) => { this._dialog.interval_unit = event.target.value; }); this._listen(root.querySelector("[data-copy-due]"), "click", (event) => this._copyDueSettings(event.currentTarget)); this._listen(root.querySelector("[data-paste-due]"), "click", () => this._pasteDueSettings()); this._listen(root.querySelector("[data-save]"), "click", () => this._saveEditor()); this._listen(root.querySelector("[data-request-delete]"), "click", () => { this._confirmation = { type: "delete", item: this._dialog.item }; this._render(); });
     this._listen(root.querySelector("[data-save-item-template]"), "click", () => this._openTemplateDialog(this._dialog.item));
     this._listen(root.querySelector("[data-run-action]"), "click", () => { const chosen = root.querySelector('input[name="todo-action"]:checked')?.value; if (chosen) this._execute(this._actionDialog.item, chosen); }); root.querySelectorAll('input[name="todo-action"]').forEach((radio) => this._listen(radio, "change", () => { this._actionDialog.action = radio.value; }));
