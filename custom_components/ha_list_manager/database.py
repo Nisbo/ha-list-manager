@@ -2950,6 +2950,14 @@ WHERE registry_entry_id IS NOT NULL;
             raise LegacyImportError("invalid_config")
         if sum(len(row["items"]) for row in lists) > MAX_ITEMS:
             raise LegacyImportError("too_many_items")
+        if plan.get("can_import") is False or any(
+            not conflict.get("selected")
+            for source in lists for conflict in source.get("ean_conflicts", [])
+        ):
+            raise LegacyImportError("ean_unresolved")
+        ean_products = plan.get("ean_products", [])
+        if not isinstance(ean_products, list) or len(ean_products) > MAX_ITEMS:
+            raise LegacyImportError("ean_source_invalid")
         now = self._now()
         result = {"lists": [], "counts": dict(plan["counts"]), "replayed": False}
         with self._connect() as connection:
@@ -2962,6 +2970,42 @@ WHERE registry_entry_id IS NOT NULL;
                 if stored["fingerprint"] != fingerprint:
                     raise LegacyImportError("import_changed")
                 return {**stored["result"], "replayed": True}
+            # EAN products belong to the shared catalog, including those without
+            # stock. Reusing an EAN never replaces an existing product's data.
+            ean_product_ids = {}
+            ean_created = 0
+            for product in ean_products:
+                if not isinstance(product, dict):
+                    raise LegacyImportError("ean_source_invalid")
+                ean = product.get("ean")
+                if (not isinstance(ean, str) or not ean.isascii() or not ean.isdecimal()
+                        or len(ean) not in {8, 12, 13, 14} or ean in ean_product_ids):
+                    raise LegacyImportError("ean_source_invalid")
+                name = product.get("name")
+                if not isinstance(name, str) or not name.strip() or len(name) > 200:
+                    raise LegacyImportError("ean_source_invalid")
+                existing = connection.execute("SELECT id FROM products WHERE ean = ?", (ean,)).fetchone()
+                if existing is not None:
+                    ean_product_ids[ean] = existing["id"]
+                    continue
+                product_id = str(uuid4())
+                connection.execute(
+                    """INSERT INTO products(
+                        id, ean, name, original_name, brand, package_quantity,
+                        image_url, source, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, 'manual', ?, ?)""",
+                    (product_id, ean, name, product.get("original_name"),
+                     product.get("brand"), product.get("package_quantity"),
+                     product.get("image_url"), now, now),
+                )
+                ean_product_ids[ean] = product_id
+                ean_created += 1
+            if ean_products or any(source.get("ean_enabled") for source in lists):
+                result["ean_counts"] = {
+                    "total": len(ean_product_ids), "created": ean_created,
+                    "reused": len(ean_product_ids) - ean_created,
+                }
+                result["ean_product_ids"] = list(ean_product_ids.values())
             names = {row["name"].casefold() for row in connection.execute("SELECT name FROM lists")}
             for source in lists:
                 name, list_type = source["name"], source["list_type"]
@@ -3010,21 +3054,54 @@ WHERE registry_entry_id IS NOT NULL;
                          chip["chip_kind"], chip["icon"], chip["color"], list_id,
                          json.dumps(template) if template is not None else None, now, now),
                     )
+                for ean, category_name in source.get("ean_product_categories", {}).items():
+                    category_id = category_ids.get(category_name.casefold())
+                    product_id = ean_product_ids.get(ean)
+                    if category_id is None or product_id is None or list_type != "inventory":
+                        raise LegacyImportError("ean_source_invalid")
+                    connection.execute(
+                        "INSERT OR IGNORE INTO product_category_assignments(product_id, category_id) VALUES (?, ?)",
+                        (product_id, category_id),
+                    )
                 product_ids = []
+                seen_product_ids = set()
                 for item in source["items"]:
                     category_id = category_ids.get(item["category"].casefold()) if item["category"] and item["category_saved"] else None
                     if list_type == "inventory":
                         stock = item["stock"]
                         self._validate_stock(stock, None)
-                        product_id = str(uuid4())
-                        # Simplified import deliberately creates generic products,
-                        # leaving every existing product and EAN assignment alone.
-                        connection.execute(
-                            """INSERT INTO products(id, name, source, created_at, updated_at)
-                               VALUES (?, ?, 'manual', ?, ?)""",
-                            (product_id, item["name"], now, now),
-                        )
-                        product_ids.append(product_id)
+                        ean = item.get("product_ean")
+                        product_id = ean_product_ids.get(ean) if ean else None
+                        if ean and (not source.get("ean_enabled") or product_id is None):
+                            raise LegacyImportError("ean_choice_invalid")
+                        if product_id is None:
+                            # Without an EAN choice the established simplified import
+                            # remains independent from existing catalog records.
+                            product_id = str(uuid4())
+                            connection.execute(
+                                """INSERT INTO products(id, name, source, created_at, updated_at)
+                                   VALUES (?, ?, 'manual', ?, ?)""",
+                                (product_id, item["name"], now, now),
+                            )
+                        previous = None
+                        if product_id in seen_product_ids:
+                            previous = connection.execute(
+                                "SELECT id, stock, hidden FROM inventory_entries WHERE list_id = ? AND product_id = ?",
+                                (list_id, product_id),
+                            ).fetchone()
+                        else:
+                            product_ids.append(product_id)
+                            seen_product_ids.add(product_id)
+                        if previous is not None:
+                            # A product has one stock record per list. Even if old
+                            # category names differ, its quantities must not multiply.
+                            stock += previous["stock"]
+                            self._validate_stock(stock, None)
+                            connection.execute(
+                                "UPDATE inventory_entries SET stock = ?, hidden = ? WHERE id = ?",
+                                (stock, int(bool(previous["hidden"]) and item["hidden"]), previous["id"]),
+                            )
+                            continue
                         connection.execute(
                             """INSERT INTO inventory_entries(
                                 id, list_id, product_id, stock, category_id, category,

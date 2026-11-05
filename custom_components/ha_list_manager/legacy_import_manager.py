@@ -18,7 +18,7 @@ from homeassistant.helpers import entity_registry as er
 
 from .const import DOMAIN, EVENT_LISTS_CHANGED
 from .data_backup import MANAGER_KEY, DataBackupManager, atomic_executor
-from .legacy_import import LegacyImportError, build_import_plan, parse_legacy_configs
+from .legacy_import import MAX_ITEMS, LegacyImportError, build_import_plan, parse_legacy_configs
 from .legacy_import_warnings import classify_import_warning
 from .localization import text
 
@@ -121,7 +121,7 @@ class LegacyImportManager:
                 names[entity] = candidate
         draft_id = self._remember(self.drafts, user_id, {"parsed": parsed})
         cards = [{key: card[key] for key in (
-            "id", "source_entity", "mode", "title", "target_name", "icon",
+            "id", "source_entity", "mode", "title", "target_name", "icon", "ean_source_entity",
         )} for card in parsed["cards"]]
         return {"draft_id": draft_id, "cards": cards, "warnings": self._warnings(parsed["warnings"], parsed["cards"])}
 
@@ -154,7 +154,21 @@ class LegacyImportManager:
                     raise LegacyImportError("unsupported_source")
             if not isinstance(name, str) or not name.strip() or len(name.strip()) > 200:
                 raise LegacyImportError("invalid_target")
-            result.append({"card_id": card["id"], "entity_id": entity, "target_name": name.strip(), "list_type": list_type})
+            choice = {"card_id": card["id"], "entity_id": entity, "target_name": name.strip(), "list_type": list_type}
+            ean_entity = row.get("ean_entity_id") or None
+            if ean_entity is not None:
+                if (list_type != "inventory" or not isinstance(ean_entity, str)
+                        or not re.fullmatch(r"todo\.[a-z0-9_]+", ean_entity) or ean_entity == entity):
+                    raise LegacyImportError("ean_source_invalid", source=str(ean_entity), index=0, field="entity")
+                ean_choices = row.get("ean_choices", {})
+                if (not isinstance(ean_choices, dict) or len(ean_choices) > MAX_ITEMS
+                        or any(not isinstance(uid, str) or not uid or len(uid) > 255
+                               or not isinstance(value, str)
+                               or (value != "generic" and not re.fullmatch(r"[0-9]{8}|[0-9]{12,14}", value))
+                               for uid, value in ean_choices.items())):
+                    raise LegacyImportError("ean_choice_invalid")
+                choice.update(ean_entity_id=ean_entity, ean_choices=dict(ean_choices))
+            result.append(choice)
         return result
 
     async def _read_sources(self, sources):
@@ -181,6 +195,19 @@ class LegacyImportManager:
             items[entity_id] = payload["items"]
         return items
 
+    async def _read_import_sources(self, choices, include_items):
+        stock = await self._read_sources(choices) if include_items else {}
+        catalogs = {}
+        for entity in dict.fromkeys(row["ean_entity_id"] for row in choices if row.get("ean_entity_id")):
+            # A catalog can serve multiple new lists but is read only once.
+            if entity in {row["entity_id"] for row in choices}:
+                raise LegacyImportError("ean_source_invalid", source=entity, index=0, field="entity")
+            try:
+                catalogs.update(await self._read_sources([{"entity_id": entity}]))
+            except LegacyImportError as error:
+                raise LegacyImportError("ean_source_unavailable", source=entity) from error
+        return stock, catalogs
+
     @staticmethod
     def _source_fingerprint(items):
         # Keep response ordering: it carries manual order when no legacy index exists.
@@ -199,20 +226,42 @@ class LegacyImportManager:
             raise LegacyImportError("invalid_config")
         draft = self._get(self.drafts, draft_id, user_id)
         choices = self._selections(draft["parsed"], sources, include_items)
-        items = await self._read_sources(choices) if include_items else {}
-        plan = await atomic_executor(self.hass, partial(build_import_plan, include_items=include_items), draft["parsed"], items, choices)
+        items, catalogs = await self._read_import_sources(choices, include_items)
+        plan = await atomic_executor(self.hass, partial(build_import_plan, include_items=include_items,
+                                     ean_items_by_entity=catalogs), draft["parsed"], items, choices)
         await self._check_names(plan)
         self._get(self.drafts, draft_id, user_id)
         plan_id = self._remember(self.plans, user_id, {
             "plan": plan, "sources": choices, "include_items": include_items,
-            "source_fingerprint": self._source_fingerprint(items), "backup": None,
+            "source_fingerprint": self._source_fingerprint({**items, **catalogs}), "backup": None,
         })
         lists = [{**{key: row[key] for key in (
             "source_entity", "name", "list_type", "icon", "counts", "include_items",
         )}, "categories": deepcopy(row["categories"]), "chips": deepcopy(row["chips"][:20]),
             "items": deepcopy(row["items"][:20])} for row in plan["lists"]]
-        return {"plan_id": plan_id, "lists": lists, "counts": plan["counts"],
-                "warnings": self._warnings(plan["warnings"], draft["parsed"]["cards"], plan["lists"], choices), "can_import": bool(lists), "include_items": include_items}
+        response = {"plan_id": plan_id, "lists": lists, "counts": plan["counts"],
+                    "warnings": self._warnings(plan["warnings"], draft["parsed"]["cards"], plan["lists"], choices),
+                    "can_import": bool(lists) and plan.get("can_import", True), "include_items": include_items}
+        if any(row.get("ean_enabled") for row in plan["lists"]):
+            existing = {product.ean: product for product in await self.runtime.database.async_list_products() if product.ean}
+            products = plan.get("ean_products", [])
+            reused = sum(product["ean"] in existing for product in products)
+            response["ean_counts"] = {"total": len(products), "created": len(products) - reused, "reused": reused}
+            response["ean_products"] = []
+            for product in products[:20]:
+                current = existing.get(product["ean"])
+                # Preview the data actually used, not discarded old values.
+                displayed = ({field: getattr(current, field) for field in product} if current else product)
+                response["ean_products"].append({**displayed, "existing": current is not None})
+            for preview, row in zip(lists, plan["lists"], strict=True):
+                preview["ean_enabled"] = row.get("ean_enabled", False)
+                conflicts = row.get("ean_conflicts", [])
+                # Show unresolved choices first, in bounded batches; keep all choices server-side.
+                ordered = sorted(conflicts, key=lambda conflict: conflict.get("selected") is not None)
+                preview["ean_conflicts"] = deepcopy(ordered[:20])
+                preview["ean_conflicts_total"] = len(conflicts)
+                preview["ean_unresolved_count"] = sum(conflict.get("selected") is None for conflict in conflicts)
+        return response
 
     def _cards_yaml(self, plan, result):
         registry = er.async_get(self.hass)
@@ -257,8 +306,10 @@ class LegacyImportManager:
                     database = self.runtime.database
                     result = await database.async_get_legacy_import_result(plan_id)
                     if result is None:
-                        items = await self._read_sources(job["sources"]) if job["include_items"] else {}
-                        if self._source_fingerprint(items) != job["source_fingerprint"]:
+                        if job["plan"].get("can_import") is False:
+                            raise LegacyImportError("ean_unresolved")
+                        items, catalogs = await self._read_import_sources(job["sources"], job["include_items"])
+                        if self._source_fingerprint({**items, **catalogs}) != job["source_fingerprint"]:
                             raise LegacyImportError("source_changed")
                         await self._check_names(job["plan"])
                         job["backup"] = await backups.create_locked(

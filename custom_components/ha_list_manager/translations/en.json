@@ -407,7 +407,7 @@
     "import_reason_pdf_export": "PDF export exists in the new cards. The importer does not yet map the old option name automatically; the PDF button can be configured in the card editor.",
     "import_reason_share_button": "The new share/send function uses its own card options and notification profiles assigned in the backend. The old switch is not copied automatically.",
     "import_reason_browser_chips": "Browser chips exist only in the individual browser and are not part of the card YAML. They are not imported; their use is configured separately in the new cards.",
-    "import_reason_ean_data": "The separate old EAN database and local EAN files are excluded from this import. Additional product data is not read from them.",
+    "import_reason_ean_data": "The old EAN To-do database is imported only when explicitly selected for an inventory import. Local EAN files are not imported.",
     "import_reason_ean_display": "The new card uses the integration’s product database for search and product information. The old EAN-list suggestion and badge settings are not copied directly.",
     "import_reason_product_quantity": "The new system stores and displays package quantity separately from the product name. The old EAN option for appending quantity is not mapped automatically.",
     "import_reason_scanner": "Scanners and their targets are managed centrally in the backend. Importing does not configure the old card’s MAC-address assignment.",
@@ -435,7 +435,7 @@
     "import_reason_inventory_selected": "The YAML does not specify a mode. Inventory was explicitly selected for this import, so entries are processed as stock.",
     "import_reason_unsupported_mode": "This card mode is not one of the supported import types and is skipped. Other recognized cards remain in the preview.",
     "import_reason_inventory_simple": "Imported inventory items receive new basic products without EANs. EAN assignments, variant groups, minimum stocks and automatic replenishment are deliberately excluded.",
-    "import_reason_inventory_merged": "Entries with the same name and category are combined into one item. Its stock is the sum of the original quantities; EAN variants are no longer separate.",
+    "import_reason_inventory_merged": "When EAN import is enabled, entries linked to the same EAN are combined. Entries without an EAN are combined by name and category. Stock is added once from each original entry.",
     "import_reason_inventory_visibility": "A combined item includes visible and hidden entries. The new item remains visible and its stock includes all combined quantities.",
     "import_reason_inventory_description": "Free-form descriptions are not copied by the simplified inventory import. It copies only name, stock and category; the source-list description remains unchanged.",
     "import_reason_transfers": "The old transfer queues and their transfer rules are excluded from this import. Automatic replenishment is configured separately in the backend afterwards.",
@@ -451,7 +451,14 @@
     "import_field_interval": "Repeat interval",
     "import_field_status": "Completion status",
     "import_field_due": "Due date",
-    "import_warning_numeric_suffix_preserved": "{source}: For {count} entries, the barcode suffix in parentheses is kept as part of the name. It is not used as the quantity; without a separate quantity, 1 is imported. In the import preview, expand “Entries” and check the quantities there."
+    "import_warning_numeric_suffix_preserved": "{source}: For {count} entries, the barcode suffix in parentheses is kept as part of the name. It is not used as the quantity; without a separate quantity, 1 is imported. In the import preview, expand “Entries” and check the quantities there.",
+    "import_ean_source_invalid": "The EAN database {source} contains invalid or conflicting data at entry {index} (field: {field}). Check the source before importing.",
+    "import_ean_source_unavailable": "The EAN database {source} could not be read. Check its availability and integration.",
+    "import_ean_choice_invalid": "An EAN assignment is invalid or no longer matches the source. Check the preview again.",
+    "import_ean_unresolved": "Resolve the ambiguous EAN assignments in the preview and check them again before importing.",
+    "import_reason_inventory_ean": "EAN products are imported into the central product database and remain available to all lists. Inventory stock is linked to the chosen product without duplicating quantities. Existing products with the same EAN are preserved.",
+    "import_reason_ean_rules_omitted": "Old minimum stocks and automatic-transfer settings are not imported. Configure minimum stock and replenishment using the new inventory settings.",
+    "import_reason_ean_category_conflict": "Entries linked to the same EAN have different categories. Their stock is combined into one inventory entry, retaining the category of the first source entry."
   },
   "config_panel": {
     "backup": {
@@ -832,7 +839,8 @@
       "min_value": "Filters out smaller numbers from all series in the backend query. The threshold itself remains visible.",
       "telegram_formats": "Telegram: plain text, HTML or Markdown is explicitly set for this destination, overriding the bot’s default format.",
       "telegram_delivery": "Choose the intended chat of your configured Telegram bot. Plain text, HTML and Markdown are available for every Telegram destination.",
-      "label_grouping": "Adds a toolbar button to switch between categories and labels. An entry with multiple labels appears in each label group; all copies use the same entry. The initial view applies until a choice is saved for this card in this browser."
+      "label_grouping": "Adds a toolbar button to switch between categories and labels. An entry with multiple labels appears in each label group; all copies use the same entry. The initial view applies until a choice is saved for this card in this browser.",
+      "auto_expand_search": "Temporarily opens categories and label groups with matching entries while the list is filtered by the input field. Clearing the search restores the previous open/closed state."
     },
     "history": {
       "add_sample": "Add reading",
@@ -1921,7 +1929,8 @@
       "label_grouping_labels": "Enabled – initially labels",
       "group_by_categories": "Group by categories",
       "group_by_labels": "Group by labels",
-      "all_labels_count": "{p0} all labels"
+      "all_labels_count": "{p0} all labels",
+      "auto_expand_search": "Automatically open groups while searching"
     },
     "scanner": {
       "active_then_default": "Active card, then default target",
@@ -2416,8 +2425,8 @@
     "legacy_import": {
       "backups_tab": "Backups",
       "import_tab": "Import old card",
-      "intro": "Copy lists from the original card into new HA List Manager lists: shopping, to-do or simplified inventory.",
-      "scope_help": "EAN databases, browser chips and transfer queues are excluded. Inventory import copies only simple products and stock.",
+      "intro": "Copy lists from the original card into new HA List Manager lists: shopping, to-do or inventory.",
+      "scope_help": "Inventory can optionally import the old EAN To-do database into the shared product database. Browser chips, local EAN files, variant groups and transfer queues are not imported.",
       "yaml_label": "Old card YAML",
       "yaml_help": "Paste one card configuration or a YAML list of several cards.",
       "upload_yaml": "Select YAML file",
@@ -2433,7 +2442,7 @@
       "file_read_failed": "The file could not be read.",
       "duplicate_file": "Files with the same name cannot be added more than once.",
       "sources_title": "Confirm sources and new lists",
-      "sources_help": "Check the import mode and new list names. To include entries, select a source to-do list; without entries, only categories and chips from the YAML are copied. Cards using the same original list are combined.",
+      "sources_help": "Check the import mode and new list names. To include entries, select a source to-do list; without entries, the new list stays empty. Cards using the same original list are combined.",
       "source_entity": "Source to-do list",
       "new_list_name": "New list name",
       "preview": "Preview import",
@@ -2442,7 +2451,7 @@
       "counts": "{items} entries · {completed} completed · {categories} categories · {chips} chips/templates",
       "category_rules": "Assignment rules: {count}",
       "sample_limit": "Showing {shown} of {total}.",
-      "confirm": "Create the listed new lists and import their data.",
+      "confirm": "Create the listed new lists and import their data, including any selected EAN products.",
       "apply": "Create lists and import",
       "applying": "Creating backup and importing data …",
       "apply_help": "A database backup is created before import. Importing does not trigger scripts, notifications or replenishment.",
@@ -2462,13 +2471,13 @@
       "list_created": "Open list",
       "data_mode": "Data import",
       "with_entries": "Include entries from to-do lists",
-      "without_entries": "Without entries – categories and chips only",
-      "no_entries_help": "Create empty lists with categories and configured chips from the YAML. No source to-do list is required or read.",
-      "no_entries_preview": "Without entries – categories and chips from the YAML only",
+      "without_entries": "Without list entries",
+      "no_entries_help": "Creates empty lists with categories and configured chips. A separately selected EAN database can still be imported into the central product database.",
+      "no_entries_preview": "Without list entries",
       "import_list_type": "Import as list type",
-      "inventory_simple": "Inventory (simple)",
-      "inventory_help": "Importing stock creates simple new products without EANs. Items with the same name and category are combined by adding their stock. EAN data, groups, minimum stock and replenishment are not imported.",
-      "inventory_counts": "{items} items · {products} new products · {hidden} hidden · {categories} categories · {chips} chips",
+      "inventory_simple": "Inventory",
+      "inventory_help": "Without EAN import, stock creates simple new products. Entries with the same name and category are combined. Variant groups, minimum stock and automatic replenishment are not imported.",
+      "inventory_counts": "{items} items · {products} products · {hidden} hidden · {categories} categories · {chips} chips",
       "inventory_stock": "Stock: {stock}",
       "inventory_merged": "Combined from {count} entries",
       "inventory_hidden": "Hidden",
@@ -2478,9 +2487,24 @@
       "warning_group_appearance": "Review appearance in the card editor",
       "warning_group_excluded": "Intentionally excluded",
       "warning_group_adjusted": "Adjusted automatically",
-      "warning_group_inventory": "Simplified inventory import",
+      "warning_group_inventory": "Inventory import",
       "warning_group_unmapped": "No automatic mapping yet",
-      "warning_card": "Card {number}"
+      "warning_card": "Card {number}",
+      "ean_enable": "Import EAN database",
+      "ean_source": "Previous EAN To-do database",
+      "ean_help": "Imports all saved EAN products into the shared product database, also for shopping lists. Existing products with the same EAN are reused without changing their data. Category defaults apply only to the imported inventory list.",
+      "inventory_ean_help": "Stock is linked to a product by its EAN or a unique name. Ambiguous names need a choice in the preview; quantities are never duplicated.",
+      "ean_products": "Central product database",
+      "ean_counts": "{total} EAN products · {created} new · {reused} already present",
+      "ean_new": "New product",
+      "ean_existing": "Existing product reused",
+      "ean_conflicts": "Assign inventory products",
+      "ean_conflicts_help": "Select the intended EAN for each ambiguous inventory entry, or keep it as a generic product. Then check the selection again.",
+      "ean_choose": "Choose product…",
+      "ean_keep_generic": "Keep as generic product (without EAN)",
+      "ean_recheck": "Check EAN assignments",
+      "ean_choice_pending": "Assignment changed. Check the preview again before importing.",
+      "ean_result": "{created} EAN products added · {reused} existing products reused"
     }
   },
   "exceptions": {
@@ -3197,6 +3221,18 @@
     },
     "import_item_field_invalid": {
       "message": "Source {source}, entry {index}: “{field}” is invalid or empty. Check this entry in the source list."
+    },
+    "import_ean_source_invalid": {
+      "message": "The EAN database {source} contains invalid or conflicting data at entry {index} (field: {field}). Check the source before importing."
+    },
+    "import_ean_source_unavailable": {
+      "message": "The EAN database {source} could not be read. Check its availability and integration."
+    },
+    "import_ean_choice_invalid": {
+      "message": "An EAN assignment is invalid or no longer matches the source. Check the preview again."
+    },
+    "import_ean_unresolved": {
+      "message": "Resolve the ambiguous EAN assignments in the preview and check them again before importing."
     }
   }
 }

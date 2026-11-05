@@ -13,6 +13,7 @@ import hashlib
 import json
 from pathlib import PurePosixPath
 import re
+import unicodedata
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -496,6 +497,7 @@ def parse_legacy_configs(yaml_text: str, files: dict[str, Any] | None = None) ->
         options = _options(config, mode, source, own_warnings)
         card = {"id": source, "source_entity": entity, "mode": mode, "title": title,
                 "target_name": name, "icon": _icon(config.get("title_icon")),
+                "ean_source_entity": config.get("ean_database_entity") if isinstance(config.get("ean_database_entity"), str) and _ENTITY.fullmatch(config["ean_database_entity"]) else None,
                 "categories": categories, "chips": chips, "options": options,
                 "warnings": own_warnings}
         cards.append(card)
@@ -597,18 +599,21 @@ def _is_inventory_metadata(description):
 
 
 def _inventory_items(items, warnings, source):
-    """Flatten physical variants into generic stock, without retaining EAN data."""
+    """Merge stock per selected product, retaining the generic-import fallback."""
     grouped = {}
     visibility_conflicts = 0
     for item in items:
-        key = (" ".join(item["name"].split()).casefold(),
-               " ".join((item["category"] or "").split()).casefold())
+        key = ("ean", item["product_ean"]) if item.get("product_ean") else (
+            "name", " ".join(item["name"].split()).casefold(),
+            " ".join((item["category"] or "").split()).casefold())
         if key not in grouped:
             grouped[key] = {**item, "stock": item["quantity"],
                             "hidden": item["completed"], "completed": False,
                             "merged_count": 1, "_hidden_count": int(item["completed"])}
             continue
         target = grouped[key]
+        if item.get("product_ean") and target["category"] != item["category"]:
+            warnings.append(_warning("ean_category_conflict", source, "category"))
         target["stock"] += item["quantity"]
         if target["stock"] > 1000000:
             raise LegacyImportError("invalid_item")
@@ -639,12 +644,92 @@ def _category_for(name, categories):
     return None
 
 
-def build_import_plan(parsed: dict[str, Any], source_items_by_entity: dict[str, list[dict[str, Any]]], selections=None, *, include_items: bool = True) -> dict[str, Any]:
+_EAN_PRODUCT_FIELDS = ("ean", "name", "original_name", "brand", "package_quantity", "image_url")
+
+
+def _ean_valid(value):
+    return isinstance(value, str) and len(value) in {8, 12, 13, 14} and value.isascii() and value.isdecimal()
+
+
+def _ean_name_key(value):
+    return " ".join(unicodedata.normalize("NFKC", value).split()).casefold()
+
+
+def _ean_catalog(rows, source):
+    """Read only the old product JSON fields; never retain configuration or fetch URLs."""
+    if not isinstance(rows, list):
+        raise LegacyImportError("ean_source_invalid", source=source, index=0, field="items")
+    if len(rows) > MAX_ITEMS:
+        raise LegacyImportError("too_many_items")
+    products, rules_omitted = {}, 0
+    for index, row in enumerate(rows, 1):
+        field = "description"
+        try:
+            if not isinstance(row, dict) or not isinstance(row.get("description"), str) or len(row["description"]) > 16384:
+                raise ValueError
+            data = json.loads(row["description"])
+            if not isinstance(data, dict) or type(data.get("schema")) is not int or data.get("schema") != 1 or data.get("type") or "transferId" in data:
+                raise ValueError
+            field = "ean"
+            ean = data.get("ean")
+            if not _ean_valid(ean):
+                raise ValueError
+            product = {"ean": ean}
+            for field, key, maximum, required in (
+                ("name", "name", 200, True), ("originalName", "original_name", 200, False),
+                ("brand", "brand", 200, False), ("quantity", "package_quantity", 200, False),
+                ("imageUrl", "image_url", 2048, False), ("category", "category", 100, False),
+            ):
+                product[key] = _text(data.get(field), maximum, required=required, code="ean_source_invalid")
+            if product["category"] and product["category"].casefold() == "none":
+                product["category"] = None
+            field = "imageUrl"
+            if product["image_url"]:
+                url = urlsplit(product["image_url"])
+                if url.scheme not in {"http", "https"} or not url.hostname or url.username or url.password:
+                    raise ValueError
+            field = "ean"
+            if ean in products and products[ean] != product:
+                raise ValueError
+            products[ean] = product
+            if data.get("minimumStock") not in (None, "") or data.get("automaticTransferDisabled") is True:
+                rules_omitted += 1
+        except (ValueError, TypeError, RecursionError):
+            raise LegacyImportError("ean_source_invalid", source=source, index=index, field=field) from None
+    return products, rules_omitted
+
+
+def _inventory_product_ean(item, uid, description, name_index, choices, conflicts):
+    # Explicit variant IDs take precedence over names shared by several products.
+    if _is_inventory_metadata(description):
+        value = json.loads(description).get("ean")
+        if value not in (None, ""):
+            if not _ean_valid(value):
+                raise LegacyImportError("invalid_item", field="ean")
+            return value
+    candidates = name_index.get(_ean_name_key(item["name"]), [])
+    if len(candidates) == 1:
+        return candidates[0]["ean"]
+    if not candidates:
+        return None
+    selected = choices.get(uid)
+    if selected is not None and selected != "generic" and selected not in {product["ean"] for product in candidates}:
+        raise LegacyImportError("ean_choice_invalid")
+    conflicts.append({"source_uid": uid, "name": item["name"], "stock": item["quantity"],
+                      "candidates": [{key: product[key] for key in ("ean", "name", "brand", "package_quantity")} for product in candidates],
+                      "selected": selected})
+    return None if selected in (None, "generic") else selected
+
+
+def build_import_plan(parsed: dict[str, Any], source_items_by_entity: dict[str, list[dict[str, Any]]], selections=None, *, include_items: bool = True, ean_items_by_entity=None) -> dict[str, Any]:
     """Build a snapshot without changing HA sources or the integration database."""
     if not isinstance(include_items, bool):
         raise LegacyImportError("invalid_config")
     selected = {row["card_id"]: row for row in (selections or []) if isinstance(row, dict) and isinstance(row.get("card_id"), str)}
     groups = {}
+    ean_products = {}
+    ean_placeholders = set()
+    ean_catalogs = {}
     warnings = deepcopy(parsed.get("warnings", []))
     for card in parsed["cards"]:
         choice = selected.get(card["id"], {})
@@ -678,6 +763,21 @@ def build_import_plan(parsed: dict[str, Any], source_items_by_entity: dict[str, 
             raise LegacyImportError("source_mode_conflict")
         elif groups[group_key]["name"] != name:
             raise LegacyImportError("source_target_conflict")
+        ean_entity = choice.get("ean_entity_id")
+        if ean_entity:
+            if list_type != "inventory" or not isinstance(ean_entity, str) or not _ENTITY.fullmatch(ean_entity) or ean_entity == entity:
+                raise LegacyImportError("ean_source_invalid", source=ean_entity or "", index=0, field="entity")
+            choices = choice.get("ean_choices", {})
+            if not isinstance(choices, dict):
+                raise LegacyImportError("ean_choice_invalid")
+            group_choices = groups[group_key].setdefault("_ean_choices", {})
+            for uid, value in choices.items():
+                if not isinstance(uid, str) or not uid or len(uid) > 255 or (value != "generic" and not _ean_valid(value)):
+                    raise LegacyImportError("ean_choice_invalid")
+                if uid in group_choices and group_choices[uid] != value:
+                    raise LegacyImportError("ean_choice_invalid")
+                group_choices[uid] = value
+            groups[group_key].setdefault("_ean_sources", set()).add(ean_entity)
         groups[group_key]["source_cards"].append(effective_card)
     lists = []
     all_items = 0
@@ -688,6 +788,33 @@ def build_import_plan(parsed: dict[str, Any], source_items_by_entity: dict[str, 
             raise LegacyImportError("invalid_target")
         target_names.add(group["name"].casefold())
         cards = group.pop("source_cards")
+        ean_sources = sorted(group.pop("_ean_sources", ()))
+        ean_choices = group.pop("_ean_choices", {})
+        catalog = {}
+        for ean_source in ean_sources:
+            if ean_source not in ean_catalogs:
+                ean_catalogs[ean_source] = _ean_catalog((ean_items_by_entity or {}).get(ean_source), ean_source)
+            source_catalog, rules_omitted = ean_catalogs[ean_source]
+            for ean, product in source_catalog.items():
+                if ean in catalog and catalog[ean] != product:
+                    raise LegacyImportError("ean_source_invalid", source=ean_source, index=0, field="ean")
+                catalog[ean] = product
+                central = {field: product[field] for field in _EAN_PRODUCT_FIELDS}
+                if ean in ean_products and ean not in ean_placeholders and ean_products[ean] != central:
+                    raise LegacyImportError("ean_source_invalid", source=ean_source, index=0, field="ean")
+                ean_products[ean] = central
+                ean_placeholders.discard(ean)
+            if rules_omitted:
+                warnings.append(_warning("ean_rules_omitted", entity, count=rules_omitted))
+        ean_name_index = {}
+        for product in catalog.values():
+            ean_name_index.setdefault(_ean_name_key(product["name"]), []).append(product)
+        if ean_sources:
+            card_ids = {card["id"] for card in cards}
+            warnings = [warning for warning in warnings if not (
+                warning.get("source") in card_ids and warning.get("field") == "ean_database_entity")]
+            warnings.append(_warning("inventory_ean", entity))
+
         if len(cards) > 1:
             warnings.append(_warning("shared_source", entity, count=len(cards)))
         categories, by_category, rules_seen = [], {}, set()
@@ -703,6 +830,12 @@ def build_import_plan(parsed: dict[str, Any], source_items_by_entity: dict[str, 
                     category = {**deepcopy(row), "legacy_rules": list(row["rules"]), "rules": []}
                     by_category[normalized] = category
                     categories.append(category)
+        for product in catalog.values():
+            category_name = product["category"]
+            if category_name and category_name.casefold() not in by_category:
+                category = {"name": category_name, "icon": None, "color": None, "rules": [], "legacy_rules": []}
+                by_category[category_name.casefold()] = category
+                categories.append(category)
         if len(categories) > MAX_CATEGORIES:
             raise LegacyImportError("invalid_category")
         for category in categories:
@@ -724,8 +857,9 @@ def build_import_plan(parsed: dict[str, Any], source_items_by_entity: dict[str, 
         if all_items > MAX_ITEMS:
             raise LegacyImportError("too_many_items")
         inventory = group["list_type"] == "inventory"
-        if inventory:
+        if inventory and not ean_sources:
             warnings.append(_warning("inventory_simple", entity))
+        ean_conflicts = []
         omitted_descriptions = 0
         numeric_suffixes = 0
         items, source_uids = [], set()
@@ -745,6 +879,13 @@ def build_import_plan(parsed: dict[str, Any], source_items_by_entity: dict[str, 
                 if _is_excluded_metadata(description, allow_inventory=inventory):
                     raise LegacyImportError("unsupported_source")
                 if inventory:
+                    if ean_sources:
+                        product_ean = _inventory_product_ean(item, uid, description, ean_name_index, ean_choices, ean_conflicts)
+                        item["product_ean"] = product_ean
+                        if product_ean and product_ean not in ean_products:
+                            ean_placeholders.add(product_ean)
+                            ean_products[product_ean] = {"ean": product_ean, "name": item["name"], "original_name": None,
+                                "brand": None, "package_quantity": None, "image_url": None}
                     if description and not _is_inventory_metadata(description):
                         omitted_descriptions += 1
                     description = None
@@ -752,6 +893,8 @@ def build_import_plan(parsed: dict[str, Any], source_items_by_entity: dict[str, 
                 if not isinstance(status, str) or status not in {"completed", "needs_action"}:
                     raise LegacyImportError("invalid_item", field="status")
                 uncategorized = item.pop("_uncategorized")
+                if inventory and ean_sources:
+                    item["_ean_uncategorized"] = uncategorized
                 category = None if uncategorized else item["category"] or _category_for(item["name"], categories)
                 saved = by_category.get(category.casefold()) if category else None
                 field = "due"
@@ -819,9 +962,18 @@ def build_import_plan(parsed: dict[str, Any], source_items_by_entity: dict[str, 
                   "hidden": sum(item["hidden"] for item in items) if inventory else 0,
                   "merged": len(source_items) - len(items) if inventory else 0,
                   "source_items": len(source_items)}
-        lists.append({**group, "categories": categories, "chips": chips, "items": items,
+        suppressed_eans = {item.get("product_ean") for item in items if item.pop("_ean_uncategorized", False)}
+        ean_fields = {"ean_enabled": True, "ean_conflicts": ean_conflicts,
+                      "ean_product_categories": {ean: by_category[product["category"].casefold()]["name"]
+                                                 for ean, product in catalog.items() if product["category"] and ean not in suppressed_eans}} if ean_sources else {}
+        lists.append({**group, **ean_fields, "categories": categories, "chips": chips, "items": items,
                       "cards": [{"title": card["title"], "title_icon": card["icon"], "options": card["options"]} for card in cards], "counts": counts})
     counts = {key: sum(row["counts"][key] for row in lists) for key in ("lists", "cards", "items", "completed", "categories", "dynamic_categories", "chips", "rules", "products", "hidden", "merged", "source_items")}
     plan = {"version": 1, "lists": lists, "warnings": warnings, "counts": counts, "include_items": include_items}
+    if ean_catalogs:
+        if len(ean_products) > MAX_ITEMS:
+            raise LegacyImportError("too_many_items")
+        plan["ean_products"] = list(ean_products.values())
+        plan["can_import"] = not any(conflict["selected"] is None for row in lists for conflict in row.get("ean_conflicts", ()))
     plan["fingerprint"] = hashlib.sha256(json.dumps(plan, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode()).hexdigest()
     return plan

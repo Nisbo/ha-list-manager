@@ -407,7 +407,7 @@
     "import_reason_pdf_export": "PDF-Export ist in den neuen Karten vorhanden. Der Importer ordnet den alten Optionsnamen noch nicht automatisch zu; die Anzeige des PDF-Buttons kann im Karteneditor eingestellt werden.",
     "import_reason_share_button": "Die neue Teilen-/Sendenfunktion verwendet eigene Kartenoptionen und die im Backend zugeordneten Benachrichtigungsprofile. Der alte Schalter wird nicht automatisch übertragen.",
     "import_reason_browser_chips": "Browserchips liegen nur im jeweiligen Browser und gehören nicht zur Karten-YAML. Sie werden nicht importiert; ihre Verwendung wird in den neuen Karten separat eingestellt.",
-    "import_reason_ean_data": "Die separate alte EAN-Datenbank und lokale EAN-Dateien sind vom aktuellen Import ausgeschlossen. Zusätzliche Produktdaten werden daraus nicht eingelesen.",
+    "import_reason_ean_data": "Die alte EAN-To-do-Datenbank wird nur übernommen, wenn sie beim Inventarimport ausdrücklich ausgewählt wird. Lokale EAN-Dateien werden nicht übernommen.",
     "import_reason_ean_display": "Die neue Karte verwendet die Produktdatenbank der Integration für Suche und Produktinformationen. Die alten Einstellungen für EAN-Listen-Vorschläge und deren Kennzeichnung werden nicht direkt übertragen.",
     "import_reason_product_quantity": "Packungsmenge und Produktname werden im neuen System getrennt gespeichert und dargestellt. Die alte EAN-Option zum Anhängen der Menge wird nicht automatisch zugeordnet.",
     "import_reason_scanner": "Scanner und ihre Zielzuordnungen werden zentral im Backend verwaltet. Die alte MAC-Zuordnung der Karte wird durch den Import nicht eingerichtet.",
@@ -435,7 +435,7 @@
     "import_reason_inventory_selected": "Die YAML enthält keine Modusangabe. Für diese Übernahme wurde ausdrücklich Inventar gewählt; die Einträge werden als Bestände verarbeitet.",
     "import_reason_unsupported_mode": "Dieser Kartenmodus gehört nicht zu den unterstützten Importarten und wird übersprungen. Die übrigen erkannten Karten bleiben in der Vorschau.",
     "import_reason_inventory_simple": "Übernommene Inventarartikel erhalten neue, einfache Produkte ohne EAN. EAN-Zuordnungen, Varianten-Gruppen, Mindestbestände und automatische Nachbestellung werden bewusst nicht übernommen.",
-    "import_reason_inventory_merged": "Einträge mit gleichem Namen und derselben Kategorie werden zu einem Artikel zusammengefasst. Sein Bestand ist die Summe der ursprünglichen Mengen; die EAN-Varianten sind danach nicht mehr getrennt.",
+    "import_reason_inventory_merged": "Bei aktivierter EAN-Übernahme werden Einträge mit derselben EAN zusammengefasst. Einträge ohne EAN werden nach Name und Kategorie zusammengefasst. Der Bestand jedes ursprünglichen Eintrags wird dabei genau einmal addiert.",
     "import_reason_inventory_visibility": "Eine Zusammenfassung enthält sichtbare und ausgeblendete Einträge. Der neue Artikel bleibt sichtbar; sein Bestand enthält alle zusammengefassten Mengen.",
     "import_reason_inventory_description": "Freie Beschreibungen werden beim vereinfachten Inventarimport nicht übernommen. Dieser übernimmt nur Name, Bestand und Kategorie; die Beschreibung in der Quellliste bleibt unverändert.",
     "import_reason_transfers": "Die alten Transferlisten und ihre Übertragungsregeln sind vom aktuellen Import ausgeschlossen. Automatische Nachbestellung wird danach separat im Backend eingerichtet.",
@@ -451,7 +451,14 @@
     "import_field_interval": "Wiederholungsintervall",
     "import_field_status": "Erledigt-Status",
     "import_field_due": "Fälligkeit",
-    "import_warning_numeric_suffix_preserved": "{source}: Bei {count} Einträgen bleibt der Barcode-Zusatz in Klammern Teil des Namens. Er wird nicht als Anzahl verwendet; ohne separate Mengenangabe wird 1 übernommen. In der Importvorschau „Einträge“ aufklappen und dort die Mengen prüfen."
+    "import_warning_numeric_suffix_preserved": "{source}: Bei {count} Einträgen bleibt der Barcode-Zusatz in Klammern Teil des Namens. Er wird nicht als Anzahl verwendet; ohne separate Mengenangabe wird 1 übernommen. In der Importvorschau „Einträge“ aufklappen und dort die Mengen prüfen.",
+    "import_ean_source_invalid": "Die EAN-Datenbank {source} enthält bei Eintrag {index} ungültige oder widersprüchliche Daten (Feld: {field}). Prüfe die Quelle vor der Übernahme.",
+    "import_ean_source_unavailable": "Die EAN-Datenbank {source} konnte nicht gelesen werden. Prüfe ihre Verfügbarkeit und Integration.",
+    "import_ean_choice_invalid": "Eine EAN-Zuordnung ist ungültig oder passt nicht mehr zur Quelle. Prüfe die Vorschau erneut.",
+    "import_ean_unresolved": "Kläre die mehrdeutigen EAN-Zuordnungen in der Vorschau und prüfe sie vor der Übernahme erneut.",
+    "import_reason_inventory_ean": "EAN-Produkte werden in die zentrale Produktdatenbank übernommen und stehen allen Listen zur Verfügung. Inventarbestände werden ohne Vervielfachung mit dem gewählten Produkt verknüpft. Vorhandene Produkte mit derselben EAN bleiben unverändert.",
+    "import_reason_ean_rules_omitted": "Alte Mindestbestände und automatische Transferregeln werden nicht übernommen. Stelle Mindestbestand und Nachbestellung in den neuen Inventareinstellungen ein.",
+    "import_reason_ean_category_conflict": "Einträge mit derselben EAN haben unterschiedliche Kategorien. Ihre Bestände werden zu einem Inventareintrag zusammengefasst; die Kategorie des ersten Quelleintrags bleibt erhalten."
   },
   "config_panel": {
     "backup": {
@@ -832,7 +839,8 @@
       "min_value": "Blendet kleinere Zahlen bei allen Datenreihen bereits in der Backend-Abfrage aus. Die Grenze selbst bleibt sichtbar.",
       "telegram_formats": "Telegram: Text, HTML oder Markdown wird für dieses Versandziel ausdrücklich gesetzt und überschreibt die Formatvorgabe des Bots.",
       "telegram_delivery": "Wähle den gewünschten Chat deines eingerichteten Telegram-Bots. Text, HTML und Markdown stehen für jedes Telegram-Versandziel zur Verfügung.",
-      "label_grouping": "Ergänzt einen Button in der Optionsleiste zum Wechseln zwischen Kategorien und Labels. Ein Eintrag mit mehreren Labels erscheint in jeder Label-Gruppe; alle Ansichten verwenden denselben Eintrag. Die Startansicht gilt, bis für diese Karte in diesem Browser eine Auswahl gespeichert wurde."
+      "label_grouping": "Ergänzt einen Button in der Optionsleiste zum Wechseln zwischen Kategorien und Labels. Ein Eintrag mit mehreren Labels erscheint in jeder Label-Gruppe; alle Ansichten verwenden denselben Eintrag. Die Startansicht gilt, bis für diese Karte in diesem Browser eine Auswahl gespeichert wurde.",
+      "auto_expand_search": "Öffnet Kategorien und Labelgruppen mit Treffern vorübergehend, wenn das Eingabefeld die Liste filtert. Nach dem Leeren der Suche gilt wieder der vorherige Auf-/Zuklappzustand."
     },
     "history": {
       "add_sample": "Messwert ergänzen",
@@ -1921,7 +1929,8 @@
       "label_grouping_labels": "Aktiviert – zunächst Labels",
       "group_by_categories": "Nach Kategorien gruppieren",
       "group_by_labels": "Nach Labels gruppieren",
-      "all_labels_count": "Alle Labels {p0}"
+      "all_labels_count": "Alle Labels {p0}",
+      "auto_expand_search": "Gruppen bei Suche automatisch öffnen"
     },
     "scanner": {
       "active_then_default": "Aktive Karte, danach Standardziel",
@@ -2416,8 +2425,8 @@
     "legacy_import": {
       "backups_tab": "Sicherungen",
       "import_tab": "Alte Karte importieren",
-      "intro": "Übernimmt Listen aus der ursprünglichen Karte in neue HA-List-Manager-Listen: Einkauf, To-do oder vereinfachtes Inventar.",
-      "scope_help": "EAN-Datenbanken, Browserchips und Transferlisten werden nicht übernommen. Der Inventarimport übernimmt nur einfache Produkte und Bestände.",
+      "intro": "Übernimm Listen aus der ursprünglichen Karte in neue HA-List-Manager-Listen: Einkauf, To-do oder Inventar.",
+      "scope_help": "Beim Inventar kann die alte EAN-To-do-Datenbank optional in die zentrale Produktdatenbank übernommen werden. Browserchips, lokale EAN-Dateien, Variantengruppen und Transferlisten werden nicht übernommen.",
       "yaml_label": "YAML der alten Karte",
       "yaml_help": "Eine Kartenkonfiguration oder mehrere Karten als YAML-Liste einfügen.",
       "upload_yaml": "YAML-Datei auswählen",
@@ -2433,7 +2442,7 @@
       "file_read_failed": "Die Datei konnte nicht gelesen werden.",
       "duplicate_file": "Dateien mit demselben Namen können nicht mehrfach hinzugefügt werden.",
       "sources_title": "Quellen und neue Listen bestätigen",
-      "sources_help": "Übernahmeart und neue Listennamen prüfen. Mit Einträgen eine Quell-To-do-Liste auswählen; ohne Einträge werden nur Kategorien und Chips aus der YAML übernommen. Mehrere Karten derselben bisherigen Liste werden zusammengeführt.",
+      "sources_help": "Prüfe Übernahmeart und neue Listennamen. Mit Einträgen wählst du eine Quell-To-do-Liste; ohne Einträge bleibt die neue Liste leer. Karten derselben bisherigen Liste werden zusammengeführt.",
       "source_entity": "Quell-To-do-Liste",
       "new_list_name": "Name der neuen Liste",
       "preview": "Übernahme prüfen",
@@ -2442,7 +2451,7 @@
       "counts": "{items} Einträge · {completed} erledigt · {categories} Kategorien · {chips} Chips/Vorlagen",
       "category_rules": "Zuordnungsregeln: {count}",
       "sample_limit": "Angezeigt: {shown} von {total}.",
-      "confirm": "Die angezeigten neuen Listen anlegen und ihre Daten übernehmen.",
+      "confirm": "Die angezeigten neuen Listen anlegen und ihre Daten einschließlich ausgewählter EAN-Produkte übernehmen.",
       "apply": "Listen anlegen und übernehmen",
       "applying": "Sicherung wird erstellt und Daten werden übernommen …",
       "apply_help": "Vor der Übernahme wird eine Datenbanksicherung erstellt. Der Import löst keine Skripte, Benachrichtigungen oder Nachbestellungen aus.",
@@ -2462,13 +2471,13 @@
       "list_created": "Liste öffnen",
       "data_mode": "Datenübernahme",
       "with_entries": "Mit Einträgen aus To-do-Listen",
-      "without_entries": "Ohne Einträge – nur Kategorien und Chips",
-      "no_entries_help": "Erstellt leere Listen mit Kategorien und konfigurierten Chips aus der YAML. Eine Quell-To-do-Liste wird dafür nicht benötigt oder gelesen.",
-      "no_entries_preview": "Ohne Einträge – nur Kategorien und Chips aus der YAML",
+      "without_entries": "Ohne Listeneinträge",
+      "no_entries_help": "Erstellt leere Listen mit Kategorien und konfigurierten Chips. Eine separat ausgewählte EAN-Datenbank kann zusätzlich in die zentrale Produktdatenbank übernommen werden.",
+      "no_entries_preview": "Ohne Listeneinträge",
       "import_list_type": "Als Listentyp übernehmen",
-      "inventory_simple": "Inventar (einfach)",
-      "inventory_help": "Bei der Übernahme von Beständen werden einfache neue Produkte ohne EAN angelegt. Gleichnamige Artikel derselben Kategorie werden mit addiertem Bestand zusammengefasst. EAN-Daten, Gruppen, Mindestbestände und Nachbestellung werden nicht übernommen.",
-      "inventory_counts": "{items} Artikel · {products} neue Produkte · {hidden} ausgeblendet · {categories} Kategorien · {chips} Chips",
+      "inventory_simple": "Inventar",
+      "inventory_help": "Ohne EAN-Übernahme werden einfache neue Produkte angelegt und Bestände mit gleichem Namen und gleicher Kategorie zusammengefasst. Variantengruppen, Mindestbestände und automatische Nachbestellungen werden nicht übernommen.",
+      "inventory_counts": "{items} Artikel · {products} Produkte · {hidden} ausgeblendet · {categories} Kategorien · {chips} Chips",
       "inventory_stock": "Bestand: {stock}",
       "inventory_merged": "Aus {count} Einträgen zusammengefasst",
       "inventory_hidden": "Ausgeblendet",
@@ -2478,9 +2487,24 @@
       "warning_group_appearance": "Darstellung im Karteneditor prüfen",
       "warning_group_excluded": "Bewusst nicht übernommen",
       "warning_group_adjusted": "Automatisch angepasst",
-      "warning_group_inventory": "Vereinfachter Inventarimport",
+      "warning_group_inventory": "Inventarübernahme",
       "warning_group_unmapped": "Noch keine automatische Zuordnung",
-      "warning_card": "Karte {number}"
+      "warning_card": "Karte {number}",
+      "ean_enable": "EAN-Datenbank übernehmen",
+      "ean_source": "Bisherige EAN-To-do-Datenbank",
+      "ean_help": "Übernimmt alle gespeicherten EAN-Produkte in die zentrale Produktdatenbank, auch für Einkaufslisten. Vorhandene Produkte mit derselben EAN werden unverändert wiederverwendet. Kategorievorgaben gelten nur für die importierte Inventarliste.",
+      "inventory_ean_help": "Bestände werden über die EAN oder einen eindeutigen Namen mit Produkten verknüpft. Mehrdeutige Namen erfordern eine Auswahl in der Vorschau; Bestände werden nicht vervielfacht.",
+      "ean_products": "Zentrale Produktdatenbank",
+      "ean_counts": "{total} EAN-Produkte · {created} neu · {reused} bereits vorhanden",
+      "ean_new": "Neues Produkt",
+      "ean_existing": "Vorhandenes Produkt wird wiederverwendet",
+      "ean_conflicts": "Inventarprodukte zuordnen",
+      "ean_conflicts_help": "Wähle für jeden mehrdeutigen Inventareintrag die passende EAN oder behalte ihn als einfaches Produkt ohne EAN. Prüfe anschließend die Auswahl erneut.",
+      "ean_choose": "Produkt auswählen …",
+      "ean_keep_generic": "Als einfaches Produkt behalten (ohne EAN)",
+      "ean_recheck": "EAN-Zuordnungen prüfen",
+      "ean_choice_pending": "Zuordnung geändert. Prüfe die Vorschau vor der Übernahme erneut.",
+      "ean_result": "{created} EAN-Produkte hinzugefügt · {reused} vorhandene Produkte wiederverwendet"
     }
   },
   "exceptions": {
@@ -3197,6 +3221,18 @@
     },
     "import_item_field_invalid": {
       "message": "Quelle {source}, Eintrag {index}: „{field}“ ist ungültig oder leer. Bitte diesen Eintrag in der Quellliste prüfen."
+    },
+    "import_ean_source_invalid": {
+      "message": "Die EAN-Datenbank {source} enthält bei Eintrag {index} ungültige oder widersprüchliche Daten (Feld: {field}). Prüfe die Quelle vor der Übernahme."
+    },
+    "import_ean_source_unavailable": {
+      "message": "Die EAN-Datenbank {source} konnte nicht gelesen werden. Prüfe ihre Verfügbarkeit und Integration."
+    },
+    "import_ean_choice_invalid": {
+      "message": "Eine EAN-Zuordnung ist ungültig oder passt nicht mehr zur Quelle. Prüfe die Vorschau erneut."
+    },
+    "import_ean_unresolved": {
+      "message": "Kläre die mehrdeutigen EAN-Zuordnungen in der Vorschau und prüfe sie vor der Übernahme erneut."
     }
   }
 }

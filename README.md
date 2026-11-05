@@ -5,7 +5,7 @@ with a shared product database, dashboard cards and an administration panel.
 A separate history card adds long-term recording for selected HA entities.
 
 > [!IMPORTANT]
-> **Beta release: 1.0.0b4.** This is a pre-release for testing before the stable release.
+> **Beta release: 1.0.0b5.** This is a pre-release for testing before the stable release.
 > Back up your Home Assistant configuration and important data before testing.
 > Please report problems with the installed version and steps to reproduce them.
 
@@ -40,6 +40,12 @@ same quantity, completion state and edits. The feature is disabled by default.
 See the [worked example](https://github.com/Nisbo/ha-list-manager/wiki/Categories-and-Labels-Example)
 for setup and matching English/German screenshots.
 
+When typing filters a list, matching category and label sections temporarily
+open automatically. Clearing the search restores their previous open/closed
+state. **Automatically open groups while searching** is enabled by default and
+can be disabled in each card editor. Header text and icons automatically adapt
+to light or dark category and label colors.
+
 The shared backend also provides:
 
 - **Product management:** Optional EAN, brand, package quantity and image, with
@@ -54,7 +60,8 @@ The shared backend also provides:
 - **Data backup:** A persistent archive with download, upload, confirmed restore
   and delete controls, plus automatic safety copies before restore or import.
 - **Import from the original card:** Previewed transfer of shopping, to-do or
-  simplified inventory data, with explanations for omitted settings.
+  inventory data, with an optional transfer of the old EAN database into the
+  shared product catalog and explanations for omitted settings.
 
 Products, shopping entries and inventory stock are separate records. Removing a
 shopping entry does not delete its product. Marking a purchase complete does not
@@ -78,7 +85,7 @@ restricted to administrators. See the [permissions guide](https://github.com/Nis
 2. Click the blue button above, select your Home Assistant instance and open
    **HA List Manager** in HACS. Confirm adding the repository if requested.
 3. Open the HACS download dialog, choose a different version and select
-   **1.0.0b4**. Download it and **restart Home Assistant**.
+   **1.0.0b5**. Download it and **restart Home Assistant**.
 4. Open **Settings → Devices & services → Add integration**, search for
    **HA List Manager**, and complete setup.
 5. Open **HA List Manager** in the sidebar to create your lists, then add their
@@ -98,7 +105,7 @@ cards; do not add it as a Dashboard/Frontend-only repository.
 ### Manual installation
 
 1. Download the installation archive
-   [`ha-list-manager-1.0.0b4.zip`](https://github.com/Nisbo/ha-list-manager/releases/download/1.0.0b4/ha-list-manager-1.0.0b4.zip).
+   [`ha-list-manager-1.0.0b5.zip`](https://github.com/Nisbo/ha-list-manager/releases/download/1.0.0b5/ha-list-manager-1.0.0b5.zip).
 2. Extract it into your HA configuration directory so the result is
    `<config>/custom_components/ha_list_manager/manifest.json`.
 3. Restart Home Assistant and add **HA List Manager** under
@@ -127,13 +134,21 @@ through this with complete screenshots and neutral examples.
 ### Already using the original card?
 
 Use **HA List Manager → Backup → Import old card**. Supply the old card YAML and
-choose a source to-do list, or choose **Without entries** to copy only categories
-and configured chips. Check the preview and import notes before applying.
+choose a source to-do list, or choose **Without list entries** to copy categories
+and configured chips. An inventory EAN database can be selected separately,
+including when no list entries are copied. Check the preview and import notes
+before applying.
 
-The importer creates **new lists** and leaves the sources unchanged. Simplified
-inventory import creates new generic products without EANs and combines matching
-names in the same category. It does not transfer EAN databases, browser chips,
-transfer queues, inventory groups or replenishment settings.
+The importer creates **new lists** and leaves the sources unchanged. Inventory
+can optionally import its old EAN to-do database into the **shared product
+catalog**, including products without stock. Existing EAN products are reused
+without overwriting their data, and ambiguous inventory assignments require an
+explicit choice in the preview. These products are also available to shopping
+lists. Imported category defaults apply only to the new inventory list.
+
+Without EAN import, inventory creates generic products and combines matching
+names in the same category. Browser chips, local EAN files, transfer queues,
+inventory groups, minimum stocks and replenishment settings are not imported.
 
 See [Data import](https://github.com/Nisbo/ha-list-manager/wiki/Data-Import) /
 [Datenübernahme](https://github.com/Nisbo/ha-list-manager/wiki/Data-Import-DE) for
