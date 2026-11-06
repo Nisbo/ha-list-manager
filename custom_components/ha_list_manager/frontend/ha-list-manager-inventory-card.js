@@ -151,7 +151,7 @@ function inventoryState(entry) {
   return "stock-normal";
 }
 
-const CARD_VERSION = "1.0.0b6";
+const CARD_VERSION = "1.0.0b7";
 const PICKER_RESULT_LIMIT = 100;
 const MODES = (hass = null) => ({
   add: { label: haListManagerInventoryCardText("ui.stock_in", {}, hass), icon: "mdi:package-variant-plus", color: "var(--success-color,#2e7d32)", help: haListManagerInventoryCardText("inventory.stock_in_activated", {}, hass) },
@@ -220,6 +220,7 @@ class HaListManagerInventoryCard extends HTMLElement {
     this._suppressChipClickUntil = 0;
     this._dialog = null;
     this._itemAction = null;
+    this._selectionPopup = null;
     this._itemActionMenuOpen = false;
     this._confirmation = null;
     this._memberPicker = null;
@@ -580,30 +581,66 @@ class HaListManagerInventoryCard extends HTMLElement {
     const target = this._importantChipTarget(chip);
     return Boolean(target && this._importantChipKeys.has(`${target.target_type}:${target.target_id}`));
   }
+  _withRenderData(action) {
+    // Share derived data only during one synchronous UI update. Backend events
+    // and later interactions always derive it again from the current records.
+    if (this._renderData) return action();
+    this._renderData = new Map();
+    try { return action(); } finally { this._renderData = null; }
+  }
+  _renderMemo(key, derive) {
+    if (!this._renderData) return derive();
+    if (!this._renderData.has(key)) this._renderData.set(key, derive());
+    return this._renderData.get(key);
+  }
+  _compareNames(left, right, numeric = false, locale = haListManagerInventoryCardTextLocale(this._hass)) {
+    const key = `${locale || ""}:${numeric}`;
+    this._nameCollators ||= new Map();
+    if (!this._nameCollators.has(key)) this._nameCollators.set(key, new Intl.Collator(locale || undefined, { sensitivity: "base", numeric }));
+    return this._nameCollators.get(key).compare(left, right);
+  }
+  _categoryIndex() {
+    return this._renderMemo("categoryIndex", () => {
+      const byId = new Map();
+      const byName = new Map();
+      for (const category of this._categories) {
+        byId.set(category.id, category);
+        const name = category.name.toLocaleLowerCase();
+        if (!byName.has(name)) byName.set(name, category);
+      }
+      return { byId, byName };
+    });
+  }
   _effectiveChips() {
-    if (this._config.show_browser_chips === false) return this._chips;
-    const names = new Set(this._chips.map((chip) => this._normalizedChipName(chip.name)));
-    const products = new Set(this._chips.map((chip) => chip.product_id).filter(Boolean));
-    const browser = this._browserChips.filter((chip) => !names.has(this._normalizedChipName(chip.name)) && !(chip.product_id && products.has(chip.product_id)));
-    return [...this._chips, ...browser].sort((left, right) => left.name.localeCompare(right.name, haListManagerInventoryCardTextLocale(this._hass), { sensitivity: "base", numeric: true }));
+    return this._renderMemo("effectiveChips", () => {
+      if (this._config.show_browser_chips === false) return this._chips;
+      const names = new Set(this._chips.map((chip) => this._normalizedChipName(chip.name)));
+      const products = new Set(this._chips.map((chip) => chip.product_id).filter(Boolean));
+      const browser = this._browserChips.filter((chip) => !names.has(this._normalizedChipName(chip.name)) && !(chip.product_id && products.has(chip.product_id)));
+      return [...this._chips, ...browser].sort((left, right) => this._compareNames(left.name, right.name, true));
+    });
   }
   _matchingProductCategory(product) { return this._productDefaultCategory(product); }
   _categoryProductChips() {
-    const linkedProducts = new Set(this._effectiveChips().map((chip) => chip.product_id).filter(Boolean));
-    return this._products.flatMap((product) => {
-      if (!product?.id || linkedProducts.has(product.id)) return [];
-      const category = this._matchingProductCategory(product);
-      if (!category) return [];
-      return [{ id: `category-product:${product.id}`, name: product.name, product_id: product.id, product_name: product.name, scope: category.scope || "list", category, categoryProduct: true }];
+    return this._renderMemo("categoryProductChips", () => {
+      const linkedProducts = new Set(this._effectiveChips().map((chip) => chip.product_id).filter(Boolean));
+      return this._products.flatMap((product) => {
+        if (!product?.id || linkedProducts.has(product.id)) return [];
+        const category = this._matchingProductCategory(product);
+        if (!category) return [];
+        return [{ id: `category-product:${product.id}`, name: product.name, product_id: product.id, product_name: product.name, scope: category.scope || "list", category, categoryProduct: true }];
+      });
     });
   }
   _categoryChipLayout() { return this._config.category_chip_layout || "none"; }
   _categoryChipsEnabled() { return this._categoryChipLayout() !== "none"; }
   _displayChips() {
-    const chips = this._categoryChipsEnabled() ? [...this._effectiveChips(), ...this._categoryProductChips()] : this._effectiveChips();
-    return chips.map((chip) => ({ ...chip, important: this._isChipImportant(chip) })).sort((left, right) => {
-      if (this._config.show_important_chips !== false && left.important !== right.important) return left.important ? -1 : 1;
-      return left.name.localeCompare(right.name, haListManagerInventoryCardTextLocale(this._hass), { sensitivity: "base", numeric: true });
+    return this._renderMemo("displayChips", () => {
+      const chips = this._categoryChipsEnabled() ? [...this._effectiveChips(), ...this._categoryProductChips()] : this._effectiveChips();
+      return chips.map((chip) => ({ ...chip, important: this._isChipImportant(chip) })).sort((left, right) => {
+        if (this._config.show_important_chips !== false && left.important !== right.important) return left.important ? -1 : 1;
+        return this._compareNames(left.name, right.name, true);
+      });
     });
   }
   async _loadChipCategories(requestId = this._loadRequestId, listId = this._listId()) {
@@ -641,7 +678,7 @@ class HaListManagerInventoryCard extends HTMLElement {
     } else {
       try { localStorage.setItem(this._chipCategoryCollapseKey(categoryId), this._chipCategoryCollapsed(categoryId) ? "0" : "1"); } catch (_error) {}
     }
-    this._render();
+    this._refreshChipContent(dialog);
   }
   _allChipCategoriesExpanded(chips = this._filteredChips()) {
     const categoryIds = this._chipCategoryGroups(chips).map(({ category }) => category.id || "__general__");
@@ -653,16 +690,18 @@ class HaListManagerInventoryCard extends HTMLElement {
     return categoryIds.every((categoryId) => !this._chipCategoryCollapsed(categoryId));
   }
   _toggleAllChipCategories() {
-    const categoryIds = this._chipCategoryGroups(this._filteredChips()).map(({ category }) => category.id || "__general__");
-    if (!categoryIds.length) return;
-    const expand = !this._allChipCategoriesExpanded();
-    if (["wrap", "compact"].includes(this._categoryChipLayout())) {
-      this._storeWrappedChipCategorySelection("card", expand ? "__all__" : null);
-    } else {
-      try { categoryIds.forEach((categoryId) => localStorage.setItem(this._chipCategoryCollapseKey(categoryId), expand ? "0" : "1")); }
-      catch (_error) {}
-    }
-    this._render();
+    return this._withRenderData(() => {
+      const categoryIds = this._chipCategoryGroups(this._filteredChips()).map(({ category }) => category.id || "__general__");
+      if (!categoryIds.length) return;
+      const expand = !this._allChipCategoriesExpanded();
+      if (["wrap", "compact"].includes(this._categoryChipLayout())) {
+        this._storeWrappedChipCategorySelection("card", expand ? "__all__" : null);
+      } else {
+        try { categoryIds.forEach((categoryId) => localStorage.setItem(this._chipCategoryCollapseKey(categoryId), expand ? "0" : "1")); }
+        catch (_error) {}
+      }
+      this._refreshChipContent();
+    });
   }
   _chipCategoryGroups(chips = this._filteredChips()) {
     const groups = new Map();
@@ -918,6 +957,7 @@ class HaListManagerInventoryCard extends HTMLElement {
       if (requestId !== this._loadRequestId || listId !== this._listId()) return;
       const previousLabelIds = new Set(this._labels.map((label) => label.id));
       this._entries = inventory.entries || [];
+      this._inventoryViewDirty = true;
       this._products = options.products || [];
       this._categories = options.categories || [];
       this._labels = options.labels || [];
@@ -985,7 +1025,7 @@ class HaListManagerInventoryCard extends HTMLElement {
     for (let node = this; node; node = node.parentElement || node.getRootNode?.().host) {
       if (node.scrollTop || node.scrollLeft) outerScroll.push([node, node.scrollTop, node.scrollLeft]);
     }
-    this._render();
+    this._render(true);
     for (const [selector, values] of transientInputs) {
       [...this.shadowRoot.querySelectorAll(selector)].forEach((input, index) => {
         const previous = values[index];
@@ -1169,7 +1209,7 @@ class HaListManagerInventoryCard extends HTMLElement {
     const dialog = this._pendingScanDialog();
     if (dialog) {
       const section = this.shadowRoot.querySelector("[data-scan-collaboration]");
-      if (section) { section.innerHTML = this._pendingScanControls(); this._bindScanActions(); }
+      if (section) { section.innerHTML = this._pendingScanControls(); this._bindScanActions(); this._bindMessageDismissals(section); }
       this._applyPendingScanControls();
     } else if (!this._dialog && !this._memberPicker && !this._groupPicker && !this._confirmation) this._render();
   }
@@ -1296,14 +1336,15 @@ class HaListManagerInventoryCard extends HTMLElement {
     const editing = this._canEditPendingScan(dialog);
     const other = collaboration.editor_session && collaboration.editor_session !== this._scanSessionId;
     const status = haListManagerInventoryCardText(editing ? "scanner.edit_here" : other ? "scanner.edit_elsewhere" : "scanner.edit_prompt", {}, this._hass);
-    return `${dialog.scanError ? `<p class="dialog-status warning" role="alert">${escapeHtml(dialog.scanError)}</p>` : ""}<p class="scan-session-status" role="status"><ha-icon icon="mdi:${editing ? "pencil" : other ? "lock-outline" : "information-outline"}"></ha-icon>${escapeHtml(status)}</p>${collaboration.viewers > 1 ? `<p class="field-help">${haListManagerInventoryCardText("scanner.shared_open", {}, this._hass)}</p>` : ""}<div class="dialog-actions scan-session-actions">${!editing ? `<button type="button" class="primary" data-edit-pending-scan ${this._busy || other ? "disabled" : ""}><ha-icon icon="mdi:pencil"></ha-icon>${haListManagerInventoryCardText("ui.edit", {}, this._hass)}</button>` : ""}<button type="button" class="danger" data-discard-pending-scan="${escapeHtml(dialog.pendingScan.id)}" ${this._busy ? "disabled" : ""}><ha-icon icon="mdi:delete-outline"></ha-icon>${haListManagerInventoryCardText("scanner.discard", {}, this._hass)}</button></div>`;
+    return `${this._messageMarkup(dialog.scanError, "scan", "dialog-status warning", "alert-outline")}<p class="scan-session-status" role="status"><ha-icon icon="mdi:${editing ? "pencil" : other ? "lock-outline" : "information-outline"}"></ha-icon>${escapeHtml(status)}</p>${collaboration.viewers > 1 ? `<p class="field-help">${haListManagerInventoryCardText("scanner.shared_open", {}, this._hass)}</p>` : ""}<div class="dialog-actions scan-session-actions">${!editing ? `<button type="button" class="primary" data-edit-pending-scan ${this._busy || other ? "disabled" : ""}><ha-icon icon="mdi:pencil"></ha-icon>${haListManagerInventoryCardText("ui.edit", {}, this._hass)}</button>` : ""}<button type="button" class="danger" data-discard-pending-scan="${escapeHtml(dialog.pendingScan.id)}" ${this._busy ? "disabled" : ""}><ha-icon icon="mdi:delete-outline"></ha-icon>${haListManagerInventoryCardText("scanner.discard", {}, this._hass)}</button></div>`;
   }
 
   _applyPendingScanControls() {
     if (!this._pendingScanDialog()) return;
     const editing = this._canEditPendingScan();
+    if (!editing && this._selectionPopup) this._closeSelectionPopup();
     this.shadowRoot.querySelectorAll("[data-dialog-panel] input,[data-dialog-panel] select,[data-dialog-panel] textarea,[data-dialog-panel] ha-combo-box,[data-dialog-panel] button").forEach((control) => {
-      if (control.matches?.("[data-close-dialog],[data-edit-pending-scan],[data-discard-pending-scan],[data-dialog-image]")) return;
+      if (control.matches?.("[data-close-dialog],[data-edit-pending-scan],[data-discard-pending-scan],[data-dialog-image],[data-dismiss-message]")) return;
       if (control.dataset.scanDisabled === undefined) control.dataset.scanDisabled = control.disabled ? "1" : "0";
       const unrelated = control.matches?.("[data-edit-product],[data-delete-entry],[data-pick-group],[data-new-group-for-entry],[data-edit-entry-group],[data-remove-entry-group]");
       control.disabled = !editing || this._busy || control.dataset.scanDisabled === "1" || Boolean(unrelated);
@@ -1321,9 +1362,9 @@ class HaListManagerInventoryCard extends HTMLElement {
     this._confirmation.scanId = scan.id;
   }
 
-  _bindScanActions() {
-    this.shadowRoot.querySelector("[data-edit-pending-scan]")?.addEventListener("click", () => this._editPendingScan());
-    this.shadowRoot.querySelectorAll("[data-discard-pending-scan]").forEach((button) => button.addEventListener("click", () => {
+  _bindScanActions(root = this.shadowRoot) {
+    root.querySelector("[data-edit-pending-scan]")?.addEventListener("click", () => this._editPendingScan());
+    root.querySelectorAll("[data-discard-pending-scan]").forEach((button) => button.addEventListener("click", () => {
       const id = button.dataset.discardPendingScan;
       this._requestDiscardPendingScan(this._pendingScans.find((item) => item.id === id) || this._pendingScanDialog()?.pendingScan);
     }));
@@ -1683,7 +1724,7 @@ class HaListManagerInventoryCard extends HTMLElement {
       }),
     };
     this._rememberDialogState();
-    this._render();
+    this._renderDialogRegion();
   }
 
   _preferredCategory(product) {
@@ -1698,15 +1739,18 @@ class HaListManagerInventoryCard extends HTMLElement {
   }
 
   _productDefaultCategory(product) {
-    const byId = new Map(this._categories.map((category) => [category.id, category]));
+    const results = this._renderMemo("productCategories", () => new Map());
+    if (results.has(product)) return results.get(product);
+    const { byId, byName } = this._categoryIndex();
     const assignments = Array.isArray(product?.category_assignments) ? product.category_assignments : [];
     const preferred = [
       assignments.find((item) => item.scope === "list" && item.list_id === this._listId()),
       assignments.find((item) => item.scope === "list_type" && item.list_type === "inventory"),
       assignments.find((item) => item.scope === "global"),
-    ].find((item) => item && (byId.has(item.category_id) || this._categories.some((category) => category.name.toLocaleLowerCase() === String(item.category?.name || "").toLocaleLowerCase())));
-    if (preferred) return byId.get(preferred.category_id) || this._categories.find((category) => category.name.toLocaleLowerCase() === String(preferred.category?.name || "").toLocaleLowerCase());
-    return null;
+    ].find((item) => item && (byId.has(item.category_id) || byName.has(String(item.category?.name || "").toLocaleLowerCase())));
+    const category = preferred ? byId.get(preferred.category_id) || byName.get(String(preferred.category?.name || "").toLocaleLowerCase()) : null;
+    results.set(product, category);
+    return category;
   }
 
   _effectiveEntryCategory(entry) {
@@ -1723,16 +1767,16 @@ class HaListManagerInventoryCard extends HTMLElement {
   }
 
   _currentPermanentCategory(category) {
-    return this._categories.find((item) => item.name.toLocaleLowerCase() === String(category?.name || "").toLocaleLowerCase()) || category;
+    return this._categoryIndex().byName.get(String(category?.name || "").toLocaleLowerCase()) || category;
   }
 
-  _openEditDialog(entry) { this._clearDialogStatus(); this._dialog = { kind: "edit", entry, draft: { stock: entry.stock, minimum_stock: entry.minimum_stock ?? "", category_id: entry.category_id || "", category_name: entry.category_name || entry.category?.name || "" } }; this._rememberDialogState(); this._render(); }
+  _openEditDialog(entry) { this._clearDialogStatus(); this._dialog = { kind: "edit", entry, draft: { stock: entry.stock, minimum_stock: entry.minimum_stock ?? "", category_id: entry.category_id || "", category_name: entry.category_name || entry.category?.name || "" } }; this._rememberDialogState(); this._renderDialogRegion(); }
   _openProductEditDialog(entry) {
     const product = entry.product;
     this._clearDialogStatus();
     this._dialog = { kind: "product-edit", entry, draft: this._productDialogDraft(product) };
     this._rememberDialogState();
-    this._render();
+    this._renderDialogRegion();
   }
 
   _productDialogDraft(product = null, overrides = {}) {
@@ -1771,7 +1815,7 @@ class HaListManagerInventoryCard extends HTMLElement {
       },
     };
     this._rememberDialogState();
-    this._render();
+    this._renderDialogRegion();
   }
 
   _groupForEntry(entryId) {
@@ -2017,7 +2061,7 @@ class HaListManagerInventoryCard extends HTMLElement {
   }
 
   _renderItemActionTransition(view = this._itemActionView(), selector = "") {
-    this._render();
+    this._renderDialogRegion();
     const quantity = this.shadowRoot.querySelector("[data-quantity]");
     if (quantity && view.quantity !== undefined) quantity.value = view.quantity;
     const target = selector ? this.shadowRoot.querySelector(selector) : view.focus
@@ -2064,6 +2108,7 @@ class HaListManagerInventoryCard extends HTMLElement {
     const action = this._itemAction;
     if (!action || action.busy) return;
     this._itemAction = null;
+    this._selectionPopup = null;
     this._itemActionMenuOpen = false;
     if (this._dialog !== action.parent) return;
     if (message) this._setDialogStatus(message, "success");
@@ -2113,7 +2158,7 @@ class HaListManagerInventoryCard extends HTMLElement {
     const content = action.kind === "send"
       ? `<strong class="dialog-product">${escapeHtml(context.name)}</strong><p class="field-help">${text("source_unchanged")}</p>${action.loading ? `<p role="status">${haListManagerInventoryCardText("ui.please_wait", {}, this._hass)}</p>` : action.targets.length ? `<label><span>${text("target")}</span><select data-item-action-target ${disabled ? "disabled" : ""}><option value="">${text("choose_target")}</option>${action.targets.map((target) => `<option value="${escapeHtml(target.id)}" ${target.id === action.targetId ? "selected" : ""}>${escapeHtml(target.name)}</option>`).join("")}</select></label><label><span>${haListManagerInventoryCardText("ui.count", {}, this._hass)}</span><input type="number" min="1" max="1000000" step="1" value="${escapeHtml(action.quantity)}" data-item-action-quantity ${disabled ? "disabled" : ""}></label>` : `<p class="field-help">${text("no_targets")}</p>`}`
       : `<p>${text(action.kind === "chip" ? "confirm_chip" : "confirm_rule", action.kind === "chip" ? {p0:escapeHtml(context.name), p1:escapeHtml(context.listName)} : {p0:escapeHtml(context.name), p1:escapeHtml(context.category.name), p2:escapeHtml(context.listName)})}</p>${action.kind === "rule" && context.category.scope !== "list" ? `<p class="field-help">${text("local_category_help")}</p>` : ""}`;
-    return `<div class="backdrop nested-backdrop" data-item-action-backdrop><section class="dialog item-action-dialog" role="dialog" aria-modal="true" aria-label="${title}" data-dialog-panel><div class="dialog-header"><h3>${title}</h3><button class="icon-button" type="button" data-close-item-action title="${haListManagerInventoryCardText("ui.close", {}, this._hass)}" ${action.busy ? "disabled" : ""}><ha-icon icon="mdi:close"></ha-icon></button></div>${content}${action.dirty ? `<p class="field-help">${text("saved_source_note")}</p>` : ""}${action.error ? `<div class="dialog-status error" role="alert"><ha-icon icon="mdi:alert-circle-outline"></ha-icon>${escapeHtml(action.error)}</div>` : ""}<div class="dialog-actions"><button class="primary" type="button" data-confirm-item-action ${disabled || (action.kind === "send" && !action.targets.length) ? "disabled" : ""}>${action.busy ? haListManagerInventoryCardText("ui.please_wait", {}, this._hass) : action.kind === "send" ? haListManagerInventoryCardText("ui.add", {}, this._hass) : text("create")}</button><button type="button" data-close-item-action ${action.busy ? "disabled" : ""}>${haListManagerInventoryCardText("ui.cancel", {}, this._hass)}</button></div></section></div>`;
+    return `<div class="backdrop nested-backdrop" data-item-action-backdrop><section class="dialog item-action-dialog" role="dialog" aria-modal="true" aria-label="${title}" data-dialog-panel><div class="dialog-header"><h3>${title}</h3><button class="icon-button" type="button" data-close-item-action title="${haListManagerInventoryCardText("ui.close", {}, this._hass)}" ${action.busy ? "disabled" : ""}><ha-icon icon="mdi:close"></ha-icon></button></div>${content}${action.dirty ? `<p class="field-help">${text("saved_source_note")}</p>` : ""}${this._messageMarkup(action.error, "item-action", "dialog-status error", "alert-circle-outline")}<div class="dialog-actions"><button class="primary" type="button" data-confirm-item-action ${disabled || (action.kind === "send" && !action.targets.length) ? "disabled" : ""}>${action.busy ? haListManagerInventoryCardText("ui.please_wait", {}, this._hass) : action.kind === "send" ? haListManagerInventoryCardText("ui.add", {}, this._hass) : text("create")}</button><button type="button" data-close-item-action ${action.busy ? "disabled" : ""}>${haListManagerInventoryCardText("ui.cancel", {}, this._hass)}</button></div></section></div>`;
   }
 
   _dialogHeader(title) {
@@ -2121,11 +2166,12 @@ class HaListManagerInventoryCard extends HTMLElement {
   }
 
   _closeDialog() {
+    if (this._selectionPopup) { this._closeSelectionPopup(); return; }
     if (this._itemAction) { this._closeItemAction(); return; }
     if (this._busy || !this._dialog) return;
     if (this._dialog.kind === "image") {
       this._dialog = this._dialog.parent || null;
-      this._render();
+      this._renderDialogRegion();
       return;
     }
     if (this._isDialogDirty(true)) {
@@ -2149,22 +2195,23 @@ class HaListManagerInventoryCard extends HTMLElement {
     this._stopPendingScanView();
     this._dialog = null;
     this._itemAction = null;
+    this._selectionPopup = null;
     this._itemActionMenuOpen = false;
     this._memberPicker = null;
     this._groupPicker = null;
     this._clearDialogStatus();
-    this._render();
+    this._renderDialogRegion();
   }
 
   _requestConfirmation(title, message, confirmLabel, action, danger = true) {
     this._confirmation = { title, message, confirmLabel, action, danger };
-    this._render();
+    this._renderDialogRegion();
   }
 
   async _resolveConfirmation(accepted) {
     const confirmation = this._confirmation;
     this._confirmation = null;
-    if (!accepted || !confirmation?.action) { this._render(); return; }
+    if (!accepted || !confirmation?.action) { this._renderDialogRegion(); return; }
     await confirmation.action();
   }
 
@@ -2250,9 +2297,214 @@ class HaListManagerInventoryCard extends HTMLElement {
     this._dialogStatusTarget = target;
   }
 
+  _messageMarkup(message, key, className, icon = "information-outline", extra = "") {
+    if (!message) return "";
+    return `<div class="${className} dismissible-message" data-message="${key}" role="${className.includes("error") ? "alert" : "status"}"><ha-icon icon="mdi:${icon}"></ha-icon><span class="message-copy">${escapeHtml(message)}</span>${extra}<button type="button" class="message-dismiss" data-dismiss-message="${key}" aria-label="${haListManagerInventoryCardText("ui.dismiss_message", {}, this._hass)}" title="${haListManagerInventoryCardText("ui.dismiss_message", {}, this._hass)}"><ha-icon icon="mdi:close"></ha-icon></button></div>`;
+  }
+
+  _messageScrollState() {
+    const nodes = [...this.shadowRoot.querySelectorAll("ha-card,[data-dialog-panel]")];
+    for (let node = this; node; node = node.parentElement || node.getRootNode?.().host) nodes.push(node);
+    return [...new Set(nodes)].map((node) => [node, node.scrollTop, node.scrollLeft]);
+  }
+
+  _dismissMessage(button) {
+    const key = button.dataset.dismissMessage;
+    const banner = button.closest("[data-message]");
+    if (!banner) return;
+    const scroll = this._messageScrollState();
+    const focused = this.shadowRoot.activeElement === button;
+    if (key === "action") { this._actionStatus = ""; this._saveInventoryUndo(); }
+    else if (key === "error") this._error = "";
+    else if (key === "dialog") this._clearDialogStatus();
+    else if (key === "restock" && this._restockDialog) this._restockDialog.status = "";
+    else if (key === "item-action" && this._itemAction) this._itemAction.error = "";
+    else if (key === "browser-chip" && this._browserChipMenu) this._browserChipMenu.status = "";
+    else if (key === "scan" && this._pendingScanDialog()) this._pendingScanDialog().scanError = "";
+    const undo = key === "action" ? banner.querySelector("[data-undo-booking]") : null;
+    if (undo) {
+      const holder = document.createElement("div");
+      holder.className = "inventory-action-status inventory-undo-only";
+      banner.replaceWith(holder);
+      holder.append(undo);
+    } else banner.remove();
+    if (key === "error") this.shadowRoot.querySelectorAll('[data-message="error"]').forEach((notice) => notice.remove());
+    if (focused) (undo || this.shadowRoot.querySelector(key === "browser-chip" ? "button[data-close-browser-chip-menu]" : "[data-dialog-panel] [data-field],[data-product-input]"))?.focus?.({ preventScroll: true });
+    for (const [node, top, left] of scroll) { node.scrollTop = top; node.scrollLeft = left; }
+  }
+
+  _bindMessageDismissals(root = this.shadowRoot) {
+    root.querySelectorAll("[data-dismiss-message]").forEach((button) => button.addEventListener("click", (event) => {
+      event.preventDefault(); event.stopPropagation(); this._dismissMessage(button);
+    }));
+  }
+
+  _selectionButton(kind) {
+    const title = haListManagerInventoryCardText(`selection.choose_${kind}`, {}, this._hass);
+    const disabled = this._busy || kind === "labels" && !this._labels.length;
+    return `<button type="button" class="selection-trigger" data-open-selection="${kind}" aria-label="${title}" title="${title}" ${disabled ? "disabled" : ""}><ha-icon icon="mdi:view-grid-outline"></ha-icon></button>`;
+  }
+
+  _selectionLabelAllowed(label) {
+    const list = this._inventoryLists.find((entry) => entry.id === this._listId());
+    if (label?.scope === "global") return list?.use_global_labels !== false;
+    if (label?.scope === "list_type") return list?.use_type_labels !== false && (!label.list_type || label.list_type === "inventory");
+    return !label?.list_id || label.list_id === this._listId();
+  }
+
+  _selectedPopupLabelNames(popup) {
+    return new Set([...popup.selected].map((id) => popup.labelDefinitions.get(id)).filter((label) => label && this._selectionLabelAllowed(label)).map((label) => label.name.toLocaleLowerCase()));
+  }
+
+  _selectionChoices(kind = this._selectionPopup?.kind) {
+    if (kind === "labels") return this._labels.filter((label) => this._selectionLabelAllowed(label));
+    const choices = this._inventoryCategoryChoices();
+    const draft = this._dialog?.draft;
+    const current = String(draft?.category_name || "").trim();
+    if (current && !choices.some((choice) => choice.name.localeCompare(current, undefined, { sensitivity: "base" }) === 0)) choices.push({ id: `dynamic:${current.toLocaleLowerCase()}`, name: current, dynamic: true, scope: "dynamic", icon: "mdi:shape-plus-outline" });
+    const inherited = this._productDefaultCategory(this._categoryContextProduct());
+    return [{ id: "__default__", name: haListManagerInventoryCardText(inherited ? "ui.use_product_default" : "ui.general", {}, this._hass), hint: inherited?.name || "", icon: inherited?.icon || "mdi:shape-outline", color: inherited?.color }, ...choices];
+  }
+
+  _openSelectionPopup(kind, trigger) {
+    if (this._busy || !this._dialog?.draft || this._itemAction || this._selectionPopup || !["categories", "labels"].includes(kind)) return;
+    if (kind === "labels" && !this._labels.length) return;
+    if (this._pendingScanDialog() && !this._canEditPendingScan()) return;
+    this._syncDialogDraft();
+    this.shadowRoot.activeElement?.blur?.();
+    this._hideItemActionMenu();
+    this.shadowRoot.querySelectorAll(".category-picker-options,.label-picker-options").forEach((menu) => { menu.hidden = true; });
+    const selected = new Set(this._dialog.draft.label_ids || []);
+    this._selectionPopup = { kind, parent: this._dialog, query: "", selected, labelDefinitions: new Map(this._labels.map((label) => [label.id, label])), trigger, scroll: this._messageScrollState() };
+    const host = document.createElement("div");
+    host.innerHTML = this._renderSelectionPopup();
+    const popup = host.firstElementChild;
+    this.shadowRoot.querySelector("ha-card").append(popup);
+    this._bindSelectionPopup();
+    this.shadowRoot.querySelector("[data-selection-close]")?.focus({ preventScroll: true });
+  }
+
+  _selectionOptionsMarkup() {
+    const popup = this._selectionPopup;
+    if (!popup) return "";
+    const query = popup.query.trim().toLocaleLowerCase();
+    const draft = this._dialog?.draft || {};
+    const selectedNames = this._selectedPopupLabelNames(popup);
+    const options = this._selectionChoices(popup.kind).filter((choice) => [choice.name, choice.hint].some((value) => String(value || "").toLocaleLowerCase().includes(query)));
+    return options.length ? options.map((choice) => {
+      const selected = popup.kind === "labels" ? popup.selected.has(choice.id) || selectedNames.has(choice.name.toLocaleLowerCase()) : choice.id === "__default__" ? !draft.category_id && !String(draft.category_name || "").trim() : choice.id === draft.category_id || Boolean(draft.category_name) && choice.name.localeCompare(draft.category_name, undefined, { sensitivity: "base" }) === 0;
+      return `<button type="button" class="selection-chip ${selected ? "selected" : ""}" data-selection-option="${escapeHtml(choice.id)}" aria-pressed="${selected}" style="${choice.color ? `--selection-color:${escapeHtml(choice.color)};--selection-text:${categoryTextColor(choice.color)}` : ""}"><ha-icon icon="${escapeHtml(choice.icon || (popup.kind === "labels" ? "mdi:tag-outline" : "mdi:shape-outline"))}"></ha-icon><span>${escapeHtml(choice.name)}${choice.hint ? `<small>${escapeHtml(choice.hint)}</small>` : ""}</span>${selected ? '<ha-icon class="selection-check" icon="mdi:check"></ha-icon>' : ""}</button>`;
+    }).join("") : `<p class="field-help">${haListManagerInventoryCardText("selection.empty", {}, this._hass)}</p>`;
+  }
+
+  _renderSelectionPopup() {
+    const popup = this._selectionPopup;
+    if (!popup) return "";
+    if (popup.parent !== this._dialog) { this._selectionPopup = null; return ""; }
+    const title = haListManagerInventoryCardText(`selection.${popup.kind}`, {}, this._hass);
+    return `<div class="backdrop selection-backdrop" data-selection-popup-host><section class="dialog selection-dialog" role="dialog" aria-modal="true" aria-label="${title}"><div class="dialog-header"><h3>${title}</h3><button type="button" class="icon-button" data-selection-close aria-label="${haListManagerInventoryCardText("ui.close", {}, this._hass)}"><ha-icon icon="mdi:close"></ha-icon></button></div><input type="search" value="${escapeHtml(popup.query)}" data-selection-search aria-label="${haListManagerInventoryCardText("selection.search", {}, this._hass)}" placeholder="${haListManagerInventoryCardText("selection.search", {}, this._hass)}"><div class="selection-options" data-selection-options>${this._selectionOptionsMarkup()}</div><div class="dialog-actions">${popup.kind === "labels" ? `<button type="button" class="primary" data-selection-apply>${haListManagerInventoryCardText("selection.apply", {}, this._hass)}</button><button type="button" data-selection-clear>${haListManagerInventoryCardText("selection.clear", {}, this._hass)}</button>` : ""}<button type="button" data-selection-close>${haListManagerInventoryCardText("ui.cancel", {}, this._hass)}</button></div></section></div>`;
+  }
+
+  _closeSelectionPopup() {
+    const popup = this._selectionPopup;
+    if (!popup) return;
+    this._selectionPopup = null;
+    this.shadowRoot.querySelector("[data-selection-popup-host]")?.remove();
+    if (popup.parent !== this._dialog) return;
+    const trigger = popup.trigger?.isConnected ? popup.trigger : this.shadowRoot.querySelector(`[data-open-selection="${popup.kind}"]`);
+    trigger?.focus?.({ preventScroll: true });
+    for (const [node, top, left] of popup.scroll) { if (node.isConnected !== false) { node.scrollTop = top; node.scrollLeft = left; } }
+  }
+
+  _chooseSelectionOption(id) {
+    const popup = this._selectionPopup;
+    if (!popup || popup.parent !== this._dialog) return;
+    if (this._pendingScanDialog() && !this._canEditPendingScan()) { this._closeSelectionPopup(); return; }
+    const choice = this._selectionChoices(popup.kind).find((entry) => entry.id === id);
+    if (!choice) return;
+    if (popup.kind === "labels") {
+      const name = choice.name.toLocaleLowerCase();
+      popup.labelDefinitions.set(id, choice);
+      const matching = [...popup.selected].filter((selected) => selected === id || popup.labelDefinitions.get(selected)?.name.toLocaleLowerCase() === name);
+      if (matching.length) matching.forEach((selected) => popup.selected.delete(selected)); else popup.selected.add(id);
+      this._refreshSelectionOptions();
+      [...this.shadowRoot.querySelectorAll("[data-selection-option]")].find((node) => node.dataset.selectionOption === id)?.focus({ preventScroll: true });
+      return;
+    }
+    this._dialog.draft.category_id = choice.id === "__default__" || choice.dynamic ? "" : choice.id;
+    this._dialog.draft.category_name = choice.id === "__default__" ? "" : choice.name;
+    const input = this.shadowRoot.querySelector("[data-category-input]");
+    if (input) input.value = this._dialog.draft.category_name;
+    this.shadowRoot.querySelector("[data-category-options]")?.setAttribute("hidden", "");
+    this._updateDialogDirtyIndicator();
+    this._closeSelectionPopup();
+  }
+
+  _applySelectionPopup() {
+    const popup = this._selectionPopup;
+    if (!popup || popup.kind !== "labels" || popup.parent !== this._dialog) return;
+    if (this._pendingScanDialog() && !this._canEditPendingScan()) { this._closeSelectionPopup(); return; }
+    // A more specific same-name definition may replace an ID while the popup is open.
+    const names = this._selectedPopupLabelNames(popup);
+    this._dialog.draft.label_ids = this._selectionChoices("labels").filter((label) => popup.selected.has(label.id) || names.has(label.name.toLocaleLowerCase())).map((label) => label.id);
+    const selector = this.shadowRoot.querySelector(".label-selector");
+    const query = selector?.querySelector("[data-label-input]")?.value || "";
+    if (selector) {
+      const host = document.createElement("div");
+      host.innerHTML = this._renderLabelSelector(this._dialog.draft.label_ids);
+      selector.replaceWith(host.firstElementChild);
+      this._configureLabelSelector(); this._installPickerListTriggers(); this._bindSelectionTriggers();
+      const input = this.shadowRoot.querySelector("[data-label-input]");
+      if (input) input.value = query;
+    }
+    this._updateDialogDirtyIndicator();
+    this._closeSelectionPopup();
+  }
+
+  _refreshSelectionOptions() {
+    const grid = this.shadowRoot.querySelector("[data-selection-options]");
+    if (!grid) return;
+    const top = grid.scrollTop;
+    grid.innerHTML = this._selectionOptionsMarkup();
+    grid.scrollTop = top;
+    this._bindSelectionOptions();
+  }
+
+  _bindSelectionOptions() {
+    this.shadowRoot.querySelectorAll("[data-selection-option]").forEach((button) => button.addEventListener("click", () => this._chooseSelectionOption(button.dataset.selectionOption)));
+  }
+
+  _bindSelectionTriggers(root = this.shadowRoot) {
+    root.querySelectorAll("[data-open-selection]").forEach((button) => {
+      if (button.dataset.selectionBound) return;
+      button.dataset.selectionBound = "1";
+      button.addEventListener("pointerdown", (event) => { event.preventDefault(); event.stopPropagation(); });
+      button.addEventListener("click", (event) => { event.preventDefault(); event.stopPropagation(); this._openSelectionPopup(button.dataset.openSelection, button); });
+    });
+  }
+
+  _bindSelectionPopup(root = this.shadowRoot) {
+    const host = root.querySelector("[data-selection-popup-host]");
+    if (!host) return;
+    host.addEventListener("click", (event) => { event.stopPropagation(); if (event.target === host) this._closeSelectionPopup(); });
+    host.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); this._closeSelectionPopup(); }
+      else if (event.key === "Tab") {
+        const controls = [...host.querySelectorAll("button,input")].filter((node) => !node.disabled && !node.hidden);
+        const first = controls[0], last = controls.at(-1), active = this.shadowRoot.activeElement;
+        if (event.shiftKey && active === first || !event.shiftKey && active === last) { event.preventDefault(); (event.shiftKey ? last : first)?.focus({ preventScroll: true }); }
+      }
+    }, true);
+    host.querySelector("[data-selection-search]")?.addEventListener("input", (event) => { if (this._selectionPopup) { this._selectionPopup.query = event.target.value; this._refreshSelectionOptions(); } });
+    host.querySelectorAll("[data-selection-close]").forEach((button) => button.addEventListener("click", () => this._closeSelectionPopup()));
+    host.querySelector("[data-selection-clear]")?.addEventListener("click", () => { this._selectionPopup?.selected.clear(); this._refreshSelectionOptions(); });
+    host.querySelector("[data-selection-apply]")?.addEventListener("click", () => this._applySelectionPopup());
+    this._bindSelectionOptions();
+  }
+
   _renderDialogStatus(target = "general") {
     if (!this._dialogStatus || this._dialogStatusTarget !== target) return "";
-    return `<p class="dialog-status ${escapeHtml(this._dialogStatusTone)}"><ha-icon icon="mdi:${this._dialogStatusTone === "success" ? "check-circle-outline" : this._dialogStatusTone === "warning" ? "alert-outline" : this._dialogStatusTone === "error" ? "alert-circle-outline" : "information-outline"}"></ha-icon><span>${escapeHtml(this._dialogStatus)}</span></p>`;
+    return this._messageMarkup(this._dialogStatus, "dialog", `dialog-status ${escapeHtml(this._dialogStatusTone)}`, this._dialogStatusTone === "success" ? "check-circle-outline" : this._dialogStatusTone === "warning" ? "alert-outline" : this._dialogStatusTone === "error" ? "alert-circle-outline" : "information-outline");
   }
 
   _parseProductName(name, brand, quantity) {
@@ -2390,11 +2642,10 @@ class HaListManagerInventoryCard extends HTMLElement {
   }
 
   _renderLabelSelector(selectedIds = []) {
-    if (!this._labels.length) return `<div class="label-selector"><span>${haListManagerInventoryCardText("ui.labels_optional", {}, this._hass)}</span><p class="field-help">${haListManagerInventoryCardText("labels.none_created", {}, this._hass)}</p></div>`;
     const knownLabels = [...this._labels, ...((this._dialog?.entry?.product?.labels) || [])].filter((label, index, all) => all.findIndex((item) => item.id === label.id) === index);
     const selected = knownLabels.filter((label) => selectedIds.includes(label.id) && this._labels.some((available) => available.id === label.id));
     const chips = selected.map((label) => `<button type="button" class="selected-label" data-remove-label="${escapeHtml(label.id)}" style="${label.color ? `--label-color:${escapeHtml(label.color)}` : ""}" title="${haListManagerInventoryCardText("ui.remove_named", {p0:(escapeHtml(label.name))}, this._hass)}"><ha-icon icon="${escapeHtml(label.icon || "mdi:label-outline")}"></ha-icon><span>${escapeHtml(label.name)}</span><ha-icon class="remove-label" icon="mdi:close"></ha-icon></button>`).join("");
-    return `<div class="label-selector"><span>${haListManagerInventoryCardText("ui.labels_optional", {}, this._hass)}</span>${chips ? `<div class="selected-labels">${chips}</div>` : ""}<div class="label-combo"><div class="label-search"><ha-icon icon="mdi:magnify"></ha-icon><input type="text" placeholder="${haListManagerInventoryCardText("ui.browse_labels", {}, this._hass)}" autocomplete="off" data-label-input></div><div class="label-picker-options" data-label-options hidden></div></div></div>`;
+    return `<div class="label-selector"><span>${haListManagerInventoryCardText("ui.labels_optional", {}, this._hass)}</span>${chips ? `<div class="selected-labels">${chips}</div>` : ""}<div class="label-combo"><div class="label-search"><ha-icon icon="mdi:magnify"></ha-icon><input type="text" placeholder="${haListManagerInventoryCardText("ui.browse_labels", {}, this._hass)}" autocomplete="off" data-label-input ${!this._labels.length ? "disabled" : ""}>${this._selectionButton("labels")}</div><div class="label-picker-options" data-label-options hidden></div></div>${!this._labels.length ? `<p class="field-help">${haListManagerInventoryCardText("labels.none_created", {}, this._hass)}</p>` : ""}</div>`;
   }
 
   _installPickerListTriggers(root = this.shadowRoot) {
@@ -2407,10 +2658,13 @@ class HaListManagerInventoryCard extends HTMLElement {
       const menu = menuHost?.querySelector(menuSelector);
       if (!triggerHost || !menu || triggerHost.querySelector(":scope > [data-picker-list-trigger]")) return;
       triggerHost.classList.add("picker-trigger-host");
-      input.style.setProperty("padding-right", "44px", "important");
+      const hasPopup = Boolean(triggerHost.querySelector("[data-open-selection]"));
+      if (hasPopup) triggerHost.classList.add("picker-with-popup");
+      input.style.setProperty("padding-right", hasPopup ? "86px" : "44px", "important");
       const trigger = document.createElement("button");
       trigger.type = "button";
       trigger.className = "picker-list-trigger";
+      trigger.disabled = input.disabled || this._busy;
       trigger.dataset.pickerListTrigger = "";
       trigger.title = haListManagerInventoryCardText("ui.open_picker_close_keyboard", {}, this._hass);
       trigger.setAttribute("aria-label", trigger.title);
@@ -2419,6 +2673,7 @@ class HaListManagerInventoryCard extends HTMLElement {
       trigger.addEventListener("click", (event) => {
         event.preventDefault();
         event.stopPropagation();
+        if (trigger.disabled || input.disabled || this._busy || this._pendingScanDialog() && !this._canEditPendingScan()) return;
         const focused = root.activeElement === input || this.shadowRoot.activeElement === input;
         this.shadowRoot.activeElement?.blur?.();
         if (!menu.hidden) {
@@ -2436,6 +2691,7 @@ class HaListManagerInventoryCard extends HTMLElement {
         const currentValue = input.value.trim();
         input.blur();
         setTimeout(() => {
+          if (input.isConnected === false || input.disabled || this._selectionPopup || this._busy || this._pendingScanDialog() && !this._canEditPendingScan()) return;
           input.value = "";
           input.dispatchEvent(new Event("focus"));
           input.value = currentValue;
@@ -2456,9 +2712,9 @@ class HaListManagerInventoryCard extends HTMLElement {
     });
   }
 
-  _configureLabelSelector() {
-    const input = this.shadowRoot.querySelector("[data-label-input]");
-    const menu = this.shadowRoot.querySelector("[data-label-options]");
+  _configureLabelSelector(root = this.shadowRoot) {
+    const input = root.querySelector("[data-label-input]");
+    const menu = root.querySelector("[data-label-options]");
     const draft = this._dialog?.draft;
     if (!input || !menu || !draft) return;
     draft.label_ids = [...new Set(draft.label_ids || [])];
@@ -2491,7 +2747,7 @@ class HaListManagerInventoryCard extends HTMLElement {
       if (first) choose(first);
     });
     input.addEventListener("blur", () => setTimeout(() => { menu.hidden = true; }, 120));
-    this.shadowRoot.querySelectorAll("[data-remove-label]").forEach((button) => button.addEventListener("click", () => {
+    root.querySelectorAll("[data-remove-label]").forEach((button) => button.addEventListener("click", () => {
       draft.label_ids = draft.label_ids.filter((id) => id !== button.dataset.removeLabel);
       this._render();
     }));
@@ -2500,7 +2756,7 @@ class HaListManagerInventoryCard extends HTMLElement {
   _openImageDialog(url, name) {
     if (!url) return;
     this._dialog = { kind: "image", url, name, parent: this._dialog };
-    this._render();
+    this._renderDialogRegion();
   }
 
   async _saveDialog() {
@@ -2627,12 +2883,12 @@ class HaListManagerInventoryCard extends HTMLElement {
     };
     this._entries.forEach((entry) => addDynamic(entry.category_name));
     this._inventoryGroups.forEach((group) => addDynamic(group.category_name));
-    return choices.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }) || (a.scope === "list" ? -1 : 1));
+    return choices.sort((a, b) => this._compareNames(a.name, b.name, false, null) || (a.scope === "list" ? -1 : 1));
   }
 
-  _configureCategoryPicker() {
-    const picker = this.shadowRoot.querySelector("[data-category-input]");
-    const menu = this.shadowRoot.querySelector("[data-category-options]");
+  _configureCategoryPicker(root = this.shadowRoot) {
+    const picker = root.querySelector("[data-category-input]");
+    const menu = root.querySelector("[data-category-options]");
     const draft = this._dialog?.draft;
     if (!picker || !menu || !draft) return;
     const categories = this._inventoryCategoryChoices();
@@ -2693,15 +2949,17 @@ class HaListManagerInventoryCard extends HTMLElement {
   }
 
   _displayUnits() {
-    const groupedIds = this._entryGroupMap();
-    const units = this._groupSelectionMode ? this._entries.map((entry) => ({ kind: "entry", entry })) : [
-      ...this._inventoryGroups.map((group) => ({ kind: "group", group: this._groupView(group) })),
-      ...this._entries.filter((entry) => !groupedIds.has(entry.id)).map((entry) => ({ kind: "entry", entry })),
-    ];
-    return units.sort((left, right) => {
-      const leftName = left.kind === "group" ? left.group.name : left.entry.product?.name || "";
-      const rightName = right.kind === "group" ? right.group.name : right.entry.product?.name || "";
-      return leftName.localeCompare(rightName, haListManagerInventoryCardTextLocale(this._hass), { sensitivity: "base", numeric: true });
+    return this._renderMemo("displayUnits", () => {
+      const groupedIds = this._entryGroupMap();
+      const units = this._groupSelectionMode ? this._entries.map((entry) => ({ kind: "entry", entry })) : [
+        ...this._inventoryGroups.map((group) => ({ kind: "group", group: this._groupView(group) })),
+        ...this._entries.filter((entry) => !groupedIds.has(entry.id)).map((entry) => ({ kind: "entry", entry })),
+      ];
+      return units.sort((left, right) => {
+        const leftName = left.kind === "group" ? left.group.name : left.entry.product?.name || "";
+        const rightName = right.kind === "group" ? right.group.name : right.entry.product?.name || "";
+        return this._compareNames(leftName, rightName, true);
+      });
     });
   }
 
@@ -2771,34 +3029,36 @@ class HaListManagerInventoryCard extends HTMLElement {
   }
 
   _groups() {
-    const units = this._displayUnits().filter((unit) => this._passesFilter(unit));
-    if (this._groupingMode() === "labels") {
+    return this._renderMemo("groups", () => {
+      const units = this._displayUnits().filter((unit) => this._passesFilter(unit));
+      if (this._groupingMode() === "labels") {
+        const groups = new Map();
+        for (const unit of units) {
+          const labels = this._unitLabels(unit);
+          const definitions = labels.length ? labels.map((label) => ({
+            ...label, id: `__label__:${label.id}`, icon: label.icon || "mdi:label-outline",
+          })) : [{ id: "__unlabeled__", name: haListManagerInventoryCardText("ui.without_label", {}, this._hass), icon: "mdi:label-off-outline" }];
+          for (const category of definitions) {
+            const key = category.id;
+            if (!groups.has(key)) groups.set(key, { key, category, units: [] });
+            groups.get(key).units.push(unit);
+          }
+        }
+        return [...groups.values()].sort((a, b) => {
+          if (a.key === "__unlabeled__" || b.key === "__unlabeled__") return a.key === b.key ? 0 : a.key === "__unlabeled__" ? -1 : 1;
+          return this._compareNames(a.category.name, b.category.name, true);
+        });
+      }
+      if (!this._groupCategories && !this._groupingEnabled()) return [{ category: null, units, flat: true }];
       const groups = new Map();
       for (const unit of units) {
-        const labels = this._unitLabels(unit);
-        const definitions = labels.length ? labels.map((label) => ({
-          ...label, id: `__label__:${label.id}`, icon: label.icon || "mdi:label-outline",
-        })) : [{ id: "__unlabeled__", name: haListManagerInventoryCardText("ui.without_label", {}, this._hass), icon: "mdi:label-off-outline" }];
-        for (const category of definitions) {
-          const key = category.id;
-          if (!groups.has(key)) groups.set(key, { key, category, units: [] });
-          groups.get(key).units.push(unit);
-        }
+        const category = this._unitCategory(unit);
+        const key = category?.id || "__uncategorized__";
+        if (!groups.has(key)) groups.set(key, { key, category, units: [] });
+        groups.get(key).units.push(unit);
       }
-      return [...groups.values()].sort((a, b) => {
-        if (a.key === "__unlabeled__" || b.key === "__unlabeled__") return a.key === b.key ? 0 : a.key === "__unlabeled__" ? -1 : 1;
-        return a.category.name.localeCompare(b.category.name, haListManagerInventoryCardTextLocale(this._hass), { sensitivity: "base", numeric: true });
-      });
-    }
-    if (!this._groupCategories && !this._groupingEnabled()) return [{ category: null, units, flat: true }];
-    const groups = new Map();
-    for (const unit of units) {
-      const category = this._unitCategory(unit);
-      const key = category?.id || "__uncategorized__";
-      if (!groups.has(key)) groups.set(key, { key, category, units: [] });
-      groups.get(key).units.push(unit);
-    }
-    return [...groups.values()].sort((a, b) => this._compareCategories(a.category, b.category));
+      return [...groups.values()].sort((a, b) => this._compareCategories(a.category, b.category));
+    });
   }
 
   _categoryScopeRank(category, order = "global_list_dynamic") {
@@ -2810,7 +3070,7 @@ class HaListManagerInventoryCard extends HTMLElement {
 
   _compareCategories(a, b) {
     if (!a || !b) return !a ? (!b ? 0 : -1) : 1;
-    const nameResult = a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
+    const nameResult = this._compareNames(a.name, b.name, false, null);
     const tieScope = this._categoryScopeRank(a, "list_global_dynamic") - this._categoryScopeRank(b, "list_global_dynamic");
     if (this._config.category_sort === "alphabetical") return nameResult || tieScope;
     if (["global_list_dynamic", "list_global_dynamic"].includes(this._config.category_sort)) {
@@ -2947,7 +3207,7 @@ class HaListManagerInventoryCard extends HTMLElement {
     const help = productDefault
       ? haListManagerInventoryCardText("help.inventory_category_override", {p0:(escapeHtml(productDefault.name))}, this._hass)
       : haListManagerInventoryCardText("help.inventory_dynamic_category", {}, this._hass);
-    return `<div class="category-combo"><input value="${escapeHtml(value)}" placeholder="${productDefault ? haListManagerInventoryCardText("ui.use_product_category_default", {p0:(escapeHtml(productDefault.name))}, this._hass) : haListManagerInventoryCardText("ui.category_search_or_create", {}, this._hass)}" autocomplete="off" data-category-input><div class="category-picker-options" data-category-options hidden></div></div><p class="field-help">${help}</p>`;
+    return `<div class="category-combo"><input value="${escapeHtml(value)}" placeholder="${productDefault ? haListManagerInventoryCardText("ui.use_product_category_default", {p0:(escapeHtml(productDefault.name))}, this._hass) : haListManagerInventoryCardText("ui.category_search_or_create", {}, this._hass)}" autocomplete="off" data-category-input>${this._selectionButton("categories")}<div class="category-picker-options" data-category-options hidden></div></div><p class="field-help">${help}</p>`;
   }
 
   _renderDialog() {
@@ -2976,6 +3236,43 @@ class HaListManagerInventoryCard extends HTMLElement {
     }
     if (["product-edit", "add"].includes(this._dialog.kind)) return this._renderProductDialog(eanStatus, generalStatus);
     return "";
+  }
+
+  _renderDialogContents() {
+    return `${this._renderDialog()}${this._renderMemberPicker()}${this._renderGroupPicker()}${this._renderPendingScanPicker()}${this._renderRestockDialog()}${this._renderInventoryUndoChoice()}${this._renderConfirmation()}${this._renderControlCodes()}${this._renderBrowserChipMenu()}`;
+  }
+
+  _renderOverlayMarkup() {
+    return `<div data-inventory-dialog-region style="display:contents">${this._renderDialogContents()}</div><div data-inventory-chip-overlay style="display:contents">${this._renderChipDialog()}</div>${this._renderSelectionPopup()}`;
+  }
+
+  _renderDialogRegion() {
+    const region = this.shadowRoot.querySelector("[data-inventory-dialog-region]");
+    if (!region) { this._render(); return; }
+    // Background stock reads leave an open edit untouched. Once it closes,
+    // the retained rows must catch up to the latest records as well.
+    if (!this._dialog && !this._confirmation && this._inventoryViewDirty) { this._refreshMetadataUi(); return; }
+    return this._withRenderData(() => {
+      if (this._selectionPopup && this._selectionPopup.parent !== this._dialog) this._selectionPopup = null;
+      if (!this._selectionPopup) this.shadowRoot.querySelector("[data-selection-popup-host]")?.remove();
+      const active = this.shadowRoot.activeElement;
+      const scroll = this._messageScrollState();
+      const moveFocusToDialog = this._dialog && active && !region.contains(active);
+      if (moveFocusToDialog) {
+        this._dialogReturnFocus = active;
+        active.blur?.();
+      }
+      region.innerHTML = this._renderDialogContents();
+      this._bindEvents(region);
+      // The retained background input must no longer receive typing or Enter.
+      // A button takes focus without opening the phone's on-screen keyboard.
+      if (moveFocusToDialog) region.querySelector("[data-close-dialog]")?.focus({ preventScroll: true });
+      if (!this._dialog && !this._confirmation) {
+        if (this._dialogReturnFocus?.isConnected) this._dialogReturnFocus.focus?.({ preventScroll: true });
+        this._dialogReturnFocus = null;
+      }
+      for (const [node, top, left] of scroll) { node.scrollTop = top; node.scrollLeft = left; }
+    });
   }
 
   _renderProductDialog(eanStatus, generalStatus) {
@@ -3066,7 +3363,7 @@ class HaListManagerInventoryCard extends HTMLElement {
     const selectedLabelCount = this._selectedLabelIds === null ? labelKeys.length : this._selectedLabelIds.size;
     const labelFilterLabel = this._selectedLabelIds === null ? haListManagerInventoryCardText("ui.all_labels", {}, this._hass) : haListManagerInventoryCardText("ui.selected_label_count", {p0:(selectedLabelCount), p1:(labelKeys.length)}, this._hass);
     const labelChoice = (key, name, icon = "mdi:label-outline", color = "") => `<label class="category-choice label-filter-choice" style="${color ? `--label-color:${escapeHtml(color)}` : ""}"><input type="checkbox" data-label-choice="${escapeHtml(key)}" ${this._selectedLabelIds === null || this._selectedLabelIds.has(key) ? "checked" : ""}><ha-icon icon="${escapeHtml(icon)}"></ha-icon><span>${escapeHtml(name)}</span></label>`;
-    const labelChoices = labelChoice("__unlabeled__", haListManagerInventoryCardText("ui.without_label", {}, this._hass), "mdi:label-off-outline") + [...this._labels].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" })).map((label) => labelChoice(label.id, label.name, label.icon || "mdi:label-outline", label.color || "")).join("");
+    const labelChoices = labelChoice("__unlabeled__", haListManagerInventoryCardText("ui.without_label", {}, this._hass), "mdi:label-off-outline") + [...this._labels].sort((a, b) => this._compareNames(a.name, b.name, false, null)).map((label) => labelChoice(label.id, label.name, label.icon || "mdi:label-outline", label.color || "")).join("");
     const filterLabel = ({ all: haListManagerInventoryCardText("ui.all", {}, this._hass), zero: haListManagerInventoryCardText("ui.zero_stock", {}, this._hass), zero_one: haListManagerInventoryCardText("inventory.stock_zero_to_one", {}, this._hass), minimum: haListManagerInventoryCardText("ui.at_or_below_minimum_stock", {}, this._hass), below: "< Mindestbestand" })[this._filter] || haListManagerInventoryCardText("ui.all", {}, this._hass);
     const categoryGroups = this._groups().filter(({ flat, units }) => !flat && units.length);
     const allCategoriesExpanded = this._allCategoriesExpanded(categoryGroups);
@@ -3179,9 +3476,9 @@ class HaListManagerInventoryCard extends HTMLElement {
     const important = this._isChipImportant(menu.chip);
     const importantAction = this._config.show_important_chips !== false ? `<button type="button" data-toggle-important-chip><ha-icon icon="mdi:${important ? "alert-circle-minus-outline" : "alert-circle-plus-outline"}"></ha-icon><span><strong>${important ? haListManagerInventoryCardText("ui.remove_important_mark", {}, this._hass) : haListManagerInventoryCardText("ui.mark_important", {}, this._hass)}</strong><small>${haListManagerInventoryCardText("ui.only_this_inventory", {}, this._hass)}</small></span></button>` : "";
     const browserActions = menu.chip.browser ? `<button type="button" data-delete-browser-chip><ha-icon icon="mdi:delete-outline"></ha-icon><span><strong>${haListManagerInventoryCardText("chips.delete", {}, this._hass)}</strong><small>${haListManagerInventoryCardText("ui.remove_browser_chip_only", {}, this._hass)}</small></span></button><button type="button" data-delete-all-browser-chips><ha-icon icon="mdi:delete-sweep-outline"></ha-icon><span><strong>${haListManagerInventoryCardText("chips.delete_all_browser", {}, this._hass)}</strong><small>${haListManagerInventoryCardText("chips.clear_inventory_browser", {}, this._hass)}</small></span></button>${this._config.allow_save_browser_chips !== false ? `<button type="button" data-save-browser-chip><ha-icon icon="mdi:content-save-outline"></ha-icon><span><strong>${haListManagerInventoryCardText("ui.save_inventory_permanently", {}, this._hass)}</strong><small>${haListManagerInventoryCardText("ui.chip_available_other_browsers", {}, this._hass)}</small></span></button>` : ""}` : "";
-    return `<div class="backdrop browser-chip-backdrop" data-close-browser-chip-menu><section class="dialog browser-chip-menu" role="dialog"><div class="dialog-header"><div><h3>${escapeHtml(menu.chip.name)}</h3><p class="field-help">${menu.chip.browser ? haListManagerInventoryCardText("ui.chip_browser_only", {}, this._hass) : menu.chip.categoryProduct ? haListManagerInventoryCardText("ui.quick_entry_product_linked", {}, this._hass) : haListManagerInventoryCardText("help.inventory_chip_important", {}, this._hass)}</p></div><button class="icon-button" data-close-browser-chip-menu><ha-icon icon="mdi:close"></ha-icon></button></div>${menu.status ? `<div class="dialog-status error">${escapeHtml(menu.status)}</div>` : ""}<div class="browser-chip-actions">${importantAction}${browserActions}</div></section></div>`;
+    return `<div class="backdrop browser-chip-backdrop" data-close-browser-chip-menu><section class="dialog browser-chip-menu" role="dialog"><div class="dialog-header"><div><h3>${escapeHtml(menu.chip.name)}</h3><p class="field-help">${menu.chip.browser ? haListManagerInventoryCardText("ui.chip_browser_only", {}, this._hass) : menu.chip.categoryProduct ? haListManagerInventoryCardText("ui.quick_entry_product_linked", {}, this._hass) : haListManagerInventoryCardText("help.inventory_chip_important", {}, this._hass)}</p></div><button class="icon-button" data-close-browser-chip-menu><ha-icon icon="mdi:close"></ha-icon></button></div>${this._messageMarkup(menu.status, "browser-chip", "dialog-status error", "alert-circle-outline")}<div class="browser-chip-actions">${importantAction}${browserActions}</div></section></div>`;
   }
-  _closeChipDialog() { this._chipDialog = false; this._render(); }
+  _closeChipDialog() { this._chipDialog = false; this._refreshChipContent(true); this._refreshChipContent(); }
   _closeBrowserChipMenu() { this._browserChipMenu = null; this._render(); }
   async _saveBrowserChipPermanently() {
     const chip = this._browserChipMenu?.chip;
@@ -3244,15 +3541,20 @@ class HaListManagerInventoryCard extends HTMLElement {
     button.addEventListener("contextmenu", (event) => event.preventDefault());
   }
   _bindChipActions(root = this.shadowRoot) {
-    const chips = this._displayChips();
     root.querySelector("[data-toggle-chip-categories]")?.addEventListener("click", () => this._toggleAllChipCategories());
     root.querySelectorAll("[data-chip-category]").forEach((button) => button.addEventListener("click", () => this._toggleChipCategory(button.dataset.chipCategory, button.dataset.chipCategoryDialog === "1")));
-    root.querySelectorAll("[data-quick-chip]").forEach((button) => this._bindChipButton(button, chips.find((chip) => chip.id === button.dataset.quickChip), () => this._useChip(chips.find((chip) => chip.id === button.dataset.quickChip))));
-    root.querySelectorAll("[data-dialog-chip]").forEach((button) => {
-      const chip = chips.find((entry) => entry.id === button.dataset.dialogChip);
-      this._bindChipButton(button, chip, async () => { this._chipDialog = false; await this._useChip(chip); });
+    const quickButtons = [...root.querySelectorAll("[data-quick-chip]")];
+    const dialogButtons = [...root.querySelectorAll("[data-dialog-chip]")];
+    const chips = quickButtons.length || dialogButtons.length ? new Map(this._displayChips().map((chip) => [chip.id, chip])) : new Map();
+    quickButtons.forEach((button) => {
+      const chip = chips.get(button.dataset.quickChip);
+      this._bindChipButton(button, chip, () => this._useChip(chip));
     });
-    root.querySelector("[data-toggle-chips]")?.addEventListener("click", () => { this._chipsExpanded = !this._chipsExpanded; this._render(); });
+    dialogButtons.forEach((button) => {
+      const chip = chips.get(button.dataset.dialogChip);
+      this._bindChipButton(button, chip, async () => { this._chipDialog = false; this._refreshChipContent(true); await this._useChip(chip); });
+    });
+    root.querySelector("[data-toggle-chips]")?.addEventListener("click", () => { this._chipsExpanded = !this._chipsExpanded; this._refreshChipContent(); });
   }
 
   _renderPendingScanPicker() {
@@ -3334,94 +3636,112 @@ class HaListManagerInventoryCard extends HTMLElement {
     const hasEligibleItems = this._restockPreview.some((item) => !item.skipped);
     const transferCount = this._restockPreview.filter((item) => !item.skipped).reduce((sum, item) => sum + Number(item.quantity || 0), 0);
     const rows = this._restockPreview.map((item) => `<div class="restock-preview-row"><span><span class="restock-row-heading"><strong>${escapeHtml(item.name)}</strong><strong class="${item.skipped ? "restock-locked" : "restock-amount"}">${item.skipped ? `<ha-icon icon="mdi:flag"></ha-icon>${haListManagerInventoryCardText("ui.locked", {}, this._hass)}` : haListManagerInventoryCardText("ui.transferred_quantity", {p0:(item.quantity)}, this._hass)}</strong></span><small>${haListManagerInventoryCardText("inventory.stock_summary", {p0:(item.stock), p1:(item.minimum_stock), p2:(item.quantity)}, this._hass)}</small><small>${haListManagerInventoryCardText("ui.shopping_list_quantity", {p0:(item.already_open || 0)}, this._hass)}</small>${this._renderRestockTransferHistory(item, true)}<details class="restock-details"><summary>${haListManagerInventoryCardText("ui.show_details", {}, this._hass)}</summary>${item.effective_mode === "fixed" ? `<small>${haListManagerInventoryCardText("inventory.fixed_auto_restock_quantity", {p0:(item.effective_fixed_quantity ?? haListManagerInventoryCardText("ui.not_set", {}, this._hass))}, this._hass)}</small>` : ""}<small>${item.skipped ? haListManagerInventoryCardText("inventory.restock_locked_skip", {}, this._hass) : haListManagerInventoryCardText("ui.manual_transfer_quantity", {p0:(item.quantity)}, this._hass)}</small><small>${haListManagerInventoryCardText("help.pending_shopping_quantity", {}, this._hass)}</small>${this._renderRestockTransferHistory(item)}</details></span>${item.latched ? `<button type="button" data-reset-restock-latch="${escapeHtml(item.source_type)}:${escapeHtml(item.source_id)}" title="${haListManagerInventoryCardText("help.reset_restock_lock", {}, this._hass)}" ${this._busy ? "disabled" : ""}><ha-icon icon="mdi:flag-remove-outline"></ha-icon> ${haListManagerInventoryCardText("ui.reset_lock", {}, this._hass)}</button>` : ""}</div>`).join("");
-    return `<div class="backdrop" data-restock-backdrop><section class="dialog restock-dialog" role="dialog" aria-modal="true" aria-labelledby="restock-title"><div class="dialog-header"><h3 id="restock-title">${haListManagerInventoryCardText("inventory.transfer_shortage", {}, this._hass)}</h3><button type="button" class="icon-button" data-close-restock aria-label="${haListManagerInventoryCardText("ui.close", {}, this._hass)}"><ha-icon icon="mdi:close"></ha-icon></button></div>${this._restockDialog.target_list_name ? `<p class="field-help restock-target">${haListManagerInventoryCardText("ui.destination_label", {}, this._hass)} <strong>${escapeHtml(this._restockDialog.target_list_name)}</strong></p>` : ""}<details class="restock-explanation"><summary>${haListManagerInventoryCardText("ui.transfer_explanation", {}, this._hass)}</summary><p class="field-help"><strong>${haListManagerInventoryCardText("ui.manual_shortage", {}, this._hass)}</strong> ${haListManagerInventoryCardText("help.restock_to_minimum", {}, this._hass)}</p><p class="field-help"><strong>${haListManagerInventoryCardText("ui.automatic_fixed_restock_quantity", {}, this._hass)}</strong> ${haListManagerInventoryCardText("help.automatic_restock_quantity_only", {}, this._hass)}</p><p class="field-help">${haListManagerInventoryCardText("help.manual_restock_locks", {}, this._hass)}</p><p class="field-help">${haListManagerInventoryCardText("ui.restock_history_unavailable", {}, this._hass)}</p><p class="field-help">${haListManagerInventoryCardText("help.reset_lock_without_transfer", {}, this._hass)}</p></details><div class="restock-preview-list">${rows || `<p class="field-help">${haListManagerInventoryCardText("inventory.no_shortage", {}, this._hass)}</p>`}</div>${this._restockPreview.length && !hasEligibleItems ? `<p class="field-help">${haListManagerInventoryCardText("inventory.all_items_locked", {}, this._hass)}</p>` : ""}${!this._restockDialog.target_list_id ? `<p class="field-help">${haListManagerInventoryCardText("errors.configure_inventory_target", {}, this._hass)}</p>` : ""}${this._restockDialog.status ? `<p class="field-help" role="status">${escapeHtml(this._restockDialog.status)}</p>` : ""}${this._error ? `<p class="error" role="alert">${escapeHtml(this._error)}</p>` : ""}<div class="dialog-actions"><button type="button" class="primary" data-apply-restock ${!this._busy && this._restockDialog.target_list_id && hasEligibleItems ? "" : "disabled"}>${this._busy ? haListManagerInventoryCardText("ui.processing", {}, this._hass) : haListManagerInventoryCardText("inventory.transfer_items", {p0:(transferCount)}, this._hass)}</button><button type="button" data-close-restock>${haListManagerInventoryCardText("ui.cancel", {}, this._hass)}</button></div></section></div>`;
+    return `<div class="backdrop" data-restock-backdrop><section class="dialog restock-dialog" role="dialog" aria-modal="true" aria-labelledby="restock-title"><div class="dialog-header"><h3 id="restock-title">${haListManagerInventoryCardText("inventory.transfer_shortage", {}, this._hass)}</h3><button type="button" class="icon-button" data-close-restock aria-label="${haListManagerInventoryCardText("ui.close", {}, this._hass)}"><ha-icon icon="mdi:close"></ha-icon></button></div>${this._restockDialog.target_list_name ? `<p class="field-help restock-target">${haListManagerInventoryCardText("ui.destination_label", {}, this._hass)} <strong>${escapeHtml(this._restockDialog.target_list_name)}</strong></p>` : ""}<details class="restock-explanation"><summary>${haListManagerInventoryCardText("ui.transfer_explanation", {}, this._hass)}</summary><p class="field-help"><strong>${haListManagerInventoryCardText("ui.manual_shortage", {}, this._hass)}</strong> ${haListManagerInventoryCardText("help.restock_to_minimum", {}, this._hass)}</p><p class="field-help"><strong>${haListManagerInventoryCardText("ui.automatic_fixed_restock_quantity", {}, this._hass)}</strong> ${haListManagerInventoryCardText("help.automatic_restock_quantity_only", {}, this._hass)}</p><p class="field-help">${haListManagerInventoryCardText("help.manual_restock_locks", {}, this._hass)}</p><p class="field-help">${haListManagerInventoryCardText("ui.restock_history_unavailable", {}, this._hass)}</p><p class="field-help">${haListManagerInventoryCardText("help.reset_lock_without_transfer", {}, this._hass)}</p></details><div class="restock-preview-list">${rows || `<p class="field-help">${haListManagerInventoryCardText("inventory.no_shortage", {}, this._hass)}</p>`}</div>${this._restockPreview.length && !hasEligibleItems ? `<p class="field-help">${haListManagerInventoryCardText("inventory.all_items_locked", {}, this._hass)}</p>` : ""}${!this._restockDialog.target_list_id ? `<p class="field-help">${haListManagerInventoryCardText("errors.configure_inventory_target", {}, this._hass)}</p>` : ""}${this._messageMarkup(this._restockDialog.status, "restock", "field-help")}${this._messageMarkup(this._error, "error", "error", "alert-circle-outline")}<div class="dialog-actions"><button type="button" class="primary" data-apply-restock ${!this._busy && this._restockDialog.target_list_id && hasEligibleItems ? "" : "disabled"}>${this._busy ? haListManagerInventoryCardText("ui.processing", {}, this._hass) : haListManagerInventoryCardText("inventory.transfer_items", {p0:(transferCount)}, this._hass)}</button><button type="button" data-close-restock>${haListManagerInventoryCardText("ui.cancel", {}, this._hass)}</button></div></section></div>`;
   }
 
-  _render() {
-    if (!this._hass || this._nativeTranslationState?.ready === false) return;
-    if (this._expandedView) this._expandedScrollTop = this.shadowRoot.querySelector("ha-card")?.scrollTop ?? this._expandedScrollTop;
-    if (!this._listId()) { this.shadowRoot.innerHTML = `<style>${this._styles()}</style><ha-card><div class="empty"><strong>${haListManagerInventoryCardText("ui.select_inventory_list", {}, this._hass)}</strong><span>${haListManagerInventoryCardText("inventory.select_backend_list_help", {}, this._hass)}</span></div></ha-card>`; return; }
-    const mode = MODES(this._hass)[this._mode];
-    const view = ["panel", "mobile"].includes(this._config.view_mode)
-      ? this._config.view_mode
-      : (this._isPanelDashboardView() ? "panel" : "auto");
-    const content = this._loading && !this._loadedListId ? `<div class="empty"><ha-circular-progress active></ha-circular-progress></div>` : this._renderGroups();
-    const count = this._selectedEntryIds.size;
-    const selectionText = count === 0
-      ? haListManagerInventoryCardText("help.create_group_minimum", {}, this._hass)
-      : count === 1
-        ? haListManagerInventoryCardText("ui.select_second_group_item", {}, this._hass)
-        : haListManagerInventoryCardText("inventory.group_selection_count", {p0:(count)}, this._hass);
-    const selectionBar = this._groupSelectionMode ? `<div class="group-selection-bar"><span data-selection-message>${selectionText}</span><button type="button" class="tool-button" data-create-group ${count < 2 ? "disabled" : ""}><ha-icon icon="mdi:group-plus"></ha-icon>${haListManagerInventoryCardText("inventory.create_group", {}, this._hass)}</button><button type="button" class="tool-button" data-cancel-group-selection>${haListManagerInventoryCardText("ui.cancel", {}, this._hass)}</button></div>` : "";
-    const scannerActive = this._scannerTargetIsCurrentList();
-    const scannerHint = scannerActive
-      ? haListManagerInventoryCardText("ui.scanner_target_active", {p0:(MODES(this._hass)[this._mode].label)}, this._hass)
-      : mode.help;
-    const contentDisplay = this._config.content_display || "card_and_large";
-    const largeViewEnabled = contentDisplay !== "card_only";
-    const largeOnly = contentDisplay === "large_only";
-    const collapsible = this._config.collapsible !== false && !largeOnly;
-    const collapsed = !this._expandedView && (largeOnly || (collapsible && this._listCollapsed()));
-    const modePanelExpanded = this._modePanelExpanded();
-    const belowMinimum = this._entries.filter((entry) => entry.minimum_stock !== null && entry.stock < entry.minimum_stock).length;
-    const inventoryStatus = haListManagerInventoryCardText("ui.item_count_suffix", {p0:(this._entries.length), p1:(belowMinimum ? (" " + haListManagerInventoryCardText("inventory.below_minimum_suffix", {p0:(belowMinimum)}, this._hass)) : (" " + haListManagerInventoryCardText("inventory.minimum_met_suffix", {}, this._hass)))}, this._hass);
-    const expandedLabel = this._expandedView ? haListManagerInventoryCardText("ui.close_large_view", {}, this._hass) : haListManagerInventoryCardText("ui.open_large_view", {}, this._hass);
-    const titleIconStyle = `color:${escapeHtml(this._configuredChipColor(this._config.title_icon_color_rgb, "var(--primary-color)"))}`;
-    const titleIcon = largeViewEnabled
-      ? `<button type="button" class="inventory-title-icon inventory-expand-toggle" style="${titleIconStyle}" data-toggle-expanded-view aria-pressed="${this._expandedView}" aria-label="${expandedLabel}" title="${expandedLabel}"><ha-icon icon="${escapeHtml(this._config.title_icon || "mdi:package-variant-closed")}"></ha-icon></button>`
-      : `<span class="inventory-title-icon inventory-static-icon" style="${titleIconStyle}"><ha-icon icon="${escapeHtml(this._config.title_icon || "mdi:package-variant-closed")}"></ha-icon></span>`;
-    const titleContent = `<h2>${escapeHtml(this._config.title || haListManagerInventoryCardText("ui.inventory", {}, this._hass))}</h2><span>${escapeHtml(inventoryStatus)}</span>`;
-    const titleCopy = largeOnly
-      ? `<button type="button" class="inventory-title-copy" data-toggle-expanded-view aria-expanded="${this._expandedView}">${titleContent}</button>`
-      : collapsible
-        ? `<button type="button" class="inventory-title-copy" data-toggle-list aria-expanded="${collapsed ? "false" : "true"}">${titleContent}</button>`
-        : `<div class="inventory-title-copy">${titleContent}</div>`;
-    const titleHeader = `<div class="inventory-title">${titleIcon}${titleCopy}</div>`;
-    const modeToggle = this._config.show_mode_toggle !== false ? `<button type="button" class="inventory-mode-toggle" data-toggle-mode-panel aria-expanded="${modePanelExpanded ? "true" : "false"}"><ha-icon icon="mdi:tune-variant"></ha-icon><span>${haListManagerInventoryCardText("ui.mode", {}, this._hass)}</span><ha-icon icon="mdi:chevron-${modePanelExpanded ? "up" : "down"}"></ha-icon></button>` : "";
-    const pdfButton = this._config.show_pdf_export_button === true ? `<button type="button" class="inventory-header-action" data-export-pdf title="${haListManagerInventoryCardText("ui.export_inventory_pdf", {}, this._hass)}" ${this._pdfExporting ? "disabled" : ""}><ha-icon icon="mdi:file-pdf-box"></ha-icon><span>${this._pdfExporting ? "PDF …" : "PDF"}</span></button>` : "";
-    const itemFontSize = this._config.item_font_size;
-    const categoryFontSize = itemFontSize * this._config.category_font_scale / 100;
-    const categorySecondaryFontSize = Math.max(9, itemFontSize - 3);
-    const categoryIconSize = Math.max(18, itemFontSize * 1.25);
-    const dividerBeforeSpacing = this._config.item_divider_before_spacing;
-    const dividerAfterSpacing = this._config.item_divider_after_spacing;
-    const appearanceStyle = `--ha-list-manager-item-font-size:${itemFontSize}px;--ha-list-manager-secondary-font-size:${Math.max(10, itemFontSize - 2)}px;--ha-list-manager-tertiary-font-size:${Math.max(9, itemFontSize - 3)}px;--ha-list-manager-category-font-size:${categoryFontSize.toFixed(2)}px;--ha-list-manager-category-secondary-font-size:${categorySecondaryFontSize.toFixed(2)}px;--ha-list-manager-category-icon-size:${categoryIconSize.toFixed(2)}px;--ha-list-manager-item-divider-before-spacing:${dividerBeforeSpacing}px;--ha-list-manager-item-divider-after-spacing:${dividerAfterSpacing}px`;
-    const dividerClass = this._config.show_item_dividers ? "item-dividers" : "";
-    const productsButton = this._hass.user?.is_admin !== true || this._config.show_product_database_button === false ? "" : `<button type="button" class="inventory-header-action" data-open-products title="${haListManagerInventoryCardText("ui.open_product_database", {}, this._hass)}"><ha-icon icon="mdi:database"></ha-icon><span>${haListManagerInventoryCardText("ui.product_database_short", {}, this._hass)}</span></button>`;
-    const groupButton = this._config.show_group_button === false ? "" : `<button type="button" class="inventory-header-action ${this._groupSelectionMode ? "active" : ""}" data-toggle-group-selection aria-pressed="${this._groupSelectionMode}" title="${this._groupSelectionMode ? haListManagerInventoryCardText("ui.finish_grouping", {}, this._hass) : haListManagerInventoryCardText("inventory.group_items", {}, this._hass)}"><ha-icon icon="mdi:group"></ha-icon><span>${this._groupSelectionMode ? haListManagerInventoryCardText("ui.finish_grouping", {}, this._hass) : haListManagerInventoryCardText("ui.group_action", {}, this._hass)}</span></button>`;
-    const controlCodesButton = `<button type="button" class="inventory-header-action" data-open-control-codes title="${haListManagerInventoryCardText("scanner.show_transaction_qr_codes", {}, this._hass)}"><ha-icon icon="mdi:qrcode"></ha-icon><span>${haListManagerInventoryCardText("ui.qr_codes", {}, this._hass)}</span></button>`;
-    const restockButton = `<button type="button" class="inventory-header-action" data-open-restock-preview title="${haListManagerInventoryCardText("ui.review_transfer_shortage", {}, this._hass)}"><ha-icon icon="mdi:cart-arrow-down"></ha-icon><span>${haListManagerInventoryCardText("ui.stock_shortage", {}, this._hass)}</span></button>`;
-    const compactRestockButtons = `<button type="button" data-open-restock-preview><ha-icon icon="mdi:cart-arrow-down"></ha-icon><span>${haListManagerInventoryCardText("inventory.transfer_shortage", {}, this._hass)}</span></button>`;
-    const compactControlCodesButton = `<button type="button" data-open-control-codes><ha-icon icon="mdi:qrcode"></ha-icon><span>${haListManagerInventoryCardText("ui.stock_mode_qr_codes", {}, this._hass)}</span></button>`;
-    const compactMenuItems = `${modeToggle ? `<button type="button" data-toggle-mode-panel><ha-icon icon="mdi:tune-variant"></ha-icon><span>${haListManagerInventoryCardText("ui.select_mode", {}, this._hass)}</span><ha-icon class="compact-menu-chevron" icon="mdi:chevron-${modePanelExpanded ? "up" : "down"}"></ha-icon></button>` : ""}${compactControlCodesButton}${compactRestockButtons}${productsButton ? `<button type="button" data-open-products><ha-icon icon="mdi:database"></ha-icon><span>${haListManagerInventoryCardText("ui.open_product_database_short", {}, this._hass)}</span></button>` : ""}${groupButton ? `<button type="button" class="${this._groupSelectionMode ? "active" : ""}" data-toggle-group-selection aria-pressed="${this._groupSelectionMode}"><ha-icon icon="mdi:group"></ha-icon><span>${this._groupSelectionMode ? haListManagerInventoryCardText("ui.finish_grouping", {}, this._hass) : haListManagerInventoryCardText("inventory.group_items", {}, this._hass)}</span></button>` : ""}${pdfButton ? `<button type="button" data-export-pdf ${this._pdfExporting ? "disabled" : ""}><ha-icon icon="mdi:file-pdf-box"></ha-icon><span>${this._pdfExporting ? haListManagerInventoryCardText("ui.pdf_creating", {}, this._hass) : haListManagerInventoryCardText("ui.export_pdf", {}, this._hass)}</span></button>` : ""}`;
-    const wideHeaderActions = `${modeToggle}${controlCodesButton}${restockButton}${productsButton}${groupButton}${pdfButton}`;
-    const headerActions = wideHeaderActions ? `<div class="inventory-header-actions"><div class="inventory-header-actions-wide">${wideHeaderActions}</div><div class="compact-header-actions"><button type="button" class="inventory-header-action compact-actions-toggle" data-toggle-header-menu aria-expanded="${this._headerMenuOpen}" title="${haListManagerInventoryCardText("ui.actions", {}, this._hass)}"><ha-icon icon="mdi:dots-horizontal"></ha-icon></button>${this._headerMenuOpen ? `<div class="compact-actions-menu">${compactMenuItems}</div>` : ""}</div></div>` : "";
-    const inventoryHeader = `<div class="inventory-header">${titleHeader}${headerActions}</div>`;
-    const scannerTargetButton = this._config.show_scanner_target_button === false ? "" : `<button class="mode-button scanner ${scannerActive ? "active" : ""}" type="button" title="${scannerActive ? haListManagerInventoryCardText("scanner.deactivate_target", {}, this._hass) : haListManagerInventoryCardText("scanner.activate_this_inventory", {}, this._hass)}" data-toggle-scanner-target><ha-icon icon="mdi:qrcode-scan"></ha-icon></button>`;
-    const modePanel = this._config.show_mode_toggle !== false && modePanelExpanded ? `<div class="mode-panel"><div class="modes">${Object.entries(MODES(this._hass)).map(([key, value]) => `<button type="button" class="mode-button mode-${key} ${key === this._mode ? "active" : ""}" style="--mode-color:${value.color}" data-mode="${key}"><ha-icon icon="${value.icon}"></ha-icon><span data-mode-label="${key}">${value.label}${key === this._mode && this._modeRemaining ? ` (${this._modeRemaining})` : ""}</span></button>`).join("")}${scannerTargetButton}</div><p>${escapeHtml(scannerHint)}</p></div>` : "";
-    const showChipButton = this._config.show_chip_popup_button !== false && this._displayChips().length;
-    const inputActions = `<button type="button" class="clear-input ${showChipButton ? "with-chip-trigger" : ""}" data-clear-input aria-label="${haListManagerInventoryCardText("ui.clear_input", {}, this._hass)}" title="${haListManagerInventoryCardText("ui.clear_input", {}, this._hass)}" ${this._inputValue ? "" : "hidden"}><ha-icon icon="mdi:close-circle"></ha-icon></button>${showChipButton ? `<button type="button" class="chip-popup-trigger" data-open-chip-dialog aria-label="${haListManagerInventoryCardText("chips.open", {}, this._hass)}" title="${haListManagerInventoryCardText("chips.open", {}, this._hass)}"><ha-icon icon="mdi:gesture-tap-button"></ha-icon></button>` : ""}`;
-    this._saveInventoryUndo();
-    const actionStatus = this._actionStatus ? `<div class="inventory-action-status" role="status"><ha-icon icon="mdi:check-circle-outline"></ha-icon><span>${escapeHtml(this._actionStatus)}</span>${this._lastInventoryBooking && this._lastInventoryBooking.listId === this._listId() && this._lastInventoryBooking.expires > Date.now() ? `<button type="button" class="tool-button" data-undo-booking><ha-icon icon="mdi:undo-variant"></ha-icon><span>${haListManagerInventoryCardText("ui.undo_countdown_prefix", {}, this._hass)}<span data-undo-countdown>${Math.max(0, Math.ceil((this._lastInventoryBooking.expires - Date.now()) / 1000))} s</span>)</span></button>` : ""}</div>` : "";
-    const quantityInput = this._config.show_quantity_box === false ? "" : `<input class="quantity" type="number" min="1" step="1" value="1" placeholder="${haListManagerInventoryCardText("ui.count", {}, this._hass)}" data-quantity>`;
-    const submitButton = this._config.show_submit_button === false ? "" : `<button class="action-button" type="button" data-action>${escapeHtml(mode.label)}</button>`;
-    const cameraButton = this._config.show_camera_scan_button === false ? "" : `<button class="scan-button" type="button" title="${haListManagerInventoryCardText("ui.scan_ean_camera", {}, this._hass)}" data-camera-scan><ha-icon icon="mdi:qrcode-scan"></ha-icon></button>`;
-    const inputBlock = `<div class="input-row">${quantityInput}<div class="product-input"><input class="${showChipButton ? "has-chip-trigger" : ""}" type="text" value="${escapeHtml(this._inputValue)}" placeholder="${haListManagerInventoryCardText("ui.item_or_ean", {}, this._hass)}" autocomplete="off" data-product-input>${inputActions}<div class="suggestions" data-suggestions hidden></div></div>${submitButton}${cameraButton}</div>${actionStatus}`;
-    const toolbar = this._renderToolbar();
-    const registrationButton = this._registrationOffer && this._mode === "correct" && this._registrationOffer.value === this._inputValue.trim() && this._error === this._registrationOffer.message ? `<button type="button" class="tool-button" data-register-missing>${haListManagerInventoryCardText("ui.register", {}, this._hass)}</button>` : "";
-    const beforeEntries = `${this._config.input_row_position === "bottom" ? "" : inputBlock}${this._config.option_row_position === "bottom" ? "" : toolbar}${selectionBar}${this._error ? `<div class="error"><ha-icon icon="mdi:alert-circle-outline"></ha-icon><span>${escapeHtml(this._error)}</span>${registrationButton}</div>` : ""}`;
-    const afterEntries = `${this._config.option_row_position === "bottom" ? toolbar : ""}${this._config.input_row_position === "bottom" ? inputBlock : ""}`;
-    const listContent = `${modePanel}${beforeEntries}<div class="entries">${content}</div>${afterEntries}`;
-    const cardBody = collapsed ? "" : `<div class="inventory-card-layout"><div class="inventory-list-column">${listContent}</div>${this._renderChips()}</div>`;
-    this.shadowRoot.innerHTML = `<style>${this._styles()}</style><ha-card class="view-${view} chips-position-${escapeHtml(this._config.chips_position)} ${dividerClass} ${collapsed ? "list-collapsed" : ""}" style="--active-mode-color:${mode.color};${appearanceStyle}">${inventoryHeader}${cardBody}${this._renderDialog()}${this._renderMemberPicker()}${this._renderGroupPicker()}${this._renderPendingScanPicker()}${this._renderRestockDialog()}${this._renderInventoryUndoChoice()}${this._renderConfirmation()}${this._renderControlCodes()}${this._renderChipDialog()}${this._renderBrowserChipMenu()}</ha-card>`;
-    this._bindEvents();
-    if (this._controlCodesOpen) this._drawControlCodes();
-    this._restoreExpandedScroll();
-    const filter = this.shadowRoot.querySelector("[data-filter]"); if (filter) filter.value = this._filter;
+  _render(preserveCard = false) {
+    return this._withRenderData(() => {
+      if (!this._hass || this._nativeTranslationState?.ready === false) return;
+      if (this._selectionPopup?.parent !== this._dialog) this._selectionPopup = null;
+      if (this._expandedView) this._expandedScrollTop = this.shadowRoot.querySelector("ha-card")?.scrollTop ?? this._expandedScrollTop;
+      if (!this._listId()) { this.shadowRoot.innerHTML = `<style>${this._styles()}</style><ha-card><div class="empty"><strong>${haListManagerInventoryCardText("ui.select_inventory_list", {}, this._hass)}</strong><span>${haListManagerInventoryCardText("inventory.select_backend_list_help", {}, this._hass)}</span></div></ha-card>`; return; }
+      const mode = MODES(this._hass)[this._mode];
+      const view = ["panel", "mobile"].includes(this._config.view_mode)
+        ? this._config.view_mode
+        : (this._isPanelDashboardView() ? "panel" : "auto");
+      const content = this._loading && !this._loadedListId ? `<div class="empty"><ha-circular-progress active></ha-circular-progress></div>` : this._renderGroups();
+      const count = this._selectedEntryIds.size;
+      const selectionText = count === 0
+        ? haListManagerInventoryCardText("help.create_group_minimum", {}, this._hass)
+        : count === 1
+          ? haListManagerInventoryCardText("ui.select_second_group_item", {}, this._hass)
+          : haListManagerInventoryCardText("inventory.group_selection_count", {p0:(count)}, this._hass);
+      const selectionBar = this._groupSelectionMode ? `<div class="group-selection-bar"><span data-selection-message>${selectionText}</span><button type="button" class="tool-button" data-create-group ${count < 2 ? "disabled" : ""}><ha-icon icon="mdi:group-plus"></ha-icon>${haListManagerInventoryCardText("inventory.create_group", {}, this._hass)}</button><button type="button" class="tool-button" data-cancel-group-selection>${haListManagerInventoryCardText("ui.cancel", {}, this._hass)}</button></div>` : "";
+      const scannerActive = this._scannerTargetIsCurrentList();
+      const scannerHint = scannerActive
+        ? haListManagerInventoryCardText("ui.scanner_target_active", {p0:(MODES(this._hass)[this._mode].label)}, this._hass)
+        : mode.help;
+      const contentDisplay = this._config.content_display || "card_and_large";
+      const largeViewEnabled = contentDisplay !== "card_only";
+      const largeOnly = contentDisplay === "large_only";
+      const collapsible = this._config.collapsible !== false && !largeOnly;
+      const collapsed = !this._expandedView && (largeOnly || (collapsible && this._listCollapsed()));
+      const modePanelExpanded = this._modePanelExpanded();
+      const belowMinimum = this._entries.filter((entry) => entry.minimum_stock !== null && entry.stock < entry.minimum_stock).length;
+      const inventoryStatus = haListManagerInventoryCardText("ui.item_count_suffix", {p0:(this._entries.length), p1:(belowMinimum ? (" " + haListManagerInventoryCardText("inventory.below_minimum_suffix", {p0:(belowMinimum)}, this._hass)) : (" " + haListManagerInventoryCardText("inventory.minimum_met_suffix", {}, this._hass)))}, this._hass);
+      const expandedLabel = this._expandedView ? haListManagerInventoryCardText("ui.close_large_view", {}, this._hass) : haListManagerInventoryCardText("ui.open_large_view", {}, this._hass);
+      const titleIconStyle = `color:${escapeHtml(this._configuredChipColor(this._config.title_icon_color_rgb, "var(--primary-color)"))}`;
+      const titleIcon = largeViewEnabled
+        ? `<button type="button" class="inventory-title-icon inventory-expand-toggle" style="${titleIconStyle}" data-toggle-expanded-view aria-pressed="${this._expandedView}" aria-label="${expandedLabel}" title="${expandedLabel}"><ha-icon icon="${escapeHtml(this._config.title_icon || "mdi:package-variant-closed")}"></ha-icon></button>`
+        : `<span class="inventory-title-icon inventory-static-icon" style="${titleIconStyle}"><ha-icon icon="${escapeHtml(this._config.title_icon || "mdi:package-variant-closed")}"></ha-icon></span>`;
+      const titleContent = `<h2>${escapeHtml(this._config.title || haListManagerInventoryCardText("ui.inventory", {}, this._hass))}</h2><span>${escapeHtml(inventoryStatus)}</span>`;
+      const titleCopy = largeOnly
+        ? `<button type="button" class="inventory-title-copy" data-toggle-expanded-view aria-expanded="${this._expandedView}">${titleContent}</button>`
+        : collapsible
+          ? `<button type="button" class="inventory-title-copy" data-toggle-list aria-expanded="${collapsed ? "false" : "true"}">${titleContent}</button>`
+          : `<div class="inventory-title-copy">${titleContent}</div>`;
+      const titleHeader = `<div class="inventory-title">${titleIcon}${titleCopy}</div>`;
+      const modeToggle = this._config.show_mode_toggle !== false ? `<button type="button" class="inventory-mode-toggle" data-toggle-mode-panel aria-expanded="${modePanelExpanded ? "true" : "false"}"><ha-icon icon="mdi:tune-variant"></ha-icon><span>${haListManagerInventoryCardText("ui.mode", {}, this._hass)}</span><ha-icon icon="mdi:chevron-${modePanelExpanded ? "up" : "down"}"></ha-icon></button>` : "";
+      const pdfButton = this._config.show_pdf_export_button === true ? `<button type="button" class="inventory-header-action" data-export-pdf title="${haListManagerInventoryCardText("ui.export_inventory_pdf", {}, this._hass)}" ${this._pdfExporting ? "disabled" : ""}><ha-icon icon="mdi:file-pdf-box"></ha-icon><span>${this._pdfExporting ? "PDF …" : "PDF"}</span></button>` : "";
+      const itemFontSize = this._config.item_font_size;
+      const categoryFontSize = itemFontSize * this._config.category_font_scale / 100;
+      const categorySecondaryFontSize = Math.max(9, itemFontSize - 3);
+      const categoryIconSize = Math.max(18, itemFontSize * 1.25);
+      const dividerBeforeSpacing = this._config.item_divider_before_spacing;
+      const dividerAfterSpacing = this._config.item_divider_after_spacing;
+      const appearanceStyle = `--ha-list-manager-item-font-size:${itemFontSize}px;--ha-list-manager-secondary-font-size:${Math.max(10, itemFontSize - 2)}px;--ha-list-manager-tertiary-font-size:${Math.max(9, itemFontSize - 3)}px;--ha-list-manager-category-font-size:${categoryFontSize.toFixed(2)}px;--ha-list-manager-category-secondary-font-size:${categorySecondaryFontSize.toFixed(2)}px;--ha-list-manager-category-icon-size:${categoryIconSize.toFixed(2)}px;--ha-list-manager-item-divider-before-spacing:${dividerBeforeSpacing}px;--ha-list-manager-item-divider-after-spacing:${dividerAfterSpacing}px`;
+      const dividerClass = this._config.show_item_dividers ? "item-dividers" : "";
+      const productsButton = this._hass.user?.is_admin !== true || this._config.show_product_database_button === false ? "" : `<button type="button" class="inventory-header-action" data-open-products title="${haListManagerInventoryCardText("ui.open_product_database", {}, this._hass)}"><ha-icon icon="mdi:database"></ha-icon><span>${haListManagerInventoryCardText("ui.product_database_short", {}, this._hass)}</span></button>`;
+      const groupButton = this._config.show_group_button === false ? "" : `<button type="button" class="inventory-header-action ${this._groupSelectionMode ? "active" : ""}" data-toggle-group-selection aria-pressed="${this._groupSelectionMode}" title="${this._groupSelectionMode ? haListManagerInventoryCardText("ui.finish_grouping", {}, this._hass) : haListManagerInventoryCardText("inventory.group_items", {}, this._hass)}"><ha-icon icon="mdi:group"></ha-icon><span>${this._groupSelectionMode ? haListManagerInventoryCardText("ui.finish_grouping", {}, this._hass) : haListManagerInventoryCardText("ui.group_action", {}, this._hass)}</span></button>`;
+      const controlCodesButton = `<button type="button" class="inventory-header-action" data-open-control-codes title="${haListManagerInventoryCardText("scanner.show_transaction_qr_codes", {}, this._hass)}"><ha-icon icon="mdi:qrcode"></ha-icon><span>${haListManagerInventoryCardText("ui.qr_codes", {}, this._hass)}</span></button>`;
+      const restockButton = `<button type="button" class="inventory-header-action" data-open-restock-preview title="${haListManagerInventoryCardText("ui.review_transfer_shortage", {}, this._hass)}"><ha-icon icon="mdi:cart-arrow-down"></ha-icon><span>${haListManagerInventoryCardText("ui.stock_shortage", {}, this._hass)}</span></button>`;
+      const compactRestockButtons = `<button type="button" data-open-restock-preview><ha-icon icon="mdi:cart-arrow-down"></ha-icon><span>${haListManagerInventoryCardText("inventory.transfer_shortage", {}, this._hass)}</span></button>`;
+      const compactControlCodesButton = `<button type="button" data-open-control-codes><ha-icon icon="mdi:qrcode"></ha-icon><span>${haListManagerInventoryCardText("ui.stock_mode_qr_codes", {}, this._hass)}</span></button>`;
+      const compactMenuItems = `${modeToggle ? `<button type="button" data-toggle-mode-panel><ha-icon icon="mdi:tune-variant"></ha-icon><span>${haListManagerInventoryCardText("ui.select_mode", {}, this._hass)}</span><ha-icon class="compact-menu-chevron" icon="mdi:chevron-${modePanelExpanded ? "up" : "down"}"></ha-icon></button>` : ""}${compactControlCodesButton}${compactRestockButtons}${productsButton ? `<button type="button" data-open-products><ha-icon icon="mdi:database"></ha-icon><span>${haListManagerInventoryCardText("ui.open_product_database_short", {}, this._hass)}</span></button>` : ""}${groupButton ? `<button type="button" class="${this._groupSelectionMode ? "active" : ""}" data-toggle-group-selection aria-pressed="${this._groupSelectionMode}"><ha-icon icon="mdi:group"></ha-icon><span>${this._groupSelectionMode ? haListManagerInventoryCardText("ui.finish_grouping", {}, this._hass) : haListManagerInventoryCardText("inventory.group_items", {}, this._hass)}</span></button>` : ""}${pdfButton ? `<button type="button" data-export-pdf ${this._pdfExporting ? "disabled" : ""}><ha-icon icon="mdi:file-pdf-box"></ha-icon><span>${this._pdfExporting ? haListManagerInventoryCardText("ui.pdf_creating", {}, this._hass) : haListManagerInventoryCardText("ui.export_pdf", {}, this._hass)}</span></button>` : ""}`;
+      const wideHeaderActions = `${modeToggle}${controlCodesButton}${restockButton}${productsButton}${groupButton}${pdfButton}`;
+      const headerActions = wideHeaderActions ? `<div class="inventory-header-actions"><div class="inventory-header-actions-wide">${wideHeaderActions}</div><div class="compact-header-actions"><button type="button" class="inventory-header-action compact-actions-toggle" data-toggle-header-menu aria-expanded="${this._headerMenuOpen}" title="${haListManagerInventoryCardText("ui.actions", {}, this._hass)}"><ha-icon icon="mdi:dots-horizontal"></ha-icon></button>${this._headerMenuOpen ? `<div class="compact-actions-menu">${compactMenuItems}</div>` : ""}</div></div>` : "";
+      const inventoryHeader = `<div class="inventory-header">${titleHeader}${headerActions}</div>`;
+      const scannerTargetButton = this._config.show_scanner_target_button === false ? "" : `<button class="mode-button scanner ${scannerActive ? "active" : ""}" type="button" title="${scannerActive ? haListManagerInventoryCardText("scanner.deactivate_target", {}, this._hass) : haListManagerInventoryCardText("scanner.activate_this_inventory", {}, this._hass)}" data-toggle-scanner-target><ha-icon icon="mdi:qrcode-scan"></ha-icon></button>`;
+      const modePanel = this._config.show_mode_toggle !== false && modePanelExpanded ? `<div class="mode-panel"><div class="modes">${Object.entries(MODES(this._hass)).map(([key, value]) => `<button type="button" class="mode-button mode-${key} ${key === this._mode ? "active" : ""}" style="--mode-color:${value.color}" data-mode="${key}"><ha-icon icon="${value.icon}"></ha-icon><span data-mode-label="${key}">${value.label}${key === this._mode && this._modeRemaining ? ` (${this._modeRemaining})` : ""}</span></button>`).join("")}${scannerTargetButton}</div><p>${escapeHtml(scannerHint)}</p></div>` : "";
+      const showChipButton = this._config.show_chip_popup_button !== false && this._displayChips().length;
+      const inputActions = `<button type="button" class="clear-input ${showChipButton ? "with-chip-trigger" : ""}" data-clear-input aria-label="${haListManagerInventoryCardText("ui.clear_input", {}, this._hass)}" title="${haListManagerInventoryCardText("ui.clear_input", {}, this._hass)}" ${this._inputValue ? "" : "hidden"}><ha-icon icon="mdi:close-circle"></ha-icon></button>${showChipButton ? `<button type="button" class="chip-popup-trigger" data-open-chip-dialog aria-label="${haListManagerInventoryCardText("chips.open", {}, this._hass)}" title="${haListManagerInventoryCardText("chips.open", {}, this._hass)}"><ha-icon icon="mdi:gesture-tap-button"></ha-icon></button>` : ""}`;
+      this._saveInventoryUndo();
+      const undoAction = this._lastInventoryBooking && this._lastInventoryBooking.listId === this._listId() && this._lastInventoryBooking.expires > Date.now() ? `<button type="button" class="tool-button" data-undo-booking><ha-icon icon="mdi:undo-variant"></ha-icon><span>${haListManagerInventoryCardText("ui.undo_countdown_prefix", {}, this._hass)}<span data-undo-countdown>${Math.max(0, Math.ceil((this._lastInventoryBooking.expires - Date.now()) / 1000))} s</span>)</span></button>` : "";
+      const actionStatus = this._actionStatus ? this._messageMarkup(this._actionStatus, "action", "inventory-action-status", "check-circle-outline", undoAction) : undoAction ? `<div class="inventory-action-status inventory-undo-only">${undoAction}</div>` : "";
+      const quantityInput = this._config.show_quantity_box === false ? "" : `<input class="quantity" type="number" min="1" step="1" value="1" placeholder="${haListManagerInventoryCardText("ui.count", {}, this._hass)}" data-quantity>`;
+      const submitButton = this._config.show_submit_button === false ? "" : `<button class="action-button" type="button" data-action>${escapeHtml(mode.label)}</button>`;
+      const cameraButton = this._config.show_camera_scan_button === false ? "" : `<button class="scan-button" type="button" title="${haListManagerInventoryCardText("ui.scan_ean_camera", {}, this._hass)}" data-camera-scan><ha-icon icon="mdi:qrcode-scan"></ha-icon></button>`;
+      const inputBlock = `<div class="input-row">${quantityInput}<div class="product-input"><input class="${showChipButton ? "has-chip-trigger" : ""}" type="text" value="${escapeHtml(this._inputValue)}" placeholder="${haListManagerInventoryCardText("ui.item_or_ean", {}, this._hass)}" autocomplete="off" data-product-input>${inputActions}<div class="suggestions" data-suggestions hidden></div></div>${submitButton}${cameraButton}</div>${actionStatus}`;
+      const toolbar = this._renderToolbar();
+      const registrationButton = this._registrationOffer && this._mode === "correct" && this._registrationOffer.value === this._inputValue.trim() && this._error === this._registrationOffer.message ? `<button type="button" class="tool-button" data-register-missing>${haListManagerInventoryCardText("ui.register", {}, this._hass)}</button>` : "";
+      const beforeEntries = `${this._config.input_row_position === "bottom" ? "" : inputBlock}${this._config.option_row_position === "bottom" ? "" : toolbar}${selectionBar}${this._messageMarkup(this._error, "error", "error", "alert-circle-outline", registrationButton)}`;
+      const afterEntries = `${this._config.option_row_position === "bottom" ? toolbar : ""}${this._config.input_row_position === "bottom" ? inputBlock : ""}`;
+      const listContent = `${modePanel}${beforeEntries}<div class="entries">${content}</div>${afterEntries}`;
+      const cardBody = collapsed ? "" : `<div class="inventory-card-layout"><div class="inventory-list-column">${listContent}</div>${this._renderChips()}</div>`;
+      const cardClass = `view-${view} chips-position-${this._config.chips_position} ${dividerClass} ${collapsed ? "list-collapsed" : ""}`;
+      const cardStyle = `--active-mode-color:${mode.color};${appearanceStyle}`;
+      const contents = `${inventoryHeader}${cardBody}${this._renderOverlayMarkup()}`;
+      const existingCard = preserveCard ? this.shadowRoot.querySelector("ha-card") : null;
+      if (existingCard) {
+        // Keeping HA's card and stylesheet mounted avoids a transient empty
+        // host that can reset dashboard layout/scroll during metadata updates.
+        existingCard.setAttribute("class", cardClass);
+        existingCard.setAttribute("style", cardStyle);
+        existingCard.innerHTML = contents;
+        this._bindEvents(existingCard);
+      } else {
+        this.shadowRoot.innerHTML = `<style>${this._styles()}</style><ha-card class="${escapeHtml(cardClass)}" style="${cardStyle}">${contents}</ha-card>`;
+        this._bindEvents();
+      }
+      if (this._controlCodesOpen) this._drawControlCodes();
+      this._restoreExpandedScroll();
+      const filter = this.shadowRoot.querySelector("[data-filter]"); if (filter) filter.value = this._filter;
+      this._inventoryViewDirty = false;
+    });
   }
 
-  _bindDialogScrollGuard() {
-    this.shadowRoot.querySelectorAll(".backdrop").forEach((backdrop) => this._guardBackdropScroll(backdrop));
+  _bindDialogScrollGuard(root = this.shadowRoot) {
+    root.querySelectorAll(".backdrop").forEach((backdrop) => this._guardBackdropScroll(backdrop));
   }
 
   _guardBackdropScroll(backdrop) {
@@ -3462,19 +3782,30 @@ class HaListManagerInventoryCard extends HTMLElement {
   }
 
   _refreshInventoryContent() {
-    const entries = this.shadowRoot.querySelector(".entries");
-    if (entries) entries.innerHTML = this._renderGroups();
-    const toggle = this.shadowRoot.querySelector("[data-toggle-categories]");
-    if (toggle) toggle.disabled = this._searchExpandsGroups() || !this._groups().some(({ flat, units }) => !flat && units.length);
-    this._bindInventoryRowEvents();
+    return this._withRenderData(() => {
+      const entries = this.shadowRoot.querySelector(".entries");
+      if (entries) entries.innerHTML = this._renderGroups();
+      const toggle = this.shadowRoot.querySelector("[data-toggle-categories]");
+      if (toggle) toggle.disabled = this._searchExpandsGroups() || !this._groups().some(({ flat, units }) => !flat && units.length);
+      this._bindInventoryRowEvents();
+    });
   }
 
-  _refreshChipContent() {
-    const panel = this.shadowRoot.querySelector(".quick-chips-panel");
-    if (!panel) return;
-    panel.outerHTML = this._renderChips();
-    const nextPanel = this.shadowRoot.querySelector(".quick-chips-panel");
-    if (nextPanel) this._bindChipActions(nextPanel);
+  _refreshChipContent(dialog = false) {
+    return this._withRenderData(() => {
+      if (dialog) {
+        const region = this.shadowRoot.querySelector("[data-inventory-chip-overlay]");
+        if (!region) { this._render(); return; }
+        region.innerHTML = this._renderChipDialog();
+        this._bindEvents(region);
+        return;
+      }
+      const panel = this.shadowRoot.querySelector(".quick-chips-panel");
+      if (!panel) return;
+      panel.outerHTML = this._renderChips();
+      const nextPanel = this.shadowRoot.querySelector(".quick-chips-panel");
+      if (nextPanel) this._bindChipActions(nextPanel);
+    });
   }
 
   _bindInventoryRowEvents(root = this.shadowRoot, bindCategories = true) {
@@ -3490,8 +3821,8 @@ class HaListManagerInventoryCard extends HTMLElement {
     root.querySelectorAll("[data-view-image]").forEach((button) => button.addEventListener("click", () => { const entry = this._entries.find((item) => item.id === button.dataset.viewImage); if (entry?.product?.image_url) this._openImageDialog(entry.product.image_url, entry.product.name); }));
   }
 
-  _bindMemberPickerChoices() {
-    this.shadowRoot.querySelectorAll("[data-member-picker-entry]").forEach((checkbox) => checkbox.addEventListener("change", () => {
+  _bindMemberPickerChoices(root = this.shadowRoot) {
+    root.querySelectorAll("[data-member-picker-entry]").forEach((checkbox) => checkbox.addEventListener("change", () => {
       if (!this._memberPicker) return;
       const entry = this._entries.find((item) => item.id === checkbox.dataset.memberPickerEntry);
       if (!checkbox.checked) {
@@ -3511,8 +3842,8 @@ class HaListManagerInventoryCard extends HTMLElement {
     }));
   }
 
-  _bindGroupPickerChoices() {
-    this.shadowRoot.querySelectorAll("[data-join-group]").forEach((button) => button.addEventListener("click", () => {
+  _bindGroupPickerChoices(root = this.shadowRoot) {
+    root.querySelectorAll("[data-join-group]").forEach((button) => button.addEventListener("click", () => {
       const group = this._inventoryGroups.find((item) => item.id === button.dataset.joinGroup);
       if (group && this._groupPicker?.entry) {
         const entry = this._groupPicker.entry;
@@ -3521,54 +3852,57 @@ class HaListManagerInventoryCard extends HTMLElement {
     }));
   }
 
-  _bindEvents() {
-    this.shadowRoot.querySelector("[data-toggle-item-actions]")?.addEventListener("click", (event) => {
+  _bindEvents(root = this.shadowRoot) {
+    this._bindMessageDismissals(root);
+    this._bindSelectionTriggers(root);
+    this._bindSelectionPopup(root);
+    root.querySelector("[data-toggle-item-actions]")?.addEventListener("click", (event) => {
       event.stopPropagation();
       this._syncDialogDraft();
       this._itemActionMenuOpen = !this._itemActionMenuOpen;
       this._renderItemActionTransition(this._itemActionView(), this._itemActionMenuOpen ? "[data-item-action]" : "[data-toggle-item-actions]");
     });
-    this.shadowRoot.querySelectorAll("[data-item-action]").forEach((button) => button.addEventListener("click", (event) => {
+    root.querySelectorAll("[data-item-action]").forEach((button) => button.addEventListener("click", (event) => {
       event.stopPropagation();
       this._openItemAction(button.dataset.itemAction);
     }));
-    this.shadowRoot.querySelector(".item-action-menu")?.addEventListener("keydown", (event) => {
+    root.querySelector(".item-action-menu")?.addEventListener("keydown", (event) => {
       if (event.key === "Escape") {
         event.preventDefault(); event.stopPropagation(); this._hideItemActionMenu();
-        this.shadowRoot.querySelector("[data-toggle-item-actions]")?.focus({ preventScroll: true });
+        root.querySelector("[data-toggle-item-actions]")?.focus({ preventScroll: true });
       } else if (["ArrowDown", "ArrowUp"].includes(event.key)) {
         event.preventDefault(); event.stopPropagation();
-        const buttons = [...this.shadowRoot.querySelectorAll("[data-item-action]")].filter((button) => !button.disabled);
+        const buttons = [...root.querySelectorAll("[data-item-action]")].filter((button) => !button.disabled);
         const index = buttons.indexOf(this.shadowRoot.activeElement);
         buttons[(index + (event.key === "ArrowDown" ? 1 : buttons.length - 1)) % buttons.length]?.focus({ preventScroll: true });
       }
     });
-    this.shadowRoot.querySelectorAll("[data-close-item-action]").forEach((button) => button.addEventListener("click", () => this._closeItemAction()));
-    this.shadowRoot.querySelector("[data-item-action-backdrop]")?.addEventListener("click", (event) => { if (event.target === event.currentTarget) this._closeItemAction(); });
-    this.shadowRoot.querySelector("[data-item-action-backdrop]")?.addEventListener("keydown", (event) => { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); this._closeItemAction(); } });
-    this.shadowRoot.querySelector("[data-item-action-target]")?.addEventListener("change", (event) => { if (this._itemAction) this._itemAction.targetId = event.target.value; });
-    this.shadowRoot.querySelector("[data-item-action-quantity]")?.addEventListener("input", (event) => { if (this._itemAction) this._itemAction.quantity = event.target.value; });
-    this.shadowRoot.querySelectorAll("[data-item-action-target],[data-item-action-quantity]").forEach((field) => field.addEventListener("keydown", (event) => { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); this._closeItemAction(); } }));
-    this.shadowRoot.querySelector("[data-confirm-item-action]")?.addEventListener("click", () => this._confirmItemAction());
-    this.shadowRoot.querySelector("ha-card")?.addEventListener("scroll", (event) => { if (this._expandedView) this._expandedScrollTop = event.currentTarget.scrollTop; }, { passive: true });
-    this.shadowRoot.querySelectorAll("[data-toggle-expanded-view]").forEach((element) => element.addEventListener("click", (event) => this._toggleExpandedView(event)));
-    this.shadowRoot.querySelector("[data-toggle-list]")?.addEventListener("click", () => { if (!this._expandedView) this._toggleList(); });
-    this.shadowRoot.querySelector("[data-toggle-header-menu]")?.addEventListener("click", () => { this._headerMenuOpen = !this._headerMenuOpen; this._render(); });
-    this.shadowRoot.querySelectorAll("[data-toggle-mode-panel]").forEach((button) => button.addEventListener("click", () => { this._headerMenuOpen = false; this._toggleModePanel(); }));
-    this.shadowRoot.querySelectorAll("[data-export-pdf]").forEach((button) => button.addEventListener("click", () => { this._headerMenuOpen = false; this._exportPdf(); }));
-    this.shadowRoot.querySelectorAll("[data-open-control-codes]").forEach((button) => button.addEventListener("click", () => this._openControlCodes()));
-    this.shadowRoot.querySelector("[data-undo-booking]")?.addEventListener("click", () => this._undoInventoryBooking());
-    this.shadowRoot.querySelector("[data-undo-stock]")?.addEventListener("click", () => this._undoInventoryBooking(false));
-    this.shadowRoot.querySelector("[data-undo-both]")?.addEventListener("click", () => this._undoInventoryBooking(true));
-    this.shadowRoot.querySelector("[data-cancel-undo]")?.addEventListener("click", () => { this._undoChoice = false; this._render(); });
-    this.shadowRoot.querySelectorAll("[data-open-restock-preview]").forEach((button) => button.addEventListener("click", () => this._openRestockDialog()));
-    this.shadowRoot.querySelectorAll("[data-close-restock]").forEach((button) => button.addEventListener("click", () => { this._restockDialog = null; this._render(); }));
-    this.shadowRoot.querySelector("[data-restock-backdrop]")?.addEventListener("click", (event) => { if (event.target === event.currentTarget) { this._restockDialog = null; this._render(); } });
-    this.shadowRoot.querySelector("[data-apply-restock]")?.addEventListener("click", () => this._applyRestockPreview());
-    this.shadowRoot.querySelectorAll("[data-reset-restock-latch]").forEach((button) => button.addEventListener("click", () => { const [type, id] = button.dataset.resetRestockLatch.split(":"); this._resetRestockLatch(type, id); }));
-    this.shadowRoot.querySelectorAll("[data-close-control-codes]").forEach((button) => button.addEventListener("click", () => this._closeControlCodes()));
-    this.shadowRoot.querySelector("[data-control-codes-backdrop]")?.addEventListener("click", (event) => { if (event.target === event.currentTarget) this._closeControlCodes(); });
-    this.shadowRoot.querySelector("ha-card")?.addEventListener("click", (event) => {
+    root.querySelectorAll("[data-close-item-action]").forEach((button) => button.addEventListener("click", () => this._closeItemAction()));
+    root.querySelector("[data-item-action-backdrop]")?.addEventListener("click", (event) => { if (event.target === event.currentTarget) this._closeItemAction(); });
+    root.querySelector("[data-item-action-backdrop]")?.addEventListener("keydown", (event) => { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); this._closeItemAction(); } });
+    root.querySelector("[data-item-action-target]")?.addEventListener("change", (event) => { if (this._itemAction) this._itemAction.targetId = event.target.value; });
+    root.querySelector("[data-item-action-quantity]")?.addEventListener("input", (event) => { if (this._itemAction) this._itemAction.quantity = event.target.value; });
+    root.querySelectorAll("[data-item-action-target],[data-item-action-quantity]").forEach((field) => field.addEventListener("keydown", (event) => { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); this._closeItemAction(); } }));
+    root.querySelector("[data-confirm-item-action]")?.addEventListener("click", () => this._confirmItemAction());
+    root.querySelector("ha-card")?.addEventListener("scroll", (event) => { if (this._expandedView) this._expandedScrollTop = event.currentTarget.scrollTop; }, { passive: true });
+    root.querySelectorAll("[data-toggle-expanded-view]").forEach((element) => element.addEventListener("click", (event) => this._toggleExpandedView(event)));
+    root.querySelector("[data-toggle-list]")?.addEventListener("click", () => { if (!this._expandedView) this._toggleList(); });
+    root.querySelector("[data-toggle-header-menu]")?.addEventListener("click", () => { this._headerMenuOpen = !this._headerMenuOpen; this._render(); });
+    root.querySelectorAll("[data-toggle-mode-panel]").forEach((button) => button.addEventListener("click", () => { this._headerMenuOpen = false; this._toggleModePanel(); }));
+    root.querySelectorAll("[data-export-pdf]").forEach((button) => button.addEventListener("click", () => { this._headerMenuOpen = false; this._exportPdf(); }));
+    root.querySelectorAll("[data-open-control-codes]").forEach((button) => button.addEventListener("click", () => this._openControlCodes()));
+    root.querySelector("[data-undo-booking]")?.addEventListener("click", () => this._undoInventoryBooking());
+    root.querySelector("[data-undo-stock]")?.addEventListener("click", () => this._undoInventoryBooking(false));
+    root.querySelector("[data-undo-both]")?.addEventListener("click", () => this._undoInventoryBooking(true));
+    root.querySelector("[data-cancel-undo]")?.addEventListener("click", () => { this._undoChoice = false; this._render(); });
+    root.querySelectorAll("[data-open-restock-preview]").forEach((button) => button.addEventListener("click", () => this._openRestockDialog()));
+    root.querySelectorAll("[data-close-restock]").forEach((button) => button.addEventListener("click", () => { this._restockDialog = null; this._render(); }));
+    root.querySelector("[data-restock-backdrop]")?.addEventListener("click", (event) => { if (event.target === event.currentTarget) { this._restockDialog = null; this._render(); } });
+    root.querySelector("[data-apply-restock]")?.addEventListener("click", () => this._applyRestockPreview());
+    root.querySelectorAll("[data-reset-restock-latch]").forEach((button) => button.addEventListener("click", () => { const [type, id] = button.dataset.resetRestockLatch.split(":"); this._resetRestockLatch(type, id); }));
+    root.querySelectorAll("[data-close-control-codes]").forEach((button) => button.addEventListener("click", () => this._closeControlCodes()));
+    root.querySelector("[data-control-codes-backdrop]")?.addEventListener("click", (event) => { if (event.target === event.currentTarget) this._closeControlCodes(); });
+    root.querySelector("ha-card")?.addEventListener("click", (event) => {
       if (this._itemActionMenuOpen && !event.target.closest(".item-action-tools")) this._hideItemActionMenu();
       let changed = false;
       if (this._headerMenuOpen && !event.target.closest(".compact-header-actions")) { this._headerMenuOpen = false; changed = true; }
@@ -3576,49 +3910,49 @@ class HaListManagerInventoryCard extends HTMLElement {
       if (this._labelMenuOpen && !event.target.closest(".label-filter")) { this._labelMenuOpen = false; changed = true; }
       if (changed) this._render();
     });
-    this.shadowRoot.querySelectorAll("[data-mode]").forEach((button) => button.addEventListener("click", () => this._selectMode(button.dataset.mode)));
-    this.shadowRoot.querySelector("[data-toggle-scanner-target]")?.addEventListener("click", () => this._toggleScannerTarget());
-    this.shadowRoot.querySelector("[data-action]")?.addEventListener("click", () => this._performInputAction());
-    this.shadowRoot.querySelector("[data-register-missing]")?.addEventListener("click", () => this._registerMissingProduct());
-    this.shadowRoot.querySelector("[data-camera-scan]")?.addEventListener("click", () => this._startCameraScan());
-    const input = this.shadowRoot.querySelector("[data-product-input]");
+    root.querySelectorAll("[data-mode]").forEach((button) => button.addEventListener("click", () => this._selectMode(button.dataset.mode)));
+    root.querySelector("[data-toggle-scanner-target]")?.addEventListener("click", () => this._toggleScannerTarget());
+    root.querySelector("[data-action]")?.addEventListener("click", () => this._performInputAction());
+    root.querySelector("[data-register-missing]")?.addEventListener("click", () => this._registerMissingProduct());
+    root.querySelector("[data-camera-scan]")?.addEventListener("click", () => this._startCameraScan());
+    const input = root.querySelector("[data-product-input]");
     input?.addEventListener("input", (event) => { this._inputValue = event.target.value; this._selectedProduct = null; this._updateSuggestions(event.target.value); if (this._config.allow_filter) this._refreshInventoryContent(); if (this._config.filter_chips !== false) this._refreshChipContent(); });
     input?.addEventListener("focus", () => this._updateSuggestions(input.value));
-    input?.addEventListener("blur", () => setTimeout(() => { const suggestions = this.shadowRoot.querySelector("[data-suggestions]"); if (suggestions) suggestions.hidden = true; }, 120));
+    input?.addEventListener("blur", () => setTimeout(() => { const suggestions = root.querySelector("[data-suggestions]"); if (suggestions) suggestions.hidden = true; }, 120));
     input?.addEventListener("keydown", (event) => { if (event.key === "Enter") this._performInputAction(); });
-    this.shadowRoot.querySelector("[data-clear-input]")?.addEventListener("click", () => this._clearInput());
-    this.shadowRoot.querySelector("[data-open-chip-dialog]")?.addEventListener("click", () => { this._chipDialog = true; this._render(); });
-    this._bindChipActions();
-    this.shadowRoot.querySelectorAll("[data-close-chip-dialog]").forEach((element) => element.addEventListener("click", (event) => { if (!event.currentTarget.classList.contains("backdrop") || event.target === event.currentTarget) this._closeChipDialog(); }));
-    this.shadowRoot.querySelectorAll("[data-close-browser-chip-menu]").forEach((element) => element.addEventListener("click", (event) => { if (!event.currentTarget.classList.contains("backdrop") || event.target === event.currentTarget) this._closeBrowserChipMenu(); }));
-    this.shadowRoot.querySelector("[data-delete-browser-chip]")?.addEventListener("click", () => { this._removeBrowserChip(this._browserChipMenu?.chip); this._closeBrowserChipMenu(); });
-    this.shadowRoot.querySelector("[data-delete-all-browser-chips]")?.addEventListener("click", () => { this._browserChipMenu.confirmAll = true; this._render(); });
-    this.shadowRoot.querySelector("[data-save-browser-chip]")?.addEventListener("click", () => this._saveBrowserChipPermanently());
-    this.shadowRoot.querySelector("[data-toggle-important-chip]")?.addEventListener("click", () => this._toggleImportantChip(this._browserChipMenu?.chip));
-    this.shadowRoot.querySelector("[data-cancel-browser-chip-confirmation]")?.addEventListener("click", () => { this._browserChipMenu.confirmAll = false; this._render(); });
-    this.shadowRoot.querySelector("[data-confirm-delete-browser-chips]")?.addEventListener("click", () => { this._clearBrowserChips(); this._closeBrowserChipMenu(); });
-    this.shadowRoot.querySelector("[data-filter]")?.addEventListener("change", (event) => { this._filter = event.target.value; this._render(); });
-    this.shadowRoot.querySelector("[data-toggle-hidden]")?.addEventListener("click", () => { this._showHidden = !this._showHidden; this._render(); });
-    this.shadowRoot.querySelector("[data-toggle-details]")?.addEventListener("click", () => { this._showDetails = !this._showDetails; this._render(); });
-    this.shadowRoot.querySelectorAll("[data-toggle-group-selection]").forEach((button) => button.addEventListener("click", () => { this._headerMenuOpen = false; this._groupSelectionMode = !this._groupSelectionMode; this._selectedEntryIds.clear(); this._render(); }));
-    this.shadowRoot.querySelector("[data-toggle-categories]")?.addEventListener("click", () => this._toggleAllCategories());
-    this.shadowRoot.querySelector("[data-toggle-grouping]")?.addEventListener("click", () => this._toggleGrouping());
-    this.shadowRoot.querySelector("[data-cancel-group-selection]")?.addEventListener("click", () => { this._groupSelectionMode = false; this._selectedEntryIds.clear(); this._render(); });
-    this.shadowRoot.querySelector("[data-create-group]")?.addEventListener("click", () => this._openGroupDialog(null, [...this._selectedEntryIds]));
-    this.shadowRoot.querySelectorAll("[data-open-products]").forEach((button) => button.addEventListener("click", () => { this._headerMenuOpen = false; history.pushState(null, "", "/ha_list_manager/products"); window.dispatchEvent(new Event("popstate")); }));
-    this.shadowRoot.querySelector("[data-open-pending-scans]")?.addEventListener("click", () => {
+    root.querySelector("[data-clear-input]")?.addEventListener("click", () => this._clearInput());
+    root.querySelector("[data-open-chip-dialog]")?.addEventListener("click", () => { this._chipDialog = true; this._refreshChipContent(true); });
+    this._bindChipActions(root);
+    root.querySelectorAll("[data-close-chip-dialog]").forEach((element) => element.addEventListener("click", (event) => { if (!event.currentTarget.classList.contains("backdrop") || event.target === event.currentTarget) this._closeChipDialog(); }));
+    root.querySelectorAll("[data-close-browser-chip-menu]").forEach((element) => element.addEventListener("click", (event) => { if (!event.currentTarget.classList.contains("backdrop") || event.target === event.currentTarget) this._closeBrowserChipMenu(); }));
+    root.querySelector("[data-delete-browser-chip]")?.addEventListener("click", () => { this._removeBrowserChip(this._browserChipMenu?.chip); this._closeBrowserChipMenu(); });
+    root.querySelector("[data-delete-all-browser-chips]")?.addEventListener("click", () => { this._browserChipMenu.confirmAll = true; this._render(); });
+    root.querySelector("[data-save-browser-chip]")?.addEventListener("click", () => this._saveBrowserChipPermanently());
+    root.querySelector("[data-toggle-important-chip]")?.addEventListener("click", () => this._toggleImportantChip(this._browserChipMenu?.chip));
+    root.querySelector("[data-cancel-browser-chip-confirmation]")?.addEventListener("click", () => { this._browserChipMenu.confirmAll = false; this._render(); });
+    root.querySelector("[data-confirm-delete-browser-chips]")?.addEventListener("click", () => { this._clearBrowserChips(); this._closeBrowserChipMenu(); });
+    root.querySelector("[data-filter]")?.addEventListener("change", (event) => { this._filter = event.target.value; this._render(); });
+    root.querySelector("[data-toggle-hidden]")?.addEventListener("click", () => { this._showHidden = !this._showHidden; this._render(); });
+    root.querySelector("[data-toggle-details]")?.addEventListener("click", () => { this._showDetails = !this._showDetails; this._render(); });
+    root.querySelectorAll("[data-toggle-group-selection]").forEach((button) => button.addEventListener("click", () => { this._headerMenuOpen = false; this._groupSelectionMode = !this._groupSelectionMode; this._selectedEntryIds.clear(); this._render(); }));
+    root.querySelector("[data-toggle-categories]")?.addEventListener("click", () => this._toggleAllCategories());
+    root.querySelector("[data-toggle-grouping]")?.addEventListener("click", () => this._toggleGrouping());
+    root.querySelector("[data-cancel-group-selection]")?.addEventListener("click", () => { this._groupSelectionMode = false; this._selectedEntryIds.clear(); this._render(); });
+    root.querySelector("[data-create-group]")?.addEventListener("click", () => this._openGroupDialog(null, [...this._selectedEntryIds]));
+    root.querySelectorAll("[data-open-products]").forEach((button) => button.addEventListener("click", () => { this._headerMenuOpen = false; history.pushState(null, "", "/ha_list_manager/products"); window.dispatchEvent(new Event("popstate")); }));
+    root.querySelector("[data-open-pending-scans]")?.addEventListener("click", () => {
       if (this._pendingScans.length === 1) this._openPendingScan(this._pendingScans[0]);
       else { this._pendingScanPicker = true; this._render(); }
     });
-    this.shadowRoot.querySelectorAll("[data-open-pending-scan]").forEach((button) => button.addEventListener("click", () => {
+    root.querySelectorAll("[data-open-pending-scan]").forEach((button) => button.addEventListener("click", () => {
       this._openPendingScan(this._pendingScans.find((scan) => scan.id === button.dataset.openPendingScan));
     }));
-    this.shadowRoot.querySelectorAll("[data-close-pending-scans]").forEach((button) => button.addEventListener("click", () => { this._pendingScanPicker = false; this._render(); }));
-    this.shadowRoot.querySelector("[data-pending-scan-backdrop]")?.addEventListener("click", (event) => { if (event.target === event.currentTarget) { this._pendingScanPicker = false; this._render(); } });
-    this.shadowRoot.querySelector("[data-toggle-category-menu]")?.addEventListener("click", () => { this._categoryMenuOpen = !this._categoryMenuOpen; this._labelMenuOpen = false; this._render(); });
-    this.shadowRoot.querySelector("[data-category-all]")?.addEventListener("click", () => { this._selectedCategoryIds = null; this._render(); });
-    this.shadowRoot.querySelector("[data-category-none]")?.addEventListener("click", () => { this._selectedCategoryIds = new Set(); this._render(); });
-    this.shadowRoot.querySelectorAll("[data-category-choice]").forEach((checkbox) => checkbox.addEventListener("change", () => {
+    root.querySelectorAll("[data-close-pending-scans]").forEach((button) => button.addEventListener("click", () => { this._pendingScanPicker = false; this._render(); }));
+    root.querySelector("[data-pending-scan-backdrop]")?.addEventListener("click", (event) => { if (event.target === event.currentTarget) { this._pendingScanPicker = false; this._render(); } });
+    root.querySelector("[data-toggle-category-menu]")?.addEventListener("click", () => { this._categoryMenuOpen = !this._categoryMenuOpen; this._labelMenuOpen = false; this._render(); });
+    root.querySelector("[data-category-all]")?.addEventListener("click", () => { this._selectedCategoryIds = null; this._render(); });
+    root.querySelector("[data-category-none]")?.addEventListener("click", () => { this._selectedCategoryIds = new Set(); this._render(); });
+    root.querySelectorAll("[data-category-choice]").forEach((checkbox) => checkbox.addEventListener("change", () => {
       const allKeys = new Set(["__uncategorized__", ...this._categories.map((category) => category.id), ...this._displayUnits().map((unit) => this._unitCategory(unit)?.id).filter(Boolean)]);
       if (this._selectedCategoryIds === null) this._selectedCategoryIds = new Set(allKeys);
       if (checkbox.checked) this._selectedCategoryIds.add(checkbox.dataset.categoryChoice); else this._selectedCategoryIds.delete(checkbox.dataset.categoryChoice);
@@ -3626,93 +3960,95 @@ class HaListManagerInventoryCard extends HTMLElement {
       if (this._selectedCategoryIds.size === allCount) this._selectedCategoryIds = null;
       this._render();
     }));
-    this.shadowRoot.querySelector("[data-flat-categories]")?.addEventListener("change", (event) => { this._groupCategories = !event.target.checked; this._render(); });
-    this.shadowRoot.querySelector("[data-toggle-label-menu]")?.addEventListener("click", () => { this._labelMenuOpen = !this._labelMenuOpen; this._categoryMenuOpen = false; this._render(); });
-    this.shadowRoot.querySelector("[data-label-all]")?.addEventListener("click", () => { this._selectedLabelIds = null; this._render(); });
-    this.shadowRoot.querySelector("[data-label-none]")?.addEventListener("click", () => { this._selectedLabelIds = new Set(); this._render(); });
-    this.shadowRoot.querySelectorAll("[data-label-choice]").forEach((checkbox) => checkbox.addEventListener("change", () => {
+    root.querySelector("[data-flat-categories]")?.addEventListener("change", (event) => { this._groupCategories = !event.target.checked; this._render(); });
+    root.querySelector("[data-toggle-label-menu]")?.addEventListener("click", () => { this._labelMenuOpen = !this._labelMenuOpen; this._categoryMenuOpen = false; this._render(); });
+    root.querySelector("[data-label-all]")?.addEventListener("click", () => { this._selectedLabelIds = null; this._render(); });
+    root.querySelector("[data-label-none]")?.addEventListener("click", () => { this._selectedLabelIds = new Set(); this._render(); });
+    root.querySelectorAll("[data-label-choice]").forEach((checkbox) => checkbox.addEventListener("change", () => {
       const allKeys = new Set(["__unlabeled__", ...this._labels.map((label) => label.id)]);
       if (this._selectedLabelIds === null) this._selectedLabelIds = new Set(allKeys);
       if (checkbox.checked) this._selectedLabelIds.add(checkbox.dataset.labelChoice); else this._selectedLabelIds.delete(checkbox.dataset.labelChoice);
       if (this._selectedLabelIds.size === allKeys.size) this._selectedLabelIds = null;
       this._render();
     }));
-    this._bindInventoryRowEvents();
-    this.shadowRoot.querySelector("[data-lookup-ean]")?.addEventListener("click", () => this._lookupDialogEan());
-    this.shadowRoot.querySelectorAll("[data-off-change]").forEach((input) => input.addEventListener("change", () => { this._syncDialogDraft(); this._applyProductRefresh(input.dataset.offChange, input.checked, this._dialog?.draft); }));
-    this.shadowRoot.querySelectorAll("[data-name-component]").forEach((button) => button.addEventListener("click", () => this._toggleNameComponent(button.dataset.nameComponent)));
-    this.shadowRoot.querySelectorAll(".dialog input,.dialog textarea,.dialog select").forEach((field) => {
+    this._bindInventoryRowEvents(root);
+    root.querySelector("[data-lookup-ean]")?.addEventListener("click", () => this._lookupDialogEan());
+    root.querySelectorAll("[data-off-change]").forEach((input) => input.addEventListener("change", () => { this._syncDialogDraft(); this._applyProductRefresh(input.dataset.offChange, input.checked, this._dialog?.draft); }));
+    root.querySelectorAll("[data-name-component]").forEach((button) => button.addEventListener("click", () => this._toggleNameComponent(button.dataset.nameComponent)));
+    root.querySelectorAll(".dialog input,.dialog textarea,.dialog select").forEach((field) => {
       field.addEventListener("keydown", (event) => event.stopPropagation());
       field.addEventListener("keyup", (event) => event.stopPropagation());
     });
-    this.shadowRoot.querySelector("[data-save-dialog]")?.addEventListener("click", () => this._saveDialog());
-    this.shadowRoot.querySelector("[data-edit-product]")?.addEventListener("click", (event) => { const entry = this._entries.find((item) => item.id === event.currentTarget.dataset.editProduct); if (entry) this._replaceDialog(() => this._openProductEditDialog(entry)); });
-    this.shadowRoot.querySelector("[data-delete-entry]")?.addEventListener("click", (event) => { const entry = this._entries.find((item) => item.id === event.currentTarget.dataset.deleteEntry); if (entry) this._deleteEntry(entry); });
-    this.shadowRoot.querySelector("[data-delete-group]")?.addEventListener("click", (event) => { const group = this._inventoryGroups.find((item) => item.id === event.currentTarget.dataset.deleteGroup); if (group) this._deleteGroup(group); });
-    this.shadowRoot.querySelector("[data-open-member-picker]")?.addEventListener("click", () => this._openMemberPicker());
-    this.shadowRoot.querySelectorAll("[data-remove-group-member]").forEach((button) => button.addEventListener("click", () => {
+    root.querySelector("[data-save-dialog]")?.addEventListener("click", () => this._saveDialog());
+    root.querySelector("[data-edit-product]")?.addEventListener("click", (event) => { const entry = this._entries.find((item) => item.id === event.currentTarget.dataset.editProduct); if (entry) this._replaceDialog(() => this._openProductEditDialog(entry)); });
+    root.querySelector("[data-delete-entry]")?.addEventListener("click", (event) => { const entry = this._entries.find((item) => item.id === event.currentTarget.dataset.deleteEntry); if (entry) this._deleteEntry(entry); });
+    root.querySelector("[data-delete-group]")?.addEventListener("click", (event) => { const group = this._inventoryGroups.find((item) => item.id === event.currentTarget.dataset.deleteGroup); if (group) this._deleteGroup(group); });
+    root.querySelector("[data-open-member-picker]")?.addEventListener("click", () => this._openMemberPicker());
+    root.querySelectorAll("[data-remove-group-member]").forEach((button) => button.addEventListener("click", () => {
       if (this._dialog?.kind !== "group-edit") return;
       this._syncDialogDraft();
       this._dialog.draft.member_ids = (this._dialog.draft.member_ids || []).filter((id) => id !== button.dataset.removeGroupMember);
       this._render();
     }));
-    this.shadowRoot.querySelectorAll("[data-edit-group-member]").forEach((button) => button.addEventListener("click", () => {
+    root.querySelectorAll("[data-edit-group-member]").forEach((button) => button.addEventListener("click", () => {
       const entry = this._entries.find((item) => item.id === button.dataset.editGroupMember);
       if (entry) this._replaceDialog(() => this._openEditDialog(entry));
     }));
-    this.shadowRoot.querySelectorAll("[data-group-adjust]").forEach((button) => button.addEventListener("click", (event) => { event.preventDefault(); event.stopPropagation(); const [id, delta] = button.dataset.groupAdjust.split(":"); this._adjust(id, Number(delta)); }));
-    this.shadowRoot.querySelectorAll("[data-pick-group]").forEach((button) => button.addEventListener("click", () => { const entry = this._entries.find((item) => item.id === button.dataset.pickGroup); if (entry) this._openGroupPicker(entry); }));
-    this.shadowRoot.querySelectorAll("[data-new-group-for-entry]").forEach((button) => button.addEventListener("click", () => {
+    root.querySelectorAll("[data-group-adjust]").forEach((button) => button.addEventListener("click", (event) => { event.preventDefault(); event.stopPropagation(); const [id, delta] = button.dataset.groupAdjust.split(":"); this._adjust(id, Number(delta)); }));
+    root.querySelectorAll("[data-pick-group]").forEach((button) => button.addEventListener("click", () => { const entry = this._entries.find((item) => item.id === button.dataset.pickGroup); if (entry) this._openGroupPicker(entry); }));
+    root.querySelectorAll("[data-new-group-for-entry]").forEach((button) => button.addEventListener("click", () => {
       const entry = this._entries.find((item) => item.id === button.dataset.newGroupForEntry);
       if (entry) this._openNewGroupForEntry(entry);
     }));
-    this.shadowRoot.querySelectorAll("[data-edit-entry-group]").forEach((button) => button.addEventListener("click", () => { const group = this._inventoryGroups.find((item) => item.id === button.dataset.editEntryGroup); if (group) this._replaceDialog(() => this._openGroupDialog(group)); }));
-    this.shadowRoot.querySelectorAll("[data-remove-entry-group]").forEach((button) => button.addEventListener("click", () => {
+    root.querySelectorAll("[data-edit-entry-group]").forEach((button) => button.addEventListener("click", () => { const group = this._inventoryGroups.find((item) => item.id === button.dataset.editEntryGroup); if (group) this._replaceDialog(() => this._openGroupDialog(group)); }));
+    root.querySelectorAll("[data-remove-entry-group]").forEach((button) => button.addEventListener("click", () => {
       const entry = this._entries.find((item) => item.id === button.dataset.removeEntryGroup);
       const group = entry ? this._groupForEntry(entry.id) : null;
       if (entry && group) this._requestRemoveEntryFromGroup(entry, group);
     }));
-    this.shadowRoot.querySelectorAll("[data-close-member-picker]").forEach((button) => button.addEventListener("click", () => { this._memberPicker = null; this._render(); }));
-    this.shadowRoot.querySelector("[data-member-picker-backdrop]")?.addEventListener("click", (event) => { if (event.target === event.currentTarget) { this._memberPicker = null; this._render(); } });
-    this.shadowRoot.querySelector("[data-show-grouped-members]")?.addEventListener("change", (event) => { if (this._memberPicker) { this._memberPicker.show_grouped = event.target.checked; this._render(); } });
-    const memberSearch = this.shadowRoot.querySelector("[data-member-picker-search]");
+    root.querySelectorAll("[data-close-member-picker]").forEach((button) => button.addEventListener("click", () => { this._memberPicker = null; this._render(); }));
+    root.querySelector("[data-member-picker-backdrop]")?.addEventListener("click", (event) => { if (event.target === event.currentTarget) { this._memberPicker = null; this._render(); } });
+    root.querySelector("[data-show-grouped-members]")?.addEventListener("change", (event) => { if (this._memberPicker) { this._memberPicker.show_grouped = event.target.checked; this._render(); } });
+    const memberSearch = root.querySelector("[data-member-picker-search]");
     memberSearch?.addEventListener("input", (event) => {
       this._memberPicker.query = event.target.value;
-      const list = this.shadowRoot.querySelector("[data-member-picker-list]");
+      const list = root.querySelector("[data-member-picker-list]");
       if (list) list.innerHTML = this._renderMemberPickerChoices();
-      this._bindMemberPickerChoices();
+      this._bindMemberPickerChoices(root);
     });
-    this.shadowRoot.querySelector("[data-apply-member-picker]")?.addEventListener("click", () => this._applyMemberPicker());
-    this._bindMemberPickerChoices();
-    this.shadowRoot.querySelectorAll("[data-close-group-picker]").forEach((button) => button.addEventListener("click", () => { this._groupPicker = null; this._render(); }));
-    this.shadowRoot.querySelector("[data-group-picker-backdrop]")?.addEventListener("click", (event) => { if (event.target === event.currentTarget) { this._groupPicker = null; this._render(); } });
-    const groupSearch = this.shadowRoot.querySelector("[data-group-picker-search]");
+    root.querySelector("[data-apply-member-picker]")?.addEventListener("click", () => this._applyMemberPicker());
+    this._bindMemberPickerChoices(root);
+    root.querySelectorAll("[data-close-group-picker]").forEach((button) => button.addEventListener("click", () => { this._groupPicker = null; this._render(); }));
+    root.querySelector("[data-group-picker-backdrop]")?.addEventListener("click", (event) => { if (event.target === event.currentTarget) { this._groupPicker = null; this._render(); } });
+    const groupSearch = root.querySelector("[data-group-picker-search]");
     groupSearch?.addEventListener("input", (event) => {
       this._groupPicker.query = event.target.value;
-      const list = this.shadowRoot.querySelector("[data-group-picker-list]");
+      const list = root.querySelector("[data-group-picker-list]");
       if (list) list.innerHTML = this._renderGroupPickerChoices();
-      this._bindGroupPickerChoices();
+      this._bindGroupPickerChoices(root);
     });
-    this._bindGroupPickerChoices();
-    this.shadowRoot.querySelector("[data-confirm-accept]")?.addEventListener("click", () => this._resolveConfirmation(true));
-    this.shadowRoot.querySelector("[data-confirm-cancel]")?.addEventListener("click", () => this._resolveConfirmation(false));
-    this.shadowRoot.querySelector("[data-confirmation-backdrop]")?.addEventListener("click", (event) => { if (event.target === event.currentTarget) this._resolveConfirmation(false); });
-    this.shadowRoot.querySelector("[data-dialog-image]")?.addEventListener("click", () => { const draft = this._dialog?.draft; if (draft?.image_url) this._openImageDialog(draft.image_url, draft.name); });
-    this.shadowRoot.querySelectorAll("[data-close-dialog]").forEach((button) => button.addEventListener("click", () => this._closeDialog()));
-    this.shadowRoot.querySelector("[data-backdrop]")?.addEventListener("click", (event) => { if (event.target === event.currentTarget) this._closeDialog(); });
-    this.shadowRoot.querySelectorAll("[data-dialog-panel] [data-field]").forEach((field) => {
+    this._bindGroupPickerChoices(root);
+    root.querySelector("[data-confirm-accept]")?.addEventListener("click", () => this._resolveConfirmation(true));
+    root.querySelector("[data-confirm-cancel]")?.addEventListener("click", () => this._resolveConfirmation(false));
+    root.querySelector("[data-confirmation-backdrop]")?.addEventListener("click", (event) => { if (event.target === event.currentTarget) this._resolveConfirmation(false); });
+    root.querySelector("[data-dialog-image]")?.addEventListener("click", () => { const draft = this._dialog?.draft; if (draft?.image_url) this._openImageDialog(draft.image_url, draft.name); });
+    root.querySelectorAll("[data-close-dialog]").forEach((button) => button.addEventListener("click", () => this._closeDialog()));
+    root.querySelector("[data-backdrop]")?.addEventListener("click", (event) => { if (event.target === event.currentTarget) this._closeDialog(); });
+    root.querySelectorAll("[data-dialog-panel] [data-field]").forEach((field) => {
       field.addEventListener("input", () => this._updateDialogDirtyIndicator());
       field.addEventListener("change", () => this._updateDialogDirtyIndicator());
     });
-    this._configureCategoryPicker();
-    this._configureLabelSelector();
-    this._installPickerListTriggers();
-    this._bindDialogScrollGuard();
-    this._bindScanActions();
+    this._configureCategoryPicker(root);
+    this._configureLabelSelector(root);
+    this._installPickerListTriggers(root);
+    this._bindDialogScrollGuard(root);
+    this._bindScanActions(root);
     this._applyPendingScanControls();
   }
 
   _styles() { return `
+
+    .dismissible-message{display:flex;align-items:center;gap:8px}.dismissible-message>.message-copy{flex:1;min-width:0;overflow-wrap:anywhere}.dismissible-message>.message-dismiss{display:grid;place-items:center;flex:0 0 34px;width:34px;height:34px;min-height:34px;margin-left:auto;padding:0;border:0;border-radius:50%;color:inherit;background:transparent;cursor:pointer}.message-dismiss:hover,.message-dismiss:focus-visible{background:color-mix(in srgb,currentColor 13%,transparent)}.message-dismiss ha-icon{--mdc-icon-size:20px}.inventory-action-status.inventory-undo-only{padding:0;border:0;background:transparent}.category-combo>.selection-trigger,.label-search>.selection-trigger{position:absolute!important;z-index:4;right:4px;top:50%;display:grid;place-items:center;width:34px!important;height:34px!important;min-width:34px!important;min-height:34px!important;padding:0!important;transform:translateY(-50%);border:0!important;border-radius:50%;color:var(--primary-color);background:transparent;cursor:pointer}.picker-with-popup .picker-list-trigger{right:44px!important}.picker-with-popup input{padding-right:86px!important}.selection-trigger:hover,.selection-trigger:focus-visible{background:color-mix(in srgb,var(--primary-color) 14%,transparent)}.selection-trigger ha-icon{--mdc-icon-size:20px}.selection-backdrop{z-index:1400}.selection-dialog{width:min(680px,100%)}.selection-dialog .dialog-header h3{margin:0}.selection-dialog>input{width:100%;margin-top:14px}.selection-options{display:flex;flex-wrap:wrap;align-content:flex-start;gap:9px;max-height:48vh;overflow:auto;margin-top:16px;padding:2px;overscroll-behavior:contain}.selection-options>.selection-chip{display:flex;align-items:center;gap:7px;max-width:100%;min-height:42px;padding:7px 12px;border:1px solid color-mix(in srgb,var(--selection-color,var(--primary-color)) 60%,var(--divider-color));border-radius:22px;color:var(--primary-text-color);background:color-mix(in srgb,var(--selection-color,var(--primary-color)) 16%,var(--card-background-color));text-align:left;cursor:pointer}.selection-chip>ha-icon{flex:0 0 auto;--mdc-icon-size:20px}.selection-chip>ha-icon:first-child{padding:3px;box-sizing:content-box;border-radius:50%;color:var(--selection-text,var(--primary-text-color));background:var(--selection-color,var(--primary-color))}.selection-chip>span{display:flex;flex-direction:column;gap:2px;overflow-wrap:anywhere;min-width:0}.selection-chip small{color:var(--secondary-text-color)}.selection-options>.selection-chip.selected{border-width:2px;padding:6px 11px;background:color-mix(in srgb,var(--selection-color,var(--primary-color)) 28%,var(--card-background-color))}.selection-options>.selection-chip:hover,.selection-options>.selection-chip:focus-visible{outline:2px solid var(--primary-color);outline-offset:1px}.selection-chip .selection-check{color:var(--primary-text-color)}
     .item-dialog-tools{display:flex;align-items:center;gap:2px;flex:0 0 auto}.item-action-tools{position:relative}.item-action-menu{position:absolute;right:0;top:calc(100% + 5px);z-index:25;min-width:min(300px,calc(100vw - 64px));max-width:calc(100vw - 64px);padding:5px;border:1px solid var(--divider-color);border-radius:9px;background:var(--card-background-color);box-shadow:0 8px 24px rgba(0,0,0,.35)}.item-action-menu button{display:flex;align-items:center;gap:8px;width:100%;min-height:44px;padding:9px 11px;border:0;border-radius:5px;color:var(--primary-text-color);background:transparent;text-align:left;cursor:pointer}.item-action-menu button:hover,.item-action-menu button:focus-visible{background:var(--secondary-background-color)}.item-action-menu button:disabled{opacity:.5;cursor:default}.item-action-menu small{display:block;padding:0 11px 8px;color:var(--secondary-text-color);font-size:12px;line-height:1.4}.item-action-dialog{width:min(480px,100%)}.item-action-dialog .dialog-header>h3{margin:0}.item-action-dialog>p{line-height:1.5;overflow-wrap:anywhere}
     .off-refresh{margin:14px 0;padding:12px;border:1px solid var(--divider-color);border-left:3px solid var(--primary-color);border-radius:8px}.off-refresh>p{margin:6px 0 10px;color:var(--secondary-text-color);font-size:14px;line-height:1.4}.off-refresh label{display:flex!important;flex-direction:row!important;align-items:flex-start;gap:10px;margin:10px 0!important}.off-refresh input[type=checkbox]{flex:0 0 auto;width:20px!important;min-height:20px!important;height:20px;margin:2px 0 0;padding:0;accent-color:var(--primary-color)}.off-refresh label>span{display:flex;flex-direction:column;min-width:0;gap:4px}.off-refresh small{overflow-wrap:anywhere;white-space:normal;color:var(--secondary-text-color)}
     .pending-scan-intro{display:grid;grid-template-columns:minmax(0,1fr) 105px;gap:12px;align-items:start;margin-top:8px}.pending-scan-intro>.dialog-image-button,.pending-scan-intro>.dialog-image{position:relative;inset:auto;display:block}.pending-scan-product-dialog>label:first-of-type{padding-right:0}.scan-session-status{display:flex;align-items:center;gap:8px;margin:12px 0 5px;color:var(--primary-color);font-size:14px}.scan-session-status ha-icon{flex:0 0 auto;--mdc-icon-size:20px}.scan-session-actions{margin:10px 0 14px}.pending-scan-item{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:7px}.scan-discard-button{display:flex;align-items:center;justify-content:center;gap:5px;padding:8px 10px;border:1px solid var(--error-color);border-radius:8px;color:var(--error-color);background:transparent;cursor:pointer}.scan-discard-button ha-icon{--mdc-icon-size:19px}@media(max-width:520px){.scan-discard-button span{display:none}.scan-session-actions{flex-wrap:wrap}.scan-session-actions button{flex:1 1 auto}}

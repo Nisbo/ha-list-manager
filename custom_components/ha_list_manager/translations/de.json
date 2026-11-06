@@ -1949,7 +1949,8 @@
       "group_by_categories": "Nach Kategorien gruppieren",
       "group_by_labels": "Nach Labels gruppieren",
       "all_labels_count": "Alle Labels {p0}",
-      "auto_expand_search": "Gruppen bei Suche automatisch öffnen"
+      "auto_expand_search": "Gruppen bei Suche automatisch öffnen",
+      "dismiss_message": "Meldung ausblenden"
     },
     "scanner": {
       "active_then_default": "Aktive Karte, danach Standardziel",
@@ -2567,6 +2568,16 @@
       "merged": "Vorhandenen Artikel auf „{p1}“ um {p0} ergänzt.",
       "error": "Die Artikelaktion konnte nicht ausgeführt werden.",
       "create": "Erstellen"
+    },
+    "selection": {
+      "categories": "Kategorie auswählen",
+      "labels": "Labels auswählen",
+      "search": "Suchen",
+      "apply": "Auswahl übernehmen",
+      "clear": "Auswahl leeren",
+      "empty": "Keine passenden Einträge.",
+      "choose_categories": "Kategorien als Chips anzeigen",
+      "choose_labels": "Labels als Chips anzeigen"
     }
   },
   "exceptions": {

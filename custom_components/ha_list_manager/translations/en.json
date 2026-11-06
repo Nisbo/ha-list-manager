@@ -1949,7 +1949,8 @@
       "group_by_categories": "Group by categories",
       "group_by_labels": "Group by labels",
       "all_labels_count": "{p0} all labels",
-      "auto_expand_search": "Automatically open groups while searching"
+      "auto_expand_search": "Automatically open groups while searching",
+      "dismiss_message": "Dismiss message"
     },
     "scanner": {
       "active_then_default": "Active card, then default target",
@@ -2567,6 +2568,16 @@
       "merged": "Increased the existing item on “{p1}” by {p0}.",
       "error": "The item action could not be completed.",
       "create": "Create"
+    },
+    "selection": {
+      "categories": "Choose a category",
+      "labels": "Choose labels",
+      "search": "Search",
+      "apply": "Apply selection",
+      "clear": "Clear selection",
+      "empty": "No matching entries.",
+      "choose_categories": "Show categories as chips",
+      "choose_labels": "Show labels as chips"
     }
   },
   "exceptions": {

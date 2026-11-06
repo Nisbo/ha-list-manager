@@ -80,7 +80,7 @@ function haListManagerHistoryCardTextRequest(hass, message) {
 }
 
 const HA_LM_HISTORY_API = "ha_list_manager";
-const CARD_VERSION = "1.0.0b6";
+const CARD_VERSION = "1.0.0b7";
 
 const esc = (value) => String(value ?? "").replace(/[&<>'"]/g, (char) => ({
   "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;",
@@ -100,6 +100,7 @@ class HaListManagerHistoryCard extends HTMLElement {
     this._disconnected = false;
     this._error = "";
     this._truncated = false;
+    this._dismissedMessages = new Map();
     this._requestTimer = null;
     this._refreshTimer = null;
     this._lastSourceUpdate = "";
@@ -262,6 +263,7 @@ class HaListManagerHistoryCard extends HTMLElement {
     this._seriesData = [];
     this._truncated = false;
     this._error = "";
+    this._dismissedMessages.clear();
     this._lastSourceUpdate = "";
     this._collapsed = null;
     this._legendCollapsed = null;
@@ -444,6 +446,8 @@ class HaListManagerHistoryCard extends HTMLElement {
       shouldRender = !this._sameSeriesData(this._seriesData, seriesData)
         || this._truncated !== nextTruncated
         || this._error !== nextError;
+      if (this._error !== nextError) this._dismissedMessages.delete("error");
+      if (this._truncated !== nextTruncated) this._dismissedMessages.delete("limit");
       this._seriesData = seriesData;
       this._states = seriesData[0]?.states || [];
       this._truncated = nextTruncated;
@@ -452,6 +456,7 @@ class HaListManagerHistoryCard extends HTMLElement {
       if (generation !== this._loadGeneration) return;
       const nextError = error?.message || String(error);
       shouldRender = this._error !== nextError;
+      if (shouldRender) this._dismissedMessages.delete("error");
       this._error = nextError;
     } finally {
       this._loading = false;
@@ -757,6 +762,22 @@ class HaListManagerHistoryCard extends HTMLElement {
     }).join("")}</section>`).join("")}</div>`;
   }
 
+  _messageMarkup(kind, text, className, role, icon) {
+    if (!text || this._dismissedMessages.get(kind) === (kind === "error" ? text : "active")) return "";
+    const dismiss = esc(haListManagerHistoryCardText("ui.dismiss_message", {}, this._hass));
+    return `<div class="${className}" role="${role}" data-message="${kind}"><ha-icon icon="mdi:${icon}"></ha-icon><span class="message-text">${esc(text)}</span><button type="button" class="message-close" data-dismiss-message="${kind}" aria-label="${dismiss}" title="${dismiss}"><ha-icon icon="mdi:close"></ha-icon></button></div>`;
+  }
+
+  _dismissMessage(kind) {
+    if (!["error", "limit"].includes(kind)) return;
+    const message = this.shadowRoot.querySelector(`[data-message="${kind}"]`);
+    if (!message) return;
+    this._dismissedMessages.set(kind, kind === "error" ? this._error : "active");
+    const restoreFocus = message.contains?.(this.shadowRoot.activeElement);
+    message.remove();
+    if (restoreFocus) this.shadowRoot.querySelector(".history-title")?.focus({ preventScroll: true });
+  }
+
   _render() {
     if (!this._hass || this._nativeTranslationState?.ready === false) return;
     if (!this.shadowRoot) return;
@@ -808,9 +829,14 @@ class HaListManagerHistoryCard extends HTMLElement {
     const legend = this._renderLegend(seriesData, view, seriesLegend);
     this.shadowRoot.innerHTML = `<style>
       :host{display:block;--history-icon-color:${iconColor}}:host([data-expanded-view]){position:fixed!important;top:var(--expanded-top,56px)!important;right:var(--expanded-right,0)!important;bottom:var(--expanded-bottom,0)!important;left:var(--expanded-left,0)!important;z-index:9998;min-width:0!important;max-width:none!important;padding:16px;overflow:hidden;background:var(--primary-background-color,#111)}:host([data-expanded-view]) ha-card{height:100%;min-height:0;overflow:auto;box-shadow:0 16px 48px rgba(0,0,0,.45)}:host([data-expanded-view]) svg[role="img"]{height:clamp(360px,65vh,720px);max-height:none}:host([data-expanded-view]) .history-list.scrollable{max-height:calc(100vh - 240px)}ha-card{padding:18px;color:var(--primary-text-color)}ha-card.collapsed{height:76px;padding:8px 14px}.history-header{display:flex;align-items:center;gap:8px;width:calc(100% + 8px);margin:-4.5px -4px 18.5px;color:var(--primary-text-color)}.collapsed .history-header{width:100%;height:auto;margin:5.5px 0 0}.entity-icon{display:grid;flex:0 0 auto;place-items:center;width:40px;height:40px;padding:5px;border:0;border-radius:50%;--mdc-icon-size:30px;color:var(--history-icon-color);background:transparent;cursor:pointer}.entity-icon:hover,.entity-icon:focus-visible{outline:0;background:color-mix(in srgb,var(--primary-text-color) 10%,transparent)}.history-title{display:flex;min-width:0;flex:1;flex-direction:column;padding:5px 4px;border:0;color:inherit;background:transparent;text-align:left}.history-title.clickable{cursor:pointer}.history-title.clickable:hover{background:color-mix(in srgb,var(--primary-text-color) 5%,transparent)}h2,p{margin:0}h2{overflow:hidden;font-size:21px;text-overflow:ellipsis;white-space:nowrap}.history-header small,.meta,.empty{color:var(--secondary-text-color)}.current{flex:0 0 auto;font-size:22px;font-weight:500}.current small{font-size:13px;font-weight:400}.header-action{display:grid;flex:0 0 auto;place-items:center;width:36px;height:36px;padding:0;border:0;border-radius:50%;color:var(--secondary-text-color);background:transparent;cursor:pointer}.header-action:hover{background:color-mix(in srgb,var(--primary-text-color) 8%,transparent)}.header-action ha-icon{--mdc-icon-size:23px}.view-toolbar{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:0 0 6px}.history-legend{margin-top:8px}.legend-toggle{display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%;min-height:32px;padding:4px 0;border:0;color:var(--secondary-text-color);background:transparent;font:inherit;font-size:13px;text-align:left;cursor:pointer}.legend-toggle:focus-visible{outline:2px solid var(--primary-color);outline-offset:3px}.legend-toggle ha-icon{--mdc-icon-size:20px}[data-legend-content][hidden]{display:none}.source-legend .legend-symbol{display:block;flex:0 0 16px;width:16px;height:16px;max-height:16px;overflow:visible}.source-legend{align-items:center}.source-legend .aggregate-entry{white-space:nowrap;flex-wrap:nowrap}.aggregate-info{display:inline-flex;align-items:center;justify-content:center;flex:0 0 32px;width:32px;height:32px;padding:0;border:0;border-radius:50%;color:inherit;background:transparent;cursor:pointer}.aggregate-info:focus-visible{outline:2px solid var(--primary-color);outline-offset:2px}.aggregate-info ha-icon{--mdc-icon-size:18px}.aggregate-explanation{margin:4px 0 10px;color:var(--secondary-text-color);font-size:12px;line-height:1.45}[data-aggregate-explanation][hidden]{display:none}.series-legend{display:flex;flex-wrap:wrap;gap:4px 12px;margin:2px 0 6px}.series-legend>div{display:grid;grid-template-columns:20px auto auto;align-items:center;gap:4px;min-width:0;font-size:12px}.series-legend ha-icon{--mdc-icon-size:17px}.series-legend span{overflow:hidden;color:var(--secondary-text-color);text-overflow:ellipsis;white-space:nowrap}.series-legend strong{font-weight:500}.meta{flex:1;font-size:12px;line-height:1.35}.view-switch{display:inline-flex;flex:0 0 auto;gap:3px;padding:3px;border:1px solid var(--divider-color);border-radius:17px;background:var(--secondary-background-color)}.view-switch button{display:grid;place-items:center;width:28px;height:28px;padding:0;border:0;border-radius:14px;color:var(--secondary-text-color);background:transparent;cursor:pointer}.view-switch button.active{color:#fff;background:var(--primary-color)}.view-switch ha-icon{--mdc-icon-size:18px}svg{display:block;width:100%;height:auto;max-height:320px;overflow:visible}svg text{fill:var(--secondary-text-color);font:24px sans-serif}.grid{stroke:var(--divider-color);stroke-width:1.5}.line{fill:none;stroke-width:4;stroke-linejoin:round;stroke-linecap:round}.hourly-point{fill:var(--ha-card-background,var(--card-background-color,#1c1c1c));stroke-width:3}.manual-point{stroke:var(--ha-card-background,var(--card-background-color,#1c1c1c));stroke-width:1.5}.reference-line{stroke-width:2;stroke-dasharray:3 7}.reference-legend,.source-legend{display:flex;flex-wrap:wrap;gap:6px 14px;margin:8px 0;color:var(--secondary-text-color);font-size:12px}.reference-legend span,.source-legend span{display:inline-flex;align-items:center;gap:5px;overflow-wrap:anywhere}.reference-legend i{width:22px;border-top:2px solid currentColor;flex-shrink:0}.reference-legend i{border-top-style:dotted}.source-badge{max-width:110px;overflow-wrap:anywhere}.empty{display:grid;min-height:150px;place-items:center;text-align:center}.error{margin-bottom:8px;padding:12px;border-left:4px solid var(--error-color);color:var(--error-color);background:color-mix(in srgb,var(--error-color) 10%,transparent)}.changes{max-height:300px;overflow:auto}.changes>div{display:grid;grid-template-columns:minmax(120px,auto) minmax(0,1fr);gap:14px;padding:9px 2px;border-bottom:1px solid var(--divider-color)}.changes time{color:var(--secondary-text-color)}.changes strong{overflow-wrap:anywhere}.history-limit-notice{display:flex;gap:6px;align-items:center;margin-bottom:8px;color:var(--secondary-text-color);font-size:12px}.history-limit-notice ha-icon{--mdc-icon-size:18px}.history-limit-notice ha-icon{flex-shrink:0;color:var(--warning-color,#f0a000)}.unit-warning{color:var(--warning-color,#f0a000)}.history-list.scrollable{max-height:var(--history-list-max-height);padding-right:5px;overflow-y:auto;overscroll-behavior:contain}.history-list section+section{margin-top:18px}.history-list h3{position:sticky;top:0;z-index:1;margin:0;padding:10px 4px;border-bottom:1px solid var(--divider-color);background:var(--ha-card-background,var(--card-background-color));font-size:17px}.history-row{display:grid;grid-template-columns:34px minmax(0,1fr) auto;align-items:center;gap:10px;min-height:64px;padding:8px 4px;border-bottom:1px dashed var(--divider-color)}.history-row>ha-icon{color:var(--history-icon-color)}.history-row>div{display:flex;min-width:0;flex-direction:column;gap:3px}.history-row strong{overflow-wrap:anywhere;font-weight:500}.history-row small{color:var(--secondary-text-color)}.source-badge{padding:3px 7px;border-radius:12px;color:var(--secondary-text-color);background:var(--secondary-background-color);font-size:11px}
+      [data-message]{display:flex;align-items:center;gap:8px}[data-message]>.message-text{flex:1;min-width:0;overflow-wrap:anywhere}.message-close{display:grid;place-items:center;flex:0 0 32px;width:32px;height:32px;margin-left:auto;padding:0;border:0;border-radius:50%;color:inherit;background:transparent;cursor:pointer}.message-close ha-icon{--mdc-icon-size:20px}.message-close:hover{background:color-mix(in srgb,currentColor 12%,transparent)}.message-close:focus-visible{outline:2px solid var(--primary-color);outline-offset:2px}
     </style><ha-card class="${collapsed ? "collapsed" : ""}"><div class="history-header"><button type="button" class="entity-icon" data-toggle-expanded-view aria-pressed="${this._expandedView}" title="${this._expandedView ? haListManagerHistoryCardText("ui.close_large_view", {}, this._hass) : haListManagerHistoryCardText("ui.open_large_view", {}, this._hass)}" aria-label="${this._expandedView ? haListManagerHistoryCardText("ui.close_large_view", {}, this._hass) : haListManagerHistoryCardText("ui.open_large_view", {}, this._hass)}"><ha-icon icon="${esc(icon)}"></ha-icon></button><button type="button" class="history-title ${collapsible ? "clickable" : ""}" ${collapsible ? "data-toggle-history" : ""} aria-expanded="${collapsed ? "false" : "true"}"><h2>${esc(title)}</h2>${seriesData.length > 1 ? `<small>${haListManagerHistoryCardText("history.entity_count", {p0:(seriesData.length)}, this._hass)}</small>` : ""}</button>${latest !== undefined && headerSeries ? `<span class="current">${esc(this._formatValue(latest))}${headerSeries.unit ? ` <small>${esc(headerSeries.unit)}</small>` : ""}</span>` : ""}${collapsible ? `<button type="button" class="header-action" data-toggle-history title="${collapsed ? haListManagerHistoryCardText("ui.expand_card", {}, this._hass) : haListManagerHistoryCardText("ui.collapse_card", {}, this._hass)}" aria-label="${collapsed ? haListManagerHistoryCardText("ui.expand_card", {}, this._hass) : haListManagerHistoryCardText("ui.collapse_card", {}, this._hass)}"><ha-icon icon="mdi:chevron-${collapsed ? "down" : "up"}"></ha-icon></button>` : ""}</div>
-      ${collapsed ? "" : `${this._error ? `<div class="error">${esc(this._error)}</div>` : ""}${this._truncated ? `<div class="history-limit-notice" role="status"><ha-icon icon="mdi:information-outline"></ha-icon>${haListManagerHistoryCardText("history.query_limit_reached", {}, this._hass)}</div>` : ""}<div class="view-toolbar"><div class="meta">${esc(summaryParts.join(" · "))}${unitWarning ? ` · <span class="unit-warning">${esc(unitWarning)}</span>` : ""}</div>${showViewToggle ? `<div class="view-switch" aria-label="${haListManagerHistoryCardText("ui.appearance", {}, this._hass)}"><button type="button" class="${view === "chart" ? "active" : ""}" data-set-view="chart" title="${haListManagerHistoryCardText("ui.chart", {}, this._hass)}" aria-label="${haListManagerHistoryCardText("ui.chart", {}, this._hass)}"><ha-icon icon="mdi:chart-line"></ha-icon></button><button type="button" class="${view === "list" ? "active" : ""}" data-set-view="list" title="${haListManagerHistoryCardText("ui.list", {}, this._hass)}" aria-label="${haListManagerHistoryCardText("ui.list", {}, this._hass)}"><ha-icon icon="mdi:format-list-bulleted"></ha-icon></button></div>` : ""}</div>${content}${legend}`}
+      ${collapsed ? "" : `${this._messageMarkup("error", this._error, "error", "alert", "alert-circle-outline")}${this._truncated ? this._messageMarkup("limit", haListManagerHistoryCardText("history.query_limit_reached", {}, this._hass), "history-limit-notice", "status", "information-outline") : ""}<div class="view-toolbar"><div class="meta">${esc(summaryParts.join(" · "))}${unitWarning ? ` · <span class="unit-warning">${esc(unitWarning)}</span>` : ""}</div>${showViewToggle ? `<div class="view-switch" aria-label="${haListManagerHistoryCardText("ui.appearance", {}, this._hass)}"><button type="button" class="${view === "chart" ? "active" : ""}" data-set-view="chart" title="${haListManagerHistoryCardText("ui.chart", {}, this._hass)}" aria-label="${haListManagerHistoryCardText("ui.chart", {}, this._hass)}"><ha-icon icon="mdi:chart-line"></ha-icon></button><button type="button" class="${view === "list" ? "active" : ""}" data-set-view="list" title="${haListManagerHistoryCardText("ui.list", {}, this._hass)}" aria-label="${haListManagerHistoryCardText("ui.list", {}, this._hass)}"><ha-icon icon="mdi:format-list-bulleted"></ha-icon></button></div>` : ""}</div>${content}${legend}`}
     </ha-card>`;
+    this.shadowRoot.querySelectorAll("[data-dismiss-message]").forEach((button) => button.addEventListener("click", (event) => {
+      event.preventDefault(); event.stopPropagation();
+      this._dismissMessage(button.dataset.dismissMessage);
+    }));
     this.shadowRoot.querySelectorAll("[data-toggle-expanded-view]").forEach((element) => element.addEventListener("click", (event) => this._toggleExpandedView(event)));
     this.shadowRoot.querySelectorAll("[data-toggle-history]").forEach((element) => element.addEventListener("click", () => this._toggleCollapsed()));
     this.shadowRoot.querySelector("[data-toggle-legend]")?.addEventListener("click", () => this._toggleLegend());

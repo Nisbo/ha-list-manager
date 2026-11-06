@@ -70,7 +70,7 @@ function haListManagerPanelTextRequest(hass, message) {
   return hass.callWS(message.type?.startsWith("ha_list_manager/") ? { ...message, language: haListManagerPanelTextLanguage(hass) } : message);
 }
 
-const PANEL_VERSION = "1.0.0b6";
+const PANEL_VERSION = "1.0.0b7";
 const GROUP_PICKER_RESULT_LIMIT = 100;
 const API = "ha_list_manager";
 const ITEMS_EVENT = "ha_list_manager_items_changed";
@@ -382,6 +382,7 @@ class HaListManagerPanel extends HTMLElement {
     const dialog = this._pendingScanDialog();
     if (!dialog) return;
     const editing = this._canEditPendingScan(dialog);
+    if (!editing && this._fieldSelection) this._closeFieldSelection();
     const fields = this.shadowRoot.querySelector("[data-pending-scan-fields]");
     if (fields) { fields.disabled = !editing; fields.inert = !editing; }
     const hint = this.shadowRoot.querySelector("[data-pending-scan-collaboration]");
@@ -1072,6 +1073,8 @@ class HaListManagerPanel extends HTMLElement {
     this._bindEvents();
     this._initializeRenderedComponents();
     this._updatePendingScanControls();
+    if (this._fieldSelection?.parent === this._dialog) this._renderFieldSelection();
+    else this._fieldSelection = null;
     const restoredScanPanel = this.shadowRoot.querySelector("[data-pending-scan-fields]")?.closest?.("[data-dialog-panel]");
     if (restoredScanPanel && this._pendingScanDialog()) restoredScanPanel.scrollTop = this._pendingScanDialog().panel_scroll_top || 0;
     this._setPageScrollLocked(Boolean(this._dialog));
@@ -6286,7 +6289,9 @@ class HaListManagerPanel extends HTMLElement {
       const menu = menuHost?.querySelector(menuSelector);
       if (!triggerHost || !menu || triggerHost.querySelector(":scope > [data-picker-list-trigger]")) return;
       triggerHost.classList.add("picker-trigger-host");
-      input.style.setProperty("padding-right", "44px", "important");
+      const paired = !input.matches("[data-inventory-product-search]");
+      triggerHost.classList.toggle("picker-paired", paired);
+      input.style.setProperty("padding-right", paired ? "86px" : "44px", "important");
       const trigger = document.createElement("button");
       trigger.type = "button";
       trigger.className = "picker-list-trigger";
@@ -6294,10 +6299,12 @@ class HaListManagerPanel extends HTMLElement {
       trigger.title = haListManagerPanelText("ui.open_picker_close_keyboard", {}, this._hass);
       trigger.setAttribute("aria-label", trigger.title);
       trigger.innerHTML = '<ha-icon icon="mdi:gesture-tap-button"></ha-icon>';
+      trigger.disabled = input.disabled;
       trigger.addEventListener("pointerdown", (event) => { event.preventDefault(); event.stopPropagation(); });
       trigger.addEventListener("click", (event) => {
         event.preventDefault();
         event.stopPropagation();
+        if (!this._canUseFieldPicker(input)) return;
         const focused = root.activeElement === input || this.shadowRoot.activeElement === input;
         this.shadowRoot.activeElement?.blur?.();
         if (!menu.hidden) {
@@ -6315,6 +6322,7 @@ class HaListManagerPanel extends HTMLElement {
         const currentValue = input.value.trim();
         input.blur();
         setTimeout(() => {
+          if (!input.isConnected || !this._canUseFieldPicker(input) || this._fieldSelection) return;
           input.value = "";
           input.dispatchEvent(new Event("focus"));
           input.value = currentValue;
@@ -6332,7 +6340,153 @@ class HaListManagerPanel extends HTMLElement {
         }, focused ? 140 : 0);
       });
       triggerHost.append(trigger);
+      if (paired) {
+        const popup = document.createElement("button");
+        popup.type = "button";
+        popup.className = "picker-list-trigger picker-popup-trigger";
+        popup.dataset.pickerPopupTrigger = "";
+        popup.disabled = input.disabled;
+        popup.title = haListManagerPanelText(input.matches("[data-label-input],[data-chip-label-combo]") ? "selection.choose_labels" : "selection.choose_categories", {}, this._hass);
+        popup.setAttribute("aria-label", popup.title);
+        popup.setAttribute("aria-haspopup", "dialog");
+        popup.innerHTML = '<ha-icon icon="mdi:view-grid-outline"></ha-icon>';
+        popup.addEventListener("pointerdown", (event) => { event.preventDefault(); event.stopPropagation(); });
+        popup.addEventListener("click", (event) => { event.preventDefault(); event.stopPropagation(); this._openFieldSelection(input, menu); });
+        triggerHost.append(popup);
+      }
     });
+  }
+
+  _canUseFieldPicker(input) {
+    return Boolean(input?.isConnected && !this._busy && !input.disabled && !input.readOnly
+      && !input.closest("[inert],fieldset:disabled") && (!this._pendingScanDialog() || this._canEditPendingScan()));
+  }
+
+  _fieldSelectionOptions(input, menu, labels) {
+    if (labels) {
+      const draft = this._dialog?.draft || {};
+      const available = input.matches("[data-chip-label-combo]")
+        ? this._labels.filter((label) => label.scope === "global" || label.scope === "list_type" && label.list_type === "todo" || draft.scope === "list" && label.scope === "list" && label.list_id === draft.list_id)
+        : this._dialog?.kind === "item-editor" ? this._labelsForList(this._selectedListId) : this._labels;
+      return available.map((label) => ({ ...label, secondary: this._labelScopeText(label) }));
+    }
+    // Use the existing chooser's options and handlers so each context keeps its
+    // own scope, product-default and dynamic-category semantics.
+    const value = input.value;
+    input.value = "";
+    input.dispatchEvent(new Event("focus"));
+    input.value = value;
+    menu.hidden = true;
+    input.setAttribute("aria-expanded", "false");
+    return Array.from(menu.querySelectorAll("button:not([disabled])")).map((button) => {
+      const attribute = Array.from(button.attributes).find((entry) => /^data-.*(?:option|value)$/.test(entry.name));
+      const id = attribute?.value || "";
+      const category = this._categories.find((entry) => entry.id === id);
+      return {
+        id, name: button.querySelector("strong")?.textContent?.trim() || button.textContent.trim(),
+        secondary: button.querySelector("small")?.textContent?.trim() || "",
+        icon: category?.icon || button.querySelector("ha-icon")?.getAttribute("icon") || "mdi:shape-outline",
+        color: category?.color || button.style.getPropertyValue("--label-color"), button,
+      };
+    });
+  }
+
+  _openFieldSelection(input, menu) {
+    if (!this._canUseFieldPicker(input) || this._fieldSelection) return;
+    const attribute = Array.from(input.attributes).find((entry) => entry.name.startsWith("data-"));
+    if (!attribute) return;
+    this.shadowRoot.activeElement?.blur?.();
+    this.shadowRoot.querySelectorAll(".category-picker-options,.category-options,.label-picker-options,.label-options,.chip-template-options").forEach((options) => { options.hidden = true; });
+    this.shadowRoot.querySelectorAll("[data-picker-list-trigger]").forEach((button) => {
+      button.classList.remove("active"); button.setAttribute("aria-expanded", "false");
+      button.closest(".picker-trigger-host")?.querySelector("input")?.setAttribute("aria-expanded", "false");
+    });
+    this._fieldSelection = {
+      parent: this._dialog, attribute: attribute.name, value: attribute.value, inputValue: input.value,
+      labels: input.matches("[data-label-input],[data-chip-label-combo]"), query: "",
+      selected: new Set(this._dialog?.draft?.label_ids || []), original: new Set(this._dialog?.draft?.label_ids || []), scroll: this._fieldSelectionScroll(),
+    };
+    menu.hidden = true;
+    this._renderFieldSelection();
+  }
+
+  _fieldSelectionInput() {
+    const popup = this._fieldSelection;
+    return popup && Array.from(this.shadowRoot.querySelectorAll(`[${popup.attribute}]`)).find((input) => input.getAttribute(popup.attribute) === popup.value);
+  }
+
+  _fieldSelectionScroll() {
+    return Array.from(this.shadowRoot.querySelectorAll(".dialog,.dialog-backdrop,main")).map((node) => ({ node, top: node.scrollTop }));
+  }
+
+  _restoreFieldSelection(popup) {
+    popup.scroll.forEach(({ node, top }) => {
+      const restored = node.isConnected ? node : this.shadowRoot.querySelector(node.matches(".dialog") ? ".dialog" : node.matches("main") ? "main" : ".dialog-backdrop");
+      if (restored) restored.scrollTop = top;
+    });
+    const input = Array.from(this.shadowRoot.querySelectorAll(`[${popup.attribute}]`)).find((field) => field.getAttribute(popup.attribute) === popup.value);
+    if (input && popup.labels) input.value = popup.inputValue;
+    input?.closest(".picker-trigger-host")?.querySelector("[data-picker-popup-trigger]")?.focus({ preventScroll: true });
+  }
+
+  _closeFieldSelection() {
+    const popup = this._fieldSelection;
+    const input = this._fieldSelectionInput();
+    this._fieldSelection = null;
+    this.shadowRoot.querySelector("[data-field-selection]")?.remove();
+    input?.closest(".picker-trigger-host")?.querySelector("[data-picker-popup-trigger]")?.focus({ preventScroll: true });
+    popup?.scroll.forEach(({ node, top }) => { if (node.isConnected) node.scrollTop = top; });
+  }
+
+  _renderFieldSelection() {
+    const popup = this._fieldSelection;
+    const input = this._fieldSelectionInput();
+    if (!popup || popup.parent !== this._dialog || !this._canUseFieldPicker(input)) { this._closeFieldSelection(); return; }
+    const menu = input.closest(".category-combo,.category-picker,.label-combo,.chip-template-combo,.dish-category-combo")?.querySelector(".category-picker-options,.category-options,.label-picker-options,.label-options,.chip-template-options");
+    if (!menu) { this._closeFieldSelection(); return; }
+    const options = this._fieldSelectionOptions(input, menu, popup.labels);
+    let host = this.shadowRoot.querySelector("[data-field-selection]");
+    if (!host) {
+      host = document.createElement("div"); host.dataset.fieldSelection = ""; this.shadowRoot.append(host);
+      host.innerHTML = `<div class="dialog-backdrop field-selection-backdrop"><section class="dialog field-selection-dialog" role="dialog" aria-modal="true" aria-label="${haListManagerPanelText(popup.labels ? "selection.labels" : "selection.categories", {}, this._hass)}"><div class="dialog-header"><h2>${haListManagerPanelText(popup.labels ? "selection.labels" : "selection.categories", {}, this._hass)}</h2><button class="icon-button" type="button" data-field-selection-close aria-label="${haListManagerPanelText("ui.close", {}, this._hass)}"><ha-icon icon="mdi:close"></ha-icon></button></div><label class="field"><span>${haListManagerPanelText("selection.search", {}, this._hass)}</span><input type="search" data-field-selection-search autocomplete="off" value="${this._escape(popup.query)}"></label><div class="field-selection-options" data-field-selection-options></div><div class="dialog-actions">${popup.labels ? `<button type="button" class="ha-button primary" data-field-selection-apply>${haListManagerPanelText("selection.apply", {}, this._hass)}</button><button type="button" class="ha-button" data-field-selection-clear>${haListManagerPanelText("selection.clear", {}, this._hass)}</button>` : ""}<button type="button" class="ha-button" data-field-selection-close>${haListManagerPanelText("ui.cancel", {}, this._hass)}</button></div></section></div>`;
+      host.querySelectorAll("[data-field-selection-close]").forEach((button) => button.addEventListener("click", () => this._closeFieldSelection()));
+      host.querySelector(".field-selection-backdrop").addEventListener("click", (event) => { if (event.target === event.currentTarget) this._closeFieldSelection(); });
+      host.addEventListener("keydown", (event) => {
+        if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); this._closeFieldSelection(); }
+        if (event.key === "Tab") {
+          const fields = Array.from(host.querySelectorAll("input,button:not([disabled])"));
+          const first = fields[0], last = fields.at(-1);
+          if (event.shiftKey && this.shadowRoot.activeElement === first) { event.preventDefault(); last.focus(); }
+          else if (!event.shiftKey && this.shadowRoot.activeElement === last) { event.preventDefault(); first.focus(); }
+        }
+      });
+      host.querySelector("[data-field-selection-search]").addEventListener("input", (event) => { popup.query = event.target.value; this._renderFieldSelection(); });
+      host.querySelector("[data-field-selection-clear]")?.addEventListener("click", () => { this._fieldSelectionOptions(this._fieldSelectionInput(), null, true).forEach((entry) => popup.selected.delete(entry.id)); this._renderFieldSelection(); });
+      host.querySelector("[data-field-selection-apply]")?.addEventListener("click", () => {
+        if (!this._canUseFieldPicker(this._fieldSelectionInput())) return;
+        const available = new Set(this._fieldSelectionOptions(this._fieldSelectionInput(), null, true).map((entry) => entry.id));
+        popup.parent.draft.label_ids = [...popup.selected].filter((id) => this._labels.some((label) => label.id === id) && (available.has(id) || popup.original.has(id)));
+        this._closeFieldSelection(); this._render();
+        this._restoreFieldSelection(popup);
+      });
+      host.querySelector("[data-field-selection-close]")?.focus({ preventScroll: true });
+    }
+    const query = popup.query.trim().toLocaleLowerCase();
+    const filtered = options.filter((entry) => `${entry.name} ${entry.secondary}`.toLocaleLowerCase().includes(query));
+    host.querySelector("[data-field-selection-options]").innerHTML = filtered.length ? filtered.map((entry, index) => `<button type="button" class="field-selection-chip${popup.labels && popup.selected.has(entry.id) || !popup.labels && entry.name === input.value ? " selected" : ""}" data-field-selection-option="${index}" ${popup.labels ? `aria-pressed="${popup.selected.has(entry.id)}"` : ""} style="${entry.color ? `--label-color:${this._escape(entry.color)}` : ""}"><ha-icon icon="${this._escape(entry.icon || "mdi:label-outline")}"></ha-icon><span><strong>${this._escape(entry.name)}</strong>${entry.secondary ? `<small>${this._escape(entry.secondary)}</small>` : ""}</span></button>`).join("") : `<p class="field-help">${haListManagerPanelText("selection.empty", {}, this._hass)}</p>`;
+    host.querySelectorAll("[data-field-selection-option]").forEach((button) => button.addEventListener("click", () => {
+      if (!this._canUseFieldPicker(this._fieldSelectionInput())) return;
+      const entry = filtered[Number(button.dataset.fieldSelectionOption)];
+      if (popup.labels) {
+        if (popup.selected.has(entry.id)) popup.selected.delete(entry.id); else popup.selected.add(entry.id);
+        this._renderFieldSelection();
+        host.querySelector(`[data-field-selection-option="${button.dataset.fieldSelectionOption}"]`)?.focus({ preventScroll: true });
+      } else {
+        this._closeFieldSelection();
+        entry.button.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }));
+        this._restoreFieldSelection(popup);
+      }
+    }));
   }
 
   _configureTodoChipPickers() {
@@ -6711,10 +6865,9 @@ class HaListManagerPanel extends HTMLElement {
   _findInventoryGroup(id) { return this._inventoryGroups.find((record) => record.id === id); }
   _renderLabelSelector(selectedIds = []) {
     const availableLabels = this._dialog?.kind === "item-editor" ? this._labelsForList(this._selectedListId) : this._labels;
-    if (!availableLabels.length) return `<div class="label-selector"><span>${haListManagerPanelText("ui.labels_optional", {}, this._hass)}</span><p class="field-help">${haListManagerPanelText("ui.no_labels_in_scope", {}, this._hass)}</p></div>`;
     const selected = availableLabels.filter((label) => selectedIds.includes(label.id));
     const chips = selected.map((label) => `<button type="button" class="selected-label" data-remove-label="${this._escape(label.id)}" style="${label.color ? `--label-color:${this._escape(label.color)}` : ""}" title="${haListManagerPanelText("ui.remove_named", {p0:(this._escape(label.name))}, this._hass)}"><ha-icon icon="${this._escape(label.icon || "mdi:label-outline")}"></ha-icon><span>${this._escape(label.name)}</span><ha-icon class="remove-label" icon="mdi:close"></ha-icon></button>`).join("");
-    return `<div class="label-selector"><span>${haListManagerPanelText("ui.labels_optional", {}, this._hass)}</span>${chips ? `<div class="selected-labels">${chips}</div>` : ""}<div class="label-combo"><div class="label-search"><ha-icon icon="mdi:magnify"></ha-icon><input type="text" placeholder="${haListManagerPanelText("ui.browse_labels", {}, this._hass)}" autocomplete="off" data-label-input></div><div class="label-picker-options" data-label-options hidden></div></div></div>`;
+    return `<div class="label-selector"><span>${haListManagerPanelText("ui.labels_optional", {}, this._hass)}</span>${chips ? `<div class="selected-labels">${chips}</div>` : ""}<div class="label-combo"><div class="label-search"><ha-icon icon="mdi:magnify"></ha-icon><input type="text" placeholder="${haListManagerPanelText("ui.browse_labels", {}, this._hass)}" autocomplete="off" data-label-input ${!availableLabels.length ? "disabled" : ""}></div><div class="label-picker-options" data-label-options hidden></div></div>${!availableLabels.length ? `<p class="field-help">${haListManagerPanelText("ui.no_labels_in_scope", {}, this._hass)}</p>` : ""}</div>`;
   }
   _configureLabelSelector() {
     const input = this.shadowRoot.querySelector("[data-label-input]");
@@ -6904,7 +7057,7 @@ class HaListManagerPanel extends HTMLElement {
           choose(options.find((option) => option.value === button.dataset.productComboValue) || null);
         }));
       };
-      input.addEventListener("focus", () => { input.select(); renderOptions(); });
+      input.addEventListener("focus", () => { if (!this._fieldSelection) input.select(); renderOptions(); });
       input.addEventListener("input", renderOptions);
       input.addEventListener("keydown", (event) => {
         if (event.key === "Escape") { close(); return; }
@@ -7346,6 +7499,7 @@ class HaListManagerPanel extends HTMLElement {
   }
 
   _styles() { return `
+    .picker-trigger-host.picker-paired input{padding-right:86px!important}.picker-paired>[data-picker-list-trigger]{right:44px}.picker-paired>.picker-popup-trigger{right:4px}.picker-list-trigger:disabled{opacity:.4;cursor:default}.field-selection-backdrop{z-index:150}.field-selection-dialog{width:min(680px,calc(100vw - 32px));max-height:calc(100dvh - 32px);display:flex;flex-direction:column;overflow:hidden;box-sizing:border-box}.field-selection-dialog>.field{margin:0 0 16px}.field-selection-options{display:flex;flex-wrap:wrap;align-content:flex-start;gap:9px;overflow:auto;min-height:60px;overscroll-behavior:contain;padding:2px}.field-selection-chip{display:inline-flex;align-items:center;gap:7px;max-width:100%;min-height:44px;padding:7px 12px;border:1px solid color-mix(in srgb,var(--label-color,var(--primary-color)) 55%,var(--divider-color));border-radius:22px;color:var(--primary-text-color);background:color-mix(in srgb,var(--label-color,var(--primary-color)) 14%,var(--card-background-color));cursor:pointer;text-align:left}.field-selection-chip ha-icon{flex-shrink:0;--mdc-icon-size:21px;padding:3px;box-sizing:content-box;border-radius:50%;color:var(--primary-text-color);background:color-mix(in srgb,var(--label-color,var(--primary-color)) 24%,var(--card-background-color))}.field-selection-chip>span{display:flex;flex-direction:column;min-width:0;overflow-wrap:anywhere}.field-selection-chip small{color:var(--secondary-text-color);font-size:12px}.field-selection-chip.selected{border-color:var(--primary-color);box-shadow:inset 0 0 0 1px var(--primary-color);background:color-mix(in srgb,var(--primary-color) 18%,var(--card-background-color))}.field-selection-chip:focus-visible{outline:2px solid var(--primary-color);outline-offset:1px}.field-selection-dialog .dialog-actions{flex-shrink:0}
     .off-refresh{margin:14px 0;padding:12px;border:1px solid var(--divider-color);border-left:3px solid var(--primary-color);border-radius:8px}.off-refresh>p{margin:6px 0 10px;color:var(--secondary-text-color);font-size:14px;line-height:1.4}.off-refresh label{display:flex!important;flex-direction:row!important;align-items:flex-start;gap:10px;margin:10px 0!important}.off-refresh input[type=checkbox]{flex:0 0 auto;width:20px!important;min-height:20px!important;height:20px;margin:2px 0 0;padding:0;accent-color:var(--primary-color)}.off-refresh label>span{display:flex;flex-direction:column;min-width:0;gap:4px}.off-refresh small{overflow-wrap:anywhere;white-space:normal;color:var(--secondary-text-color)}
     .legacy-import-warning-group{margin-top:10px;padding-top:10px;border-top:1px solid var(--divider-color)}.legacy-import-warning-reason{margin-top:10px}.legacy-import-warning-reason p{margin:0}.legacy-import-warning-reason ul{margin-top:6px}.legacy-import-warning-reason code{font-size:12px;overflow-wrap:anywhere;white-space:normal}.legacy-import-type-field{margin-bottom:14px}[data-legacy-inventory-help][hidden]{display:none}
     [data-legacy-input-block][hidden],[data-legacy-source-wrapper][hidden],[data-legacy-ean-section][hidden],[data-legacy-ean-source-wrapper][hidden]{display:none}.legacy-import-ean-conflicts{margin:14px 0;padding:12px;border-left:3px solid var(--warning-color,#ffa600);border-radius:6px;background:color-mix(in srgb,var(--warning-color,#ffa600) 8%,transparent)}[data-legacy-import-view] [data-legacy-source-fields][data-no-source="true"]{grid-template-columns:minmax(0,1fr)}[data-legacy-source-wrapper]{min-width:0}[data-legacy-import-view]>.content-header{padding-right:54px}[data-legacy-import-view] .settings-card{margin-top:16px}[data-legacy-import-view] p{line-height:1.5}[data-legacy-import-view] h4{margin:0 0 10px;font-size:16px}[data-legacy-import-view] h4 small{display:block;margin-top:4px;color:var(--secondary-text-color);font-weight:400}[data-legacy-import-view] .field-grid{grid-template-columns:minmax(0,1fr) minmax(0,1fr);align-items:end}[data-legacy-import-view] .field-grid>.field{margin-top:0}[data-legacy-import-view] ha-selector{min-width:0}[data-legacy-import-view] .setting-row{align-items:center;border-bottom:0}[data-legacy-import-view] .setting-row input{flex:0 0 auto;width:20px;height:20px;accent-color:var(--primary-color)}.legacy-import-yaml{font-family:var(--code-font-family,monospace)!important;font-size:13px!important;line-height:1.5;tab-size:2;white-space:pre;overflow-wrap:normal;overflow:auto}.legacy-import-source,.legacy-import-preview-list{margin-top:18px;padding:14px;border:1px solid var(--divider-color);border-radius:10px;overflow-wrap:anywhere}.legacy-import-notes{margin-top:14px;padding:10px 12px;border-left:3px solid var(--warning-color,#ffa600);border-radius:6px;background:color-mix(in srgb,var(--warning-color,#ffa600) 8%,transparent)}.legacy-import-notes summary{color:var(--warning-color,#ffa600)}.legacy-import-notes ul{padding-left:20px;margin-bottom:0}.legacy-import-notes li+li{margin-top:7px}.legacy-import-preview-list>details{margin-top:12px;padding-top:10px;border-top:1px solid var(--divider-color)}[data-legacy-import-view] summary{cursor:pointer}.legacy-import-definitions,.legacy-import-item-list{display:grid;gap:9px;margin-top:12px}.legacy-import-category{display:flex;align-items:center;gap:10px}.legacy-import-color{display:grid;place-items:center;flex:0 0 auto;width:34px;height:34px;border-radius:8px;color:var(--import-color,var(--primary-color));background:color-mix(in srgb,var(--import-color,var(--primary-color)) 16%,transparent)}.legacy-import-category>span:last-child,.legacy-import-item-list>div{display:flex;min-width:0;flex-direction:column;gap:4px}.legacy-import-category small,.legacy-import-item-list small{color:var(--secondary-text-color);line-height:1.4}.legacy-import-chip-list{display:flex;flex-wrap:wrap;gap:7px;margin-top:12px}.legacy-import-chip-list>span{padding:5px 9px;border:1px solid var(--divider-color);border-radius:999px;background:var(--secondary-background-color)}.legacy-import-chip-list>.field-help{flex-basis:100%}.legacy-import-file,.legacy-import-results>div{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:10px;padding:8px 10px;border:1px solid var(--divider-color);border-radius:8px;overflow-wrap:anywhere}.legacy-import-results>div{flex-wrap:wrap}.legacy-import-file>span{min-width:0}.legacy-import-file .icon-button{flex-shrink:0}[data-legacy-feedback]:empty{display:none}[data-legacy-feedback]{margin-top:12px}@media(max-width:600px){[data-legacy-import-view] .field-grid{grid-template-columns:minmax(0,1fr)}.legacy-import-source,.legacy-import-preview-list{padding:11px}[data-legacy-import-view] .settings-inline-actions>.ha-button{max-width:100%;white-space:normal}}

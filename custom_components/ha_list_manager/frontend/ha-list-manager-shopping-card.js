@@ -85,7 +85,7 @@ function haListManagerShoppingCardTextRequest(hass, message) {
 const HA_LM_API = "ha_list_manager";
 const HA_LM_ITEMS_EVENT = "ha_list_manager_items_changed";
 const HA_LM_LISTS_EVENT = "ha_list_manager_lists_changed";
-const CARD_VERSION = "1.0.0b6";
+const CARD_VERSION = "1.0.0b7";
 
 const esc = (value) => String(value ?? "").replace(/[&<>'"]/g, (char) => ({
   "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;",
@@ -153,6 +153,7 @@ class HaListManagerShoppingCard extends HTMLElement {
     this._tandoorSearchRequestId = 0;
     this._browserChipMenu = null;
     this._itemAction = null;
+    this._selectionPopup = null;
     this._chipLongPressTimer = null;
     this._suppressChipClickUntil = 0;
     this._expandedView = false;
@@ -167,6 +168,11 @@ class HaListManagerShoppingCard extends HTMLElement {
     this._expandedScrollAnchor = null;
     this._onExpandedViewResize = () => this._scheduleExpandedViewBounds();
     this._onExpandedViewKeydown = (event) => {
+      if (event.key === "Escape" && this._selectionPopup) {
+        event.preventDefault(); event.stopPropagation();
+        this._closeSelectionPopup();
+        return;
+      }
       if (event.key === "Escape" && (this._itemAction || this._dialog?.item_actions_open)) {
         event.preventDefault(); event.stopPropagation();
         if (this._itemAction) this._closeItemAction(); else this._toggleItemActions();
@@ -1019,7 +1025,7 @@ class HaListManagerShoppingCard extends HTMLElement {
   _refreshMetadataUi() {
     // Definition updates must refresh open pickers without losing an in-progress edit.
     // Product/item drafts are kept current by their input handlers.
-    const transientSelectors = ["[data-quantity]", "[data-label-input]", "[data-d-category]", "[data-category-input]"];
+    const transientSelectors = ["[data-quantity]", "[data-label-input]", "[data-d-category]", "[data-category-input]", "[data-selection-search]"];
     const transientInputs = transientSelectors.map((selector) => [selector, [...this.shadowRoot.querySelectorAll(selector)].map((input) => {
       const menu = input.closest?.(".label-combo,.category-combo,.category-picker")?.querySelector(".label-picker-options,.category-picker-options");
       return { value: input.value, menuHidden: menu?.hidden };
@@ -1030,7 +1036,7 @@ class HaListManagerShoppingCard extends HTMLElement {
     const inputValue = active?.value;
     const selection = active?.tagName === "INPUT" && ["text", "search", "url", "tel"].includes(active.type)
       ? [active.selectionStart, active.selectionEnd] : null;
-    const scrollSelector = "ha-card,.dialog,.category-picker-options,.label-picker-options";
+    const scrollSelector = "ha-card,.dialog,.category-picker-options,.label-picker-options,.selection-grid";
     const innerScroll = [...this.shadowRoot.querySelectorAll(scrollSelector)].map((node) => [node.scrollTop, node.scrollLeft]);
     const outerScroll = [];
     for (let node = this; node; node = node.parentElement || node.getRootNode?.().host) {
@@ -1113,7 +1119,8 @@ class HaListManagerShoppingCard extends HTMLElement {
       : null;
     const anchorTop = anchor?.getBoundingClientRect().top;
     const before = region.getBoundingClientRect().height;
-    region.innerHTML = message ? `<div class="send-status"><ha-icon icon="mdi:check-circle-outline"></ha-icon>${esc(message)}</div>` : "";
+    region.innerHTML = this._notice(message, "notification", "send-status", "check-circle-outline");
+    this._bindNotices(region);
     const heightChange = Number.isFinite(anchorTop)
       ? anchor.getBoundingClientRect().top - anchorTop
       : region.getBoundingClientRect().height - before;
@@ -1781,7 +1788,7 @@ class HaListManagerShoppingCard extends HTMLElement {
     }
   }
 
-  _closeDialog() { if (this._itemAction) { this._closeItemAction(); return; } this._dialog = null; this._confirmation = null; this._imageDialog = null; this._unlockScroll(); this._render(); }
+  _closeDialog() { if (this._selectionPopup) { this._closeSelectionPopup(); return; } if (this._itemAction) { this._closeItemAction(); return; } this._dialog = null; this._confirmation = null; this._imageDialog = null; this._unlockScroll(); this._render(); }
   _closeChipDialog() {
     this._chipDialog = false;
     if (!this._dialog && !this._productPicker && !this._confirmation && !this._imageDialog) this._unlockScroll();
@@ -2118,15 +2125,231 @@ class HaListManagerShoppingCard extends HTMLElement {
     return category.scope === "list_type" ? haListManagerShoppingCardText("ui.shopping_lists", {}, this._hass) : haListManagerShoppingCardText("ui.this_list", {}, this._hass);
   }
 
+  _notice(message, key, className, icon = "alert-circle-outline") {
+    if (!message) return "";
+    const close = haListManagerShoppingCardText("ui.dismiss_message", {}, this._hass);
+    return `<div class="${className} dismissible-notice" data-notice="${key}" role="${key === "error" || className.includes("error") ? "alert" : "status"}"><ha-icon icon="mdi:${icon}"></ha-icon><span class="notice-text">${esc(message)}</span><button type="button" class="notice-dismiss" data-dismiss-message="${key}" aria-label="${esc(close)}" title="${esc(close)}"><ha-icon icon="mdi:close"></ha-icon></button></div>`;
+  }
+
+  _dismissNotice(key, button, keyboard = false) {
+    const returnFocus = button?._noticeReturnFocus || (keyboard && this.shadowRoot.activeElement === button
+      ? button.closest?.(".dialog")?.querySelector?.("input:not(:disabled),select:not(:disabled),textarea:not(:disabled)") || this.shadowRoot.querySelector("[data-product-input]")
+      : null);
+    if (key === "notification") this._notificationStatus = "";
+    else if (key === "error") this._error = "";
+    else if (key === "item-action") { if (this._itemAction) this._itemAction.error = ""; }
+    else if (key === "dish") { if (this._dishDialog) this._dishDialog.status = ""; }
+    else if (key === "tandoor") { if (this._tandoorDialog) this._tandoorDialog.status = ""; }
+    else if (key === "browser-chip") { if (this._browserChipMenu) this._browserChipMenu.status = ""; }
+    else if (this._dialog) {
+      const field = { dialog: "status", ean: "eanStatus", quick: "quick_action_status" }[key];
+      if (field) this._dialog[field] = "";
+    }
+    // Remove only this banner: keep input nodes, picker queries and scroll anchors mounted.
+    button?.closest?.("[data-notice]")?.remove();
+    returnFocus?.focus?.({ preventScroll: true });
+  }
+
+  _bindNotices(root = this.shadowRoot) {
+    root.querySelectorAll("[data-dismiss-message]").forEach((button) => {
+      button.addEventListener("pointerdown", () => {
+        const active = this.shadowRoot.activeElement;
+        button._noticeReturnFocus = active && ["INPUT", "TEXTAREA", "SELECT"].includes(active.tagName) ? active : null;
+      });
+      button.addEventListener("click", (event) => {
+        event.preventDefault(); event.stopPropagation();
+        this._dismissNotice(button.dataset.dismissMessage, button, event.detail === 0);
+      });
+    });
+  }
+
+  _selectionHeading(text) { return `<span class="selection-field-heading">${text}</span>`; }
+
+  _selectionButton(kind, disabled = false, context = "", itemId = "") {
+    const label = haListManagerShoppingCardText(`selection.choose_${kind}`, {}, this._hass);
+    return `<button type="button" class="selection-open" data-open-selection="${kind}"${context ? ` data-selection-context="${context}" data-selection-item="${esc(itemId)}"` : ""} aria-label="${esc(label)}" title="${esc(label)}" ${disabled || this._busy ? "disabled" : ""}><ha-icon icon="mdi:view-grid-outline"></ha-icon></button>`;
+  }
+
+  _selectionIsCurrent(popup = this._selectionPopup) {
+    if (!popup) return false;
+    if (!popup.context) return this._dialog === popup.parent;
+    const owner = popup.context === "dish" ? this._dishDialog : this._tandoorDialog;
+    const choices = popup.context === "dish" ? owner?.categories : owner?.ingredientCategories;
+    return owner === popup.owner && choices?.[popup.itemId] === popup.parent && !popup.parent.locked
+      && [...(owner.selected || [])].some((id) => String(id) === popup.itemId);
+  }
+
+  _selectionOptions(popup = this._selectionPopup) {
+    if (!this._selectionIsCurrent(popup)) return [];
+    if (popup.kind === "labels") this._labels.forEach((entry) => {
+      popup.labelNames[entry.id] = entry.name.toLocaleLowerCase();
+      popup.labelDefinitions[entry.id] = entry;
+    });
+    const values = popup.kind === "labels" ? this._labels : [
+      { id: "", name: haListManagerShoppingCardText("ui.general", {}, this._hass), icon: "mdi:shape-outline", general: true },
+      ...this._availableCategories().filter((entry) => popup.parent.mode !== "product-transfer" || !entry.dynamic),
+    ];
+    const query = popup.query.trim().toLocaleLowerCase(haListManagerShoppingCardTextLocale(this._hass));
+    return values.filter((entry) => !query || entry.name.toLocaleLowerCase(haListManagerShoppingCardTextLocale(this._hass)).includes(query));
+  }
+
+  _selectionLabelPermitted(id, popup = this._selectionPopup) {
+    const label = popup?.labelDefinitions[id];
+    if (!label) return false;
+    if (label.scope === "global") return this._list?.use_global_labels !== false;
+    if (label.scope === "list_type") return this._list?.use_type_labels !== false;
+    return label.scope === "list" && (!label.list_id || label.list_id === this._listId());
+  }
+
+  _renderSelectionOptions() {
+    const popup = this._selectionPopup;
+    if (!popup) return "";
+    const options = this._selectionOptions(popup);
+    return options.length ? options.map((entry) => {
+      const selected = popup.kind === "labels" ? popup.selected.some((id) => this._selectionLabelPermitted(id, popup) && popup.labelNames[id] === entry.name.toLocaleLowerCase())
+        : entry.general ? !popup.parent.category_id && !popup.parent.category_name : entry.id === popup.parent.category_id || entry.name === popup.parent.category_name;
+      const scope = entry.general ? haListManagerShoppingCardText("ui.no_category", {}, this._hass)
+        : popup.kind === "labels" ? this._labelScope(entry) : this._categoryScope(entry);
+      return `<button type="button" class="selection-chip ${selected ? "selected" : ""}" data-selection-option="${esc(entry.id)}" aria-pressed="${selected}" style="${entry.color ? `--selection-color:${esc(entry.color)};--selection-ink:${categoryTextColor(entry.color)}` : ""}"><ha-icon icon="${esc(entry.icon || "mdi:tag-outline")}"></ha-icon><span><strong>${esc(entry.name)}</strong><small>${esc(scope)}</small></span>${selected ? '<ha-icon class="selection-check" icon="mdi:check"></ha-icon>' : ""}</button>`;
+    }).join("") : `<p class="field-help">${haListManagerShoppingCardText("selection.empty", {}, this._hass)}</p>`;
+  }
+
+  _renderSelectionPopup() {
+    const popup = this._selectionPopup;
+    if (!this._selectionIsCurrent(popup)) { this._selectionPopup = null; return ""; }
+    const title = haListManagerShoppingCardText(`selection.${popup.kind}`, {}, this._hass);
+    return `<div class="backdrop selection-backdrop" data-selection-backdrop data-selection-popup-host><section class="dialog selection-dialog" role="dialog" aria-modal="true" aria-label="${esc(title)}" data-selection-dialog><header><h2>${title}</h2><button type="button" class="icon-button" data-selection-close aria-label="${haListManagerShoppingCardText("ui.close", {}, this._hass)}"><ha-icon icon="mdi:close"></ha-icon></button></header><label class="selection-search"><span>${haListManagerShoppingCardText("selection.search", {}, this._hass)}</span><input type="search" data-selection-search value="${esc(popup.query)}" autocomplete="off"></label><div class="selection-grid" data-selection-grid>${this._renderSelectionOptions()}</div><footer>${popup.kind === "labels" ? `<button type="button" class="primary" data-selection-apply>${haListManagerShoppingCardText("selection.apply", {}, this._hass)}</button><button type="button" data-clear-selection>${haListManagerShoppingCardText("selection.clear", {}, this._hass)}</button>` : ""}<button type="button" data-selection-close>${haListManagerShoppingCardText("ui.cancel", {}, this._hass)}</button></footer></section></div>`;
+  }
+
+  _openSelectionPopup(kind, trigger = null) {
+    const context = trigger?.dataset.selectionContext || "";
+    const itemId = trigger?.dataset.selectionItem || "";
+    const owner = context === "dish" ? this._dishDialog : context === "tandoor" ? this._tandoorDialog : null;
+    const parent = context === "dish" ? owner?.categories?.[itemId] : context === "tandoor" ? owner?.ingredientCategories?.[itemId] : this._dialog;
+    const panelSelector = context === "dish" ? "[data-dish-dialog]" : context === "tandoor" ? ".tandoor-recipe-dialog" : "[data-dialog]";
+    if (!parent || this._busy || this._itemAction || this._selectionPopup || trigger?.disabled || !["categories", "labels"].includes(kind) || (context && kind !== "categories") || (kind === "labels" && !this._labels.length)) return;
+    const popup = { kind, parent, context, owner, itemId, trigger, panelSelector, selected: [...(parent.label_ids || [])], labelNames: Object.fromEntries(this._labels.map((entry) => [entry.id, entry.name.toLocaleLowerCase()])), labelDefinitions: Object.fromEntries(this._labels.map((entry) => [entry.id, entry])), query: "", scroll: this.shadowRoot.querySelector(panelSelector)?.scrollTop || 0 };
+    if (!this._selectionIsCurrent(popup)) return;
+    this.shadowRoot.activeElement?.blur?.();
+    this.shadowRoot.querySelectorAll(".category-picker-options,.category-options,.label-picker-options,.label-options,.chip-template-options").forEach((menu) => { menu.hidden = true; });
+    this.shadowRoot.querySelectorAll("[data-picker-list-trigger]").forEach((button) => { button.classList.remove("active"); button.setAttribute("aria-expanded", "false"); });
+    this.shadowRoot.querySelectorAll("[data-d-category],[data-label-input],[data-dish-category-search],[data-tandoor-category-search]").forEach((input) => input.setAttribute("aria-expanded", "false"));
+    this._selectionPopup = popup;
+    this.shadowRoot.querySelector("ha-card")?.insertAdjacentHTML("beforeend", this._renderSelectionPopup());
+    this._bindSelectionPopup();
+    // Keep the on-screen keyboard closed until the user chooses to search.
+    this.shadowRoot.querySelector("[data-selection-dialog] [data-selection-close]")?.focus({ preventScroll: true });
+  }
+
+  _closeSelectionPopup(apply = false) {
+    const popup = this._selectionPopup;
+    if (!popup) return;
+    const current = this._selectionIsCurrent(popup);
+    if (apply && current && popup.kind === "labels") {
+      const selectedNames = new Set(popup.selected.filter((id) => this._selectionLabelPermitted(id, popup)).map((id) => popup.labelNames[id]));
+      const availableNames = new Set(this._labels.map((entry) => entry.name.toLocaleLowerCase()));
+      // Scope updates can replace an effective definition while this popup is open.
+      // Keep unavailable assignments and resolve visible selections by name.
+      const hiddenIds = (popup.parent.label_ids || []).filter((id) => !this._selectionLabelPermitted(id, popup) || !availableNames.has(popup.labelNames[id]));
+      popup.parent.label_ids = [...new Set([...hiddenIds, ...this._labels.filter((entry) => selectedNames.has(entry.name.toLocaleLowerCase())).map((entry) => entry.id)])];
+    }
+    this._selectionPopup = null;
+    this.shadowRoot.querySelector("[data-selection-backdrop]")?.remove();
+    if (apply && current && !popup.context) this._refreshMetadataUi();
+    if (current) {
+      const panel = this.shadowRoot.querySelector(popup.panelSelector || "[data-dialog]");
+      if (panel) panel.scrollTop = popup.scroll;
+      const trigger = popup.trigger?.isConnected ? popup.trigger : popup.context
+        ? [...this.shadowRoot.querySelectorAll("[data-open-selection]")].find((button) => button.dataset.selectionContext === popup.context && button.dataset.selectionItem === popup.itemId)
+        : this.shadowRoot.querySelector(`[data-open-selection="${popup.kind}"]`);
+      trigger?.focus({ preventScroll: true });
+    }
+  }
+
+  _chooseSelectionOption(id, button = null) {
+    const popup = this._selectionPopup;
+    if (!this._selectionIsCurrent(popup) || this._busy) return;
+    if (popup.kind === "labels") {
+      const entry = this._labels.find((entry) => entry.id === id);
+      if (!entry) return;
+      const name = entry.name.toLocaleLowerCase();
+      popup.labelNames[id] = name;
+      popup.labelDefinitions[id] = entry;
+      const selected = !popup.selected.some((selectedId) => this._selectionLabelPermitted(selectedId, popup) && popup.labelNames[selectedId] === name);
+      popup.selected = popup.selected.filter((selectedId) => !this._selectionLabelPermitted(selectedId, popup) || popup.labelNames[selectedId] !== name);
+      if (selected) popup.selected.push(id);
+      button?.setAttribute?.("aria-pressed", String(selected));
+      button?.classList?.toggle("selected", selected);
+      this._refreshSelectionGrid(id);
+      return;
+    }
+    const category = this._selectionOptions({ ...popup, query: "" }).find((entry) => entry.id === id);
+    if (!category) return;
+    popup.parent.category_id = category.id || null;
+    popup.parent.category_name = category.general ? "" : category.name;
+    const input = popup.context
+      ? [...this.shadowRoot.querySelectorAll(popup.context === "dish" ? "[data-dish-category-search]" : "[data-tandoor-category-search]")].find((field) => (popup.context === "dish" ? field.dataset.dishCategorySearch : field.dataset.tandoorCategorySearch) === popup.itemId)
+      : this.shadowRoot.querySelector("[data-d-category]");
+    if (popup.context) {
+      popup.parent.dynamic = Boolean(category.dynamic || String(category.id || "").startsWith("dynamic:"));
+      popup.parent.general = Boolean(category.general);
+      popup.parent.source = "manual";
+      input?.closest(".dish-category-combo")?.classList.remove("unresolved");
+    }
+    if (input) input.value = popup.parent.category_name;
+    this._closeSelectionPopup(true);
+  }
+
+  _refreshSelectionGrid(focusId = null) {
+    const grid = this.shadowRoot.querySelector("[data-selection-grid]");
+    if (!grid) return;
+    const scrollTop = grid.scrollTop;
+    grid.innerHTML = this._renderSelectionOptions();
+    this._bindSelectionOptions();
+    grid.scrollTop = scrollTop;
+    if (focusId !== null) [...grid.querySelectorAll("[data-selection-option]")].find((button) => button.dataset.selectionOption === focusId)?.focus({ preventScroll: true });
+  }
+
+  _bindSelectionOptions() {
+    this.shadowRoot.querySelectorAll("[data-selection-option]").forEach((button) => button.addEventListener("click", () => this._chooseSelectionOption(button.dataset.selectionOption, button)));
+  }
+
+  _bindSelectionTriggers(root = this.shadowRoot) {
+    root.querySelectorAll("[data-open-selection]").forEach((button) => {
+      if (button.dataset.selectionBound) return;
+      button.dataset.selectionBound = "1";
+      button.addEventListener("pointerdown", (event) => { event.preventDefault(); event.stopPropagation(); });
+      button.addEventListener("click", (event) => { event.preventDefault(); event.stopPropagation(); if (!button.disabled) this._openSelectionPopup(button.dataset.openSelection, button); });
+    });
+  }
+
+  _bindSelectionPopup() {
+    const root = this.shadowRoot;
+    root.querySelector("[data-selection-backdrop]")?.addEventListener("click", (event) => { if (event.target === event.currentTarget) this._closeSelectionPopup(); });
+    root.querySelector("[data-selection-dialog]")?.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); this._closeSelectionPopup(); }
+      if (event.key === "Tab") {
+        const focusable = [...root.querySelectorAll("[data-selection-dialog] button,[data-selection-dialog] input")].filter((element) => !element.disabled);
+        const first = focusable[0], last = focusable[focusable.length - 1];
+        if (event.shiftKey && root.activeElement === first) { event.preventDefault(); last?.focus({ preventScroll: true }); }
+        else if (!event.shiftKey && root.activeElement === last) { event.preventDefault(); first?.focus({ preventScroll: true }); }
+      }
+    });
+    root.querySelectorAll("[data-selection-close]").forEach((button) => button.addEventListener("click", () => this._closeSelectionPopup()));
+    root.querySelector("[data-selection-search]")?.addEventListener("input", (event) => { if (this._selectionPopup) { this._selectionPopup.query = event.target.value; this._refreshSelectionGrid(); } });
+    root.querySelector("[data-clear-selection]")?.addEventListener("click", () => { if (this._selectionPopup) { this._selectionPopup.selected = []; this._refreshSelectionGrid(); } });
+    root.querySelector("[data-selection-apply]")?.addEventListener("click", () => this._closeSelectionPopup(true));
+    this._bindSelectionOptions();
+  }
+
   _renderLabels(labels) {
     return (labels || []).map((label) => `<span class="label" style="${label.color ? `--label-color:${esc(label.color)}` : ""}"><ha-icon icon="${esc(label.icon || "mdi:label-outline")}"></ha-icon>${esc(label.name)}</span>`).join("");
   }
 
   _renderLabelSelector(selectedIds = []) {
-    if (!this._labels.length) return `<div class="label-selector"><span>${haListManagerShoppingCardText("ui.labels_optional", {}, this._hass)}</span><p class="field-help">${haListManagerShoppingCardText("labels.none_created", {}, this._hass)}</p></div>`;
     const selected = this._labels.filter((label) => selectedIds.includes(label.id));
     const chips = selected.map((label) => `<button type="button" class="selected-label" data-remove-label="${esc(label.id)}" style="${label.color ? `--label-color:${esc(label.color)}` : ""}" title="${haListManagerShoppingCardText("ui.remove_named", {p0:(esc(label.name))}, this._hass)}"><ha-icon icon="${esc(label.icon || "mdi:label-outline")}"></ha-icon><span>${esc(label.name)}</span><ha-icon class="remove-label" icon="mdi:close"></ha-icon></button>`).join("");
-    return `<div class="label-selector"><span>${haListManagerShoppingCardText("ui.labels_optional", {}, this._hass)}</span>${chips ? `<div class="selected-labels">${chips}</div>` : ""}<div class="label-combo"><div class="label-search"><ha-icon icon="mdi:magnify"></ha-icon><input type="text" placeholder="${haListManagerShoppingCardText("ui.browse_labels", {}, this._hass)}" autocomplete="off" data-label-input></div><div class="label-picker-options" data-label-options hidden></div></div><p class="field-help">${haListManagerShoppingCardText("help.label_scope_priority", {}, this._hass)}</p></div>`;
+    return `<div class="label-selector">${this._selectionHeading(haListManagerShoppingCardText("ui.labels_optional", {}, this._hass))}${chips ? `<div class="selected-labels">${chips}</div>` : ""}<div class="label-combo"><div class="label-search picker-popup-host"><ha-icon icon="mdi:magnify"></ha-icon><input type="text" placeholder="${haListManagerShoppingCardText("ui.browse_labels", {}, this._hass)}" autocomplete="off" data-label-input ${this._labels.length ? "" : "disabled"}>${this._selectionButton("labels", !this._labels.length)}</div><div class="label-picker-options" data-label-options hidden></div></div><p class="field-help">${haListManagerShoppingCardText(this._labels.length ? "help.label_scope_priority" : "labels.none_created", {}, this._hass)}</p></div>`;
   }
 
   _renderCategorySelector(productMode = false) {
@@ -2136,7 +2359,7 @@ class HaListManagerShoppingCard extends HTMLElement {
       ? haListManagerShoppingCardText("help.product_category_scope", {}, this._hass)
       : haListManagerShoppingCardText("help.choose_saved_dynamic_category", {}, this._hass);
     const categoryStatus = productMode ? this._productCategoryInputStatus(draft.category_name, draft.category_id) : "";
-    return `<div class="category-combo"><input value="${esc(draft.category_name)}" placeholder="${placeholder}" autocomplete="off" data-d-category data-product-category="${productMode ? "1" : "0"}"><div class="category-picker-options" data-category-options hidden></div></div>${productMode ? `<p class="field-help product-category-input-status" data-product-category-input-status ${categoryStatus ? "" : "hidden"}>${esc(categoryStatus)}</p>` : ""}<p class="field-help">${help}</p>`;
+    return `<div class="category-combo picker-popup-host"><input value="${esc(draft.category_name)}" placeholder="${placeholder}" autocomplete="off" data-d-category data-product-category="${productMode ? "1" : "0"}">${this._selectionButton("categories")}<div class="category-picker-options" data-category-options hidden></div></div>${productMode ? `<p class="field-help product-category-input-status" data-product-category-input-status ${categoryStatus ? "" : "hidden"}>${esc(categoryStatus)}</p>` : ""}<p class="field-help">${help}</p>`;
   }
 
   _productCategoryInputStatus(value, selectedId = null) {
@@ -2299,7 +2522,7 @@ class HaListManagerShoppingCard extends HTMLElement {
     const fields = !isSend ? "" : action.loading ? `<p role="status">${haListManagerShoppingCardText("ui.please_wait", {}, this._hass)}</p>`
       : action.lists.length ? `<label><span>${text("target")}</span><select data-item-action-target ${action.busy ? "disabled" : ""}><option value="">${text("choose_target")}</option>${action.lists.map((list) => `<option value="${esc(list.id)}" ${list.id === action.target_list_id ? "selected" : ""}>${esc(list.name)}</option>`).join("")}</select></label><label><span>${haListManagerShoppingCardText("ui.count", {}, this._hass)}</span><input type="number" min="1" max="1000000" step="1" value="${esc(action.quantity)}" data-item-action-quantity ${action.busy ? "disabled" : ""}></label>` : `<p class="field-help">${text("no_targets")}</p>`;
     const disabled = action.busy || action.loading || isSend && !action.lists.length;
-    return `<div class="backdrop" data-close-dialog><section class="dialog item-action-dialog" role="dialog" aria-modal="true" aria-label="${title}" data-dialog><header><h2>${title}</h2><button type="button" class="icon-button" data-close-dialog ${action.busy ? "disabled" : ""} aria-label="${haListManagerShoppingCardText("ui.close", {}, this._hass)}"><ha-icon icon="mdi:close"></ha-icon></button></header>${note}${fields}${action.error ? `<div class="dialog-status error" role="alert"><ha-icon icon="mdi:alert-circle-outline"></ha-icon>${esc(action.error)}</div>` : ""}<footer><button type="button" class="primary" data-confirm-item-action ${disabled ? "disabled" : ""}>${action.busy ? haListManagerShoppingCardText("ui.please_wait", {}, this._hass) : isSend ? haListManagerShoppingCardText("ui.add", {}, this._hass) : text("create")}</button><button type="button" data-cancel-item-action data-close-dialog ${action.busy ? "disabled" : ""}>${haListManagerShoppingCardText("ui.cancel", {}, this._hass)}</button></footer></section></div>`;
+    return `<div class="backdrop" data-close-dialog><section class="dialog item-action-dialog" role="dialog" aria-modal="true" aria-label="${title}" data-dialog><header><h2>${title}</h2><button type="button" class="icon-button" data-close-dialog ${action.busy ? "disabled" : ""} aria-label="${haListManagerShoppingCardText("ui.close", {}, this._hass)}"><ha-icon icon="mdi:close"></ha-icon></button></header>${note}${fields}${this._notice(action.error, "item-action", "dialog-status error")}<footer><button type="button" class="primary" data-confirm-item-action ${disabled ? "disabled" : ""}>${action.busy ? haListManagerShoppingCardText("ui.please_wait", {}, this._hass) : isSend ? haListManagerShoppingCardText("ui.add", {}, this._hass) : text("create")}</button><button type="button" data-cancel-item-action data-close-dialog ${action.busy ? "disabled" : ""}>${haListManagerShoppingCardText("ui.cancel", {}, this._hass)}</button></footer></section></div>`;
   }
 
   async _confirmItemAction() {
@@ -2353,7 +2576,7 @@ class HaListManagerShoppingCard extends HTMLElement {
       return `<div class="backdrop" data-close-dialog><section class="dialog product-choice-dialog" role="dialog" aria-modal="true" aria-label="${haListManagerShoppingCardText("ui.select_existing_product", {}, this._hass)}" data-dialog>
         <header><div><h2>${haListManagerShoppingCardText("ui.product_exists", {}, this._hass)}</h2><p>${haListManagerShoppingCardText("ui.choose_existing_or_duplicate_product", {}, this._hass)}</p></div><button class="icon-button" data-product-transfer-back title="${haListManagerShoppingCardText("ui.back_to_item", {}, this._hass)}"><ha-icon icon="mdi:close"></ha-icon></button></header>
         <div class="product-choices">${draft.matches.map((product) => `<button type="button" class="product-choice" data-link-existing-product="${esc(product.id)}">${product.image_url ? `<img src="${esc(product.image_url)}" alt="">` : `<span class="product-choice-placeholder"><ha-icon icon="mdi:image-off-outline"></ha-icon></span>`}<span><strong>${esc(product.name)}</strong><small>${esc([product.brand, product.package_quantity, product.ean ? `EAN ${product.ean}` : null].filter(Boolean).join(" · ") || haListManagerShoppingCardText("ui.product_database", {}, this._hass))}</small></span><ha-icon icon="mdi:link-variant"></ha-icon></button>`).join("")}</div>
-        ${draft.status ? `<div class="dialog-status ${esc(draft.statusTone)}"><ha-icon icon="mdi:alert-circle-outline"></ha-icon>${esc(draft.status)}</div>` : ""}
+        ${this._notice(draft.status, "dialog", `dialog-status ${esc(draft.statusTone)}`)}
         <footer><button data-create-product-anyway><ha-icon icon="mdi:database-plus-outline"></ha-icon>${haListManagerShoppingCardText("ui.create_product_anyway", {}, this._hass)}</button><button data-product-transfer-back>${haListManagerShoppingCardText("ui.back_to_item", {}, this._hass)}</button></footer>
       </section></div>`;
     }
@@ -2364,7 +2587,7 @@ class HaListManagerShoppingCard extends HTMLElement {
         ? `<button class="transfer-product-image" type="button" data-view-transfer-image title="${haListManagerShoppingCardText("ui.enlarge_product_image", {}, this._hass)}"><img src="${esc(draft.image_url)}" alt="${esc(draft.name)}"></button>`
         : `<span class="transfer-product-image placeholder"><ha-icon icon="mdi:image-off-outline"></ha-icon></span>`;
       const eanStatus = draft.eanStatus
-        ? `<div class="dialog-status ean-dialog-status ${esc(draft.eanStatusTone)}"><ha-icon icon="mdi:${draft.eanStatusTone === "success" ? "check-circle-outline" : draft.eanStatusTone === "warning" ? "alert-outline" : "alert-circle-outline"}"></ha-icon>${esc(draft.eanStatus)}</div>`
+        ? this._notice(draft.eanStatus, "ean", `dialog-status ean-dialog-status ${esc(draft.eanStatusTone)}`, draft.eanStatusTone === "success" ? "check-circle-outline" : draft.eanStatusTone === "warning" ? "alert-outline" : "alert-circle-outline")
         : "";
       return `<div class="backdrop" data-close-dialog><section class="dialog product-dialog transfer-product-dialog" role="dialog" aria-modal="true" aria-label="${title}" data-dialog>
         <header><h2>${title}</h2><button class="icon-button" data-product-transfer-back title="${haListManagerShoppingCardText("ui.back_to_item", {}, this._hass)}"><ha-icon icon="mdi:close"></ha-icon></button></header>
@@ -2372,11 +2595,11 @@ class HaListManagerShoppingCard extends HTMLElement {
         <div class="ean-lookup-row"><label><span>${haListManagerShoppingCardText("ui.ean_optional", {}, this._hass)}</span><input data-product-field="ean" value="${esc(draft.ean)}" inputmode="numeric" maxlength="32"></label><button type="button" data-lookup-product-ean><ha-icon icon="mdi:database-search-outline"></ha-icon>${haListManagerShoppingCardText("ui.lookup_ean", {}, this._hass)}</button></div>${eanStatus}
         <div class="bring-detail-fields"><label><span>${haListManagerShoppingCardText("ui.brand_optional", {}, this._hass)}</span><input data-product-field="brand" value="${esc(draft.brand)}" maxlength="200"></label><label><span>${haListManagerShoppingCardText("ui.package_quantity_optional", {}, this._hass)}</span><input data-product-field="package_quantity" value="${esc(draft.package_quantity)}" maxlength="100" placeholder="${haListManagerShoppingCardText("ui.package_weight_example", {}, this._hass)}"></label></div>
         <label><span>${haListManagerShoppingCardText("ui.optional_image_url", {}, this._hass)}</span><input data-product-field="image_url" value="${esc(draft.image_url)}" maxlength="1000"></label>
-        <div class="dialog-field"><span>${haListManagerShoppingCardText("ui.category", {}, this._hass)}</span>${this._renderCategorySelector(true)}</div>
+        <div class="dialog-field">${this._selectionHeading(haListManagerShoppingCardText("ui.category", {}, this._hass))}${this._renderCategorySelector(true)}</div>
         ${this._renderProductRefresh(draft)}
         ${this._renderProductCategoryMove()}
         ${this._renderLabelSelector(draft.label_ids)}
-        ${draft.status ? `<div class="dialog-status ${esc(draft.statusTone)}"><ha-icon icon="mdi:${draft.statusTone === "success" ? "check-circle-outline" : draft.statusTone === "warning" ? "alert-outline" : "alert-circle-outline"}"></ha-icon>${esc(draft.status)}</div>` : ""}
+        ${this._notice(draft.status, "dialog", `dialog-status ${esc(draft.statusTone)}`, draft.statusTone === "success" ? "check-circle-outline" : draft.statusTone === "warning" ? "alert-outline" : "alert-circle-outline")}
         <footer><button class="primary" data-save-product-transfer>${this._busy ? haListManagerShoppingCardText("ui.saving", {}, this._hass) : action}</button><button data-product-transfer-back>${haListManagerShoppingCardText("ui.back_to_item", {}, this._hass)}</button></footer>
       </section></div>`;
     }
@@ -2399,17 +2622,17 @@ class HaListManagerShoppingCard extends HTMLElement {
         <header><h2>${haListManagerShoppingCardText("ui.increase_quantity", {}, this._hass)}</h2><button class="icon-button" data-close-dialog title="${haListManagerShoppingCardText("ui.close", {}, this._hass)}"><ha-icon icon="mdi:close"></ha-icon></button></header>
         ${image}<div class="increment-product"><strong>${esc(this._displayNameWithoutQuantity(draft.item))}</strong>${product?.ean ? `<span class="meta">EAN ${esc(product.ean)}${product.brand ? ` · ${esc(product.brand)}` : ""}${product.package_quantity ? ` · ${esc(product.package_quantity)}` : ""}</span>` : ""}</div>
         <div class="increment-summary"><div class="increment-term"><span>${haListManagerShoppingCardText("ui.current_count", {}, this._hass)}</span><strong>${current}</strong></div><button type="button" class="increment-operator increment-plus" data-increment-plus title="${haListManagerShoppingCardText("ui.increase_add_quantity", {}, this._hass)}">+</button><label class="increment-term"><span>${haListManagerShoppingCardText("ui.add", {}, this._hass)}</span><input data-d-increment type="number" min="1" max="1000000" value="${esc(draft.increment)}"></label><span class="increment-operator increment-equals">=</span><div class="increment-term increment-new"><span>${haListManagerShoppingCardText("ui.new_count", {}, this._hass)}</span><strong data-increment-total>${current + increment}</strong></div></div>
-        ${draft.status ? `<div class="dialog-status ${esc(draft.statusTone)}"><ha-icon icon="mdi:alert-circle-outline"></ha-icon>${esc(draft.status)}</div>` : ""}
+        ${this._notice(draft.status, "dialog", `dialog-status ${esc(draft.statusTone)}`)}
         <footer><button class="primary" data-save-dialog>${this._busy ? haListManagerShoppingCardText("ui.saving", {}, this._hass) : haListManagerShoppingCardText("ui.increase_quantity", {}, this._hass)}</button><button data-close-dialog>${haListManagerShoppingCardText("ui.cancel", {}, this._hass)}</button><button data-edit-existing><ha-icon icon="mdi:pencil-outline"></ha-icon>${haListManagerShoppingCardText("ui.edit_item", {}, this._hass)}</button></footer>
       </section></div>`;
     }
     return `<div class="backdrop" data-close-dialog><section class="dialog product-dialog" role="dialog" aria-modal="true" aria-label="${draft.item ? haListManagerShoppingCardText("ui.edit_item", {}, this._hass) : haListManagerShoppingCardText("ui.add_item", {}, this._hass)}" data-dialog>
-      <header><h2>${draft.item ? haListManagerShoppingCardText("ui.edit_item", {}, this._hass) : haListManagerShoppingCardText("ui.add_item", {}, this._hass)}</h2><div class="item-dialog-header-actions">${draft.item ? this._renderItemActionsMenu() : ""}<button class="icon-button" data-close-dialog title="${haListManagerShoppingCardText("ui.close", {}, this._hass)}"><ha-icon icon="mdi:close"></ha-icon></button></div></header>${draft.quick_action_status ? `<div class="dialog-status success item-action-result" role="status"><ha-icon icon="mdi:check-circle-outline"></ha-icon>${esc(draft.quick_action_status)}</div>` : ""}
+      <header><h2>${draft.item ? haListManagerShoppingCardText("ui.edit_item", {}, this._hass) : haListManagerShoppingCardText("ui.add_item", {}, this._hass)}</h2><div class="item-dialog-header-actions">${draft.item ? this._renderItemActionsMenu() : ""}<button class="icon-button" data-close-dialog title="${haListManagerShoppingCardText("ui.close", {}, this._hass)}"><ha-icon icon="mdi:close"></ha-icon></button></div></header>${this._notice(draft.quick_action_status, "quick", "dialog-status success item-action-result", "check-circle-outline")}
       ${image}<label class="offer-only-choice"><input type="checkbox" data-d-offer-only ${draft.offer_only ? "checked" : ""}>${haListManagerShoppingCardText("ui.buy_on_offer_only", {}, this._hass)}</label><label class="name-field"><span>${haListManagerShoppingCardText("ui.item_name", {}, this._hass)}</span><input data-d-name value="${esc(draft.name)}" maxlength="200"></label>
       ${product?.ean ? `<div class="meta product-meta">EAN ${esc(product.ean)}${product.brand ? ` · ${esc(product.brand)}` : ""}${product.package_quantity ? ` · ${esc(product.package_quantity)}` : ""}</div>` : ""}
-      ${isBring ? `<div class="bring-detail-fields"><label class="quantity-edit-field"><span>${haListManagerShoppingCardText("ui.count", {}, this._hass)}</span><input data-d-quantity type="number" min="1" max="1000000" value="${esc(draft.quantity)}"><span class="dialog-quantity-actions"><button type="button" data-dialog-quantity="-1" title="${haListManagerShoppingCardText("ui.decrease_count", {}, this._hass)}">−</button><button type="button" data-dialog-quantity="1" title="${haListManagerShoppingCardText("ui.increase_quantity", {}, this._hass)}">+</button></span></label>${amountField}</div>${amountHelp}${product?.package_quantity ? "" : `<p class="field-help bring-format-help">${haListManagerShoppingCardText("help.bring_quantity_examples", {}, this._hass)}</p>`}<div class="bring-live-preview"><span>${haListManagerShoppingCardText("bring.preview", {}, this._hass)}</span><strong data-bring-preview-name>${esc(draft.name.trim() || haListManagerShoppingCardText("ui.item_name", {}, this._hass))}</strong><small data-bring-preview-value ${this._bringPreviewValue(draft.quantity, previewDescription) ? "" : "hidden"}>${esc(this._bringPreviewValue(draft.quantity, previewDescription))}</small></div><div class="dialog-field"><span>${haListManagerShoppingCardText("ui.category", {}, this._hass)}</span>${this._renderCategorySelector()}</div>` : `<div class="bring-detail-fields"><label class="quantity-edit-field"><span>${haListManagerShoppingCardText("ui.count", {}, this._hass)}</span><input data-d-quantity type="number" min="1" max="1000000" value="${esc(draft.quantity)}"><span class="dialog-quantity-actions"><button type="button" data-dialog-quantity="-1" title="${haListManagerShoppingCardText("ui.decrease_count", {}, this._hass)}">−</button><button type="button" data-dialog-quantity="1" title="${haListManagerShoppingCardText("ui.increase_quantity", {}, this._hass)}">+</button></span></label>${amountField}</div>${amountHelp}<div class="dialog-field"><span>${haListManagerShoppingCardText("ui.category", {}, this._hass)}</span>${this._renderCategorySelector()}</div>`}
+      ${isBring ? `<div class="bring-detail-fields"><label class="quantity-edit-field"><span>${haListManagerShoppingCardText("ui.count", {}, this._hass)}</span><input data-d-quantity type="number" min="1" max="1000000" value="${esc(draft.quantity)}"><span class="dialog-quantity-actions"><button type="button" data-dialog-quantity="-1" title="${haListManagerShoppingCardText("ui.decrease_count", {}, this._hass)}">−</button><button type="button" data-dialog-quantity="1" title="${haListManagerShoppingCardText("ui.increase_quantity", {}, this._hass)}">+</button></span></label>${amountField}</div>${amountHelp}${product?.package_quantity ? "" : `<p class="field-help bring-format-help">${haListManagerShoppingCardText("help.bring_quantity_examples", {}, this._hass)}</p>`}<div class="bring-live-preview"><span>${haListManagerShoppingCardText("bring.preview", {}, this._hass)}</span><strong data-bring-preview-name>${esc(draft.name.trim() || haListManagerShoppingCardText("ui.item_name", {}, this._hass))}</strong><small data-bring-preview-value ${this._bringPreviewValue(draft.quantity, previewDescription) ? "" : "hidden"}>${esc(this._bringPreviewValue(draft.quantity, previewDescription))}</small></div><div class="dialog-field">${this._selectionHeading(haListManagerShoppingCardText("ui.category", {}, this._hass))}${this._renderCategorySelector()}</div>` : `<div class="bring-detail-fields"><label class="quantity-edit-field"><span>${haListManagerShoppingCardText("ui.count", {}, this._hass)}</span><input data-d-quantity type="number" min="1" max="1000000" value="${esc(draft.quantity)}"><span class="dialog-quantity-actions"><button type="button" data-dialog-quantity="-1" title="${haListManagerShoppingCardText("ui.decrease_count", {}, this._hass)}">−</button><button type="button" data-dialog-quantity="1" title="${haListManagerShoppingCardText("ui.increase_quantity", {}, this._hass)}">+</button></span></label>${amountField}</div>${amountHelp}<div class="dialog-field">${this._selectionHeading(haListManagerShoppingCardText("ui.category", {}, this._hass))}${this._renderCategorySelector()}</div>`}
       ${this._renderLabelSelector(draft.label_ids)}
-      ${draft.status ? `<div class="dialog-status ${esc(draft.statusTone)}"><ha-icon icon="mdi:${draft.statusTone === "warning" ? "alert-outline" : "alert-circle-outline"}"></ha-icon>${esc(draft.status)}</div>` : ""}
+      ${this._notice(draft.status, "dialog", `dialog-status ${esc(draft.statusTone)}`, draft.statusTone === "warning" ? "alert-outline" : "alert-circle-outline")}
       <footer><button class="primary" data-save-dialog>${this._busy ? haListManagerShoppingCardText("ui.saving", {}, this._hass) : haListManagerShoppingCardText("ui.save", {}, this._hass)}</button><button data-close-dialog>${haListManagerShoppingCardText("ui.cancel", {}, this._hass)}</button>${draft.item ? `<button data-open-product-transfer><ha-icon icon="mdi:${draft.item.product_id ? "database-edit-outline" : "database-plus-outline"}"></ha-icon>${draft.item.product_id ? haListManagerShoppingCardText("products.edit", {}, this._hass) : haListManagerShoppingCardText("products.save_to_database", {}, this._hass)}</button><button class="danger" data-delete-item><ha-icon icon="mdi:delete-outline"></ha-icon>${haListManagerShoppingCardText("ui.delete_from_list", {}, this._hass)}</button>` : ""}</footer>
     </section></div>`;
   }
@@ -2459,10 +2682,10 @@ class HaListManagerShoppingCard extends HTMLElement {
       const sourceText = haListManagerShoppingCardText("shopping.already_listed_quantity", {p0:(Math.max(0, Number(existing?.quantity) || 0))}, this._hass);
       const categoryControl = choice.locked
         ? `<span class="dish-category-locked"><strong>${esc(choice.category_name || haListManagerShoppingCardText("ui.general", {}, this._hass))}</strong><small>${esc(sourceText)}</small></span>`
-        : `<div class="dish-category-combo ${choice.source === "none" ? "unresolved" : ""}"><input value="${esc(choice.category_name || "")}" placeholder="${choice.general ? haListManagerShoppingCardText("ui.general", {}, this._hass) : haListManagerShoppingCardText("categories.search_or_enter", {}, this._hass)}" autocomplete="off" data-dish-category-search="${esc(item.id)}" aria-label="${haListManagerShoppingCardText("ui.category_for", {p0:(esc(item.name))}, this._hass)}" ${isSelected ? "" : "disabled"}><div class="category-picker-options" data-dish-category-options="${esc(item.id)}" hidden></div></div>`;
+        : `<div class="dish-category-combo picker-popup-host ${choice.source === "none" ? "unresolved" : ""}"><input value="${esc(choice.category_name || "")}" placeholder="${choice.general ? haListManagerShoppingCardText("ui.general", {}, this._hass) : haListManagerShoppingCardText("categories.search_or_enter", {}, this._hass)}" autocomplete="off" data-dish-category-search="${esc(item.id)}" aria-label="${haListManagerShoppingCardText("ui.category_for", {p0:(esc(item.name))}, this._hass)}" ${isSelected ? "" : "disabled"}>${this._selectionButton("categories", !isSelected, "dish", item.id)}<div class="category-picker-options" data-dish-category-options="${esc(item.id)}" hidden></div></div>`;
       return `<div class="dish-choice ${isSelected ? "selected" : ""}"><input type="checkbox" data-dish-choice="${esc(item.id)}" aria-label="${haListManagerShoppingCardText("ui.select_named_item", {p0:(esc(item.name))}, this._hass)}" ${isSelected ? "checked" : ""}><span><strong>${esc(item.product_name || item.name)}</strong>${item.product_name ? `<small>${haListManagerShoppingCardText("ui.product", {}, this._hass)}</small>` : `<small>${haListManagerShoppingCardText("ui.freeform_item", {}, this._hass)}</small>`}</span><input type="number" min="1" max="1000000" step="1" data-dish-quantity="${esc(item.id)}" value="${esc(dialog.quantities[item.id] || item.quantity || 1)}" aria-label="${haListManagerShoppingCardText("shopping.quantity_for", {p0:(esc(item.name))}, this._hass)}" ${isSelected ? "" : "disabled"}>${categoryControl}</div>`;
     }).join("");
-    return `<div class="backdrop dish-dialog-backdrop" data-close-dish-dialog><section class="dialog dish-add-dialog" role="dialog" aria-modal="true" aria-label="${haListManagerShoppingCardText("ui.add_dish", {}, this._hass)}" data-dish-dialog><header><div><h2>${esc(dialog.dish.name)}</h2><p>${haListManagerShoppingCardText("recipes.review_ingredients_help", {}, this._hass)}</p></div><button class="icon-button" data-close-dish-dialog title="${haListManagerShoppingCardText("ui.close", {}, this._hass)}"><ha-icon icon="mdi:close"></ha-icon></button></header><div class="dish-choices">${rows}</div>${dialog.status ? `<div class="dialog-status error"><ha-icon icon="mdi:alert-circle-outline"></ha-icon>${esc(dialog.status)}</div>` : ""}<footer><button class="primary" data-add-dish-to-list ${selected.size && !this._busy ? "" : "disabled"}>${this._busy ? haListManagerShoppingCardText("ui.adding", {}, this._hass) : haListManagerShoppingCardText("ui.add_selection", {}, this._hass)}</button><button data-close-dish-dialog>${haListManagerShoppingCardText("ui.cancel", {}, this._hass)}</button></footer></section></div>`;
+    return `<div class="backdrop dish-dialog-backdrop" data-close-dish-dialog><section class="dialog dish-add-dialog" role="dialog" aria-modal="true" aria-label="${haListManagerShoppingCardText("ui.add_dish", {}, this._hass)}" data-dish-dialog><header><div><h2>${esc(dialog.dish.name)}</h2><p>${haListManagerShoppingCardText("recipes.review_ingredients_help", {}, this._hass)}</p></div><button class="icon-button" data-close-dish-dialog title="${haListManagerShoppingCardText("ui.close", {}, this._hass)}"><ha-icon icon="mdi:close"></ha-icon></button></header><div class="dish-choices">${rows}</div>${this._notice(dialog.status, "dish", "dialog-status error")}<footer><button class="primary" data-add-dish-to-list ${selected.size && !this._busy ? "" : "disabled"}>${this._busy ? haListManagerShoppingCardText("ui.adding", {}, this._hass) : haListManagerShoppingCardText("ui.add_selection", {}, this._hass)}</button><button data-close-dish-dialog>${haListManagerShoppingCardText("ui.cancel", {}, this._hass)}</button></footer></section></div>`;
   }
 
   _normalizeTandoorName(value) {
@@ -2817,7 +3040,7 @@ class HaListManagerShoppingCard extends HTMLElement {
       const searching = Boolean(dialog.query.trim() || dialog.categoryId || dialog.browseAll);
       const scope = dialog.categoryId || dialog.browseAll ? `<div class="tandoor-scope"><button type="button" data-tandoor-all-cookbooks title="${haListManagerShoppingCardText("ui.back_all_cookbooks", {}, this._hass)}"><ha-icon icon="mdi:arrow-left"></ha-icon></button><span><small>${dialog.categoryId ? haListManagerShoppingCardText("recipes.cookbook", {}, this._hass) : haListManagerShoppingCardText("ui.selection", {}, this._hass)}</small><strong>${esc(dialog.categoryName || haListManagerShoppingCardText("ui.all_recipes", {}, this._hass))}</strong></span></div>` : "";
       const allRecipes = `<button type="button" class="tandoor-cookbook tandoor-all-recipes" data-tandoor-all-recipes><span class="tandoor-cookbook-icon"><ha-icon icon="mdi:silverware-fork-knife"></ha-icon></span><strong>${haListManagerShoppingCardText("ui.all_recipes", {}, this._hass)}</strong><ha-icon icon="mdi:chevron-right"></ha-icon></button>`;
-      const content = dialog.loading ? `<div class="tandoor-state"><ha-circular-progress active></ha-circular-progress><span>${haListManagerShoppingCardText("ui.loading_recipes", {}, this._hass)}</span></div>` : dialog.status ? `<div class="dialog-status error"><ha-icon icon="mdi:alert-circle-outline"></ha-icon>${esc(dialog.status)}</div>` : searching ? `<div class="tandoor-results">${rows || `<p class="tandoor-state">${haListManagerShoppingCardText("recipes.no_matches", {}, this._hass)}</p>`}</div>` : dialog.categoriesLoading ? `<div class="tandoor-state"><ha-circular-progress active></ha-circular-progress><span>${haListManagerShoppingCardText("ui.loading_cookbooks", {}, this._hass)}</span></div>` : `<section class="tandoor-cookbooks"><h3>${haListManagerShoppingCardText("recipes.recipes", {}, this._hass)}</h3>${allRecipes}<h3 class="tandoor-cookbooks-heading">${haListManagerShoppingCardText("ui.cookbooks", {}, this._hass)}</h3>${cookbooks || `<p class="tandoor-state">${haListManagerShoppingCardText("ui.no_cookbooks", {}, this._hass)}</p>`}</section>`;
+      const content = dialog.loading ? `<div class="tandoor-state"><ha-circular-progress active></ha-circular-progress><span>${haListManagerShoppingCardText("ui.loading_recipes", {}, this._hass)}</span></div>` : dialog.status ? this._notice(dialog.status, "tandoor", "dialog-status error") : searching ? `<div class="tandoor-results">${rows || `<p class="tandoor-state">${haListManagerShoppingCardText("recipes.no_matches", {}, this._hass)}</p>`}</div>` : dialog.categoriesLoading ? `<div class="tandoor-state"><ha-circular-progress active></ha-circular-progress><span>${haListManagerShoppingCardText("ui.loading_cookbooks", {}, this._hass)}</span></div>` : `<section class="tandoor-cookbooks"><h3>${haListManagerShoppingCardText("recipes.recipes", {}, this._hass)}</h3>${allRecipes}<h3 class="tandoor-cookbooks-heading">${haListManagerShoppingCardText("ui.cookbooks", {}, this._hass)}</h3>${cookbooks || `<p class="tandoor-state">${haListManagerShoppingCardText("ui.no_cookbooks", {}, this._hass)}</p>`}</section>`;
       return `<div class="backdrop tandoor-backdrop" data-close-tandoor><section class="dialog tandoor-dialog" role="dialog" aria-modal="true"><header><div><h2>${haListManagerShoppingCardText("recipes.search_tandoor", {}, this._hass)}</h2><p>${haListManagerShoppingCardText("recipes.choose_cookbook_help", {}, this._hass)}</p></div><button class="icon-button" data-close-tandoor title="${haListManagerShoppingCardText("ui.close", {}, this._hass)}"><ha-icon icon="mdi:close"></ha-icon></button></header>${scope}<div class="tandoor-filters"><label class="tandoor-search" aria-busy="${dialog.searchPending ? "true" : "false"}"><ha-icon icon="mdi:magnify"></ha-icon><input type="search" value="${esc(dialog.query)}" placeholder="${dialog.categoryId ? haListManagerShoppingCardText("recipes.search_this_cookbook", {}, this._hass) : haListManagerShoppingCardText("recipes.search_all", {}, this._hass)}" autocomplete="off" data-tandoor-search><span class="tandoor-search-actions"><ha-circular-progress size="small" active data-tandoor-search-loading ${dialog.searchPending ? "" : "hidden"}></ha-circular-progress><button type="button" data-tandoor-clear title="${haListManagerShoppingCardText("ui.clear_input", {}, this._hass)}" ${dialog.query ? "" : "hidden"}><ha-icon icon="mdi:close"></ha-icon></button></span></label><div class="tandoor-search-options"><label class="tandoor-search-option"><input type="checkbox" data-tandoor-include-ingredients ${dialog.includeIngredients !== false ? "checked" : ""}><span>${haListManagerShoppingCardText("ui.search_ingredients", {}, this._hass)}</span></label><label class="tandoor-search-option"><input type="checkbox" data-tandoor-skip-small-units ${dialog.skipSmallUnits ? "checked" : ""}><span>${haListManagerShoppingCardText("recipes.skip_small_quantities", {}, this._hass)}</span></label></div><small>${haListManagerShoppingCardText("recipes.result_limit", {p0:(esc(dialog.resultLimit))}, this._hass)}</small></div>${content}</section></div>`;
     }
     const recipe = dialog.recipe;
@@ -2836,14 +3059,14 @@ class HaListManagerShoppingCard extends HTMLElement {
       const choice = dialog.ingredientCategories?.[id] || { category_name: "", general: true, source: "none", locked: false };
       const categoryControl = choice.locked
         ? `<span class="tandoor-category-locked"><strong>${esc(choice.category_name || haListManagerShoppingCardText("ui.general", {}, this._hass))}</strong><small>${haListManagerShoppingCardText("ui.already_on_list", {}, this._hass)}</small></span>`
-        : `<div class="dish-category-combo tandoor-category-combo ${choice.source === "none" ? "unresolved" : ""}"><input value="${esc(choice.category_name || "")}" placeholder="${choice.general ? haListManagerShoppingCardText("ui.general", {}, this._hass) : haListManagerShoppingCardText("categories.search_or_enter", {}, this._hass)}" autocomplete="off" data-tandoor-category-search="${esc(id)}" aria-label="${haListManagerShoppingCardText("ui.category_for", {p0:(esc(ingredient.name))}, this._hass)}"><div class="category-picker-options" data-tandoor-category-options="${esc(id)}" hidden></div></div>`;
+        : `<div class="dish-category-combo tandoor-category-combo picker-popup-host ${choice.source === "none" ? "unresolved" : ""}"><input value="${esc(choice.category_name || "")}" placeholder="${choice.general ? haListManagerShoppingCardText("ui.general", {}, this._hass) : haListManagerShoppingCardText("categories.search_or_enter", {}, this._hass)}" autocomplete="off" data-tandoor-category-search="${esc(id)}" aria-label="${haListManagerShoppingCardText("ui.category_for", {p0:(esc(ingredient.name))}, this._hass)}">${this._selectionButton("categories", false, "tandoor", id)}<div class="category-picker-options" data-tandoor-category-options="${esc(id)}" hidden></div></div>`;
       return `<article class="tandoor-ingredient ${selected ? "selected" : ""}"><div class="tandoor-ingredient-head"><label class="tandoor-ingredient-main"><input type="checkbox" data-tandoor-ingredient="${esc(id)}" ${selected ? "checked" : ""}><span><strong>${esc(ingredient.name)}</strong>${ingredient.note ? `<small>${esc(ingredient.note)}</small>` : ""}</span></label>${selected ? categoryControl : ""}</div>${product ? `<label class="tandoor-option"><input type="checkbox" data-tandoor-product="${esc(id)}" ${useProduct ? "checked" : ""} ${selected ? "" : "disabled"}><span>${haListManagerShoppingCardText("ui.use_product_label", {}, this._hass)} <strong>${esc(productLabel)}</strong></span></label>` : ""}${amount ? `<label class="tandoor-option"><input type="checkbox" data-tandoor-amount="${esc(id)}" ${dialog.includeAmounts.has(id) ? "checked" : ""} ${selected && amountEnabled ? "" : "disabled"}><span>${haListManagerShoppingCardText("recipes.recipe_quantity", {}, this._hass)} <strong>${esc(amount)}</strong>${packageCount !== null ? (" " + haListManagerShoppingCardText("ui.quantity_suffix", {p0:(packageCount)}, this._hass)) : ""}</span></label>` : ""}</article>`;
     }).join("");
     const tabs = steps.length ? `<div class="tandoor-recipe-tabs" role="tablist" aria-label="${haListManagerShoppingCardText("ui.recipe_view", {}, this._hass)}"><button type="button" role="tab" data-tandoor-recipe-tab="ingredients" aria-selected="${recipeTab === "ingredients"}" class="${recipeTab === "ingredients" ? "active" : ""}"><ha-icon icon="mdi:format-list-checks"></ha-icon>${haListManagerShoppingCardText("ui.ingredients", {}, this._hass)} <span>${esc(recipe?.ingredients?.length || 0)}</span></button><button type="button" role="tab" data-tandoor-recipe-tab="preparation" aria-selected="${recipeTab === "preparation"}" class="${recipeTab === "preparation" ? "active" : ""}"><ha-icon icon="mdi:chef-hat"></ha-icon>${haListManagerShoppingCardText("ui.preparation", {}, this._hass)} <span>${esc(steps.length)}</span></button></div>` : "";
     const ingredientContent = `<label class="tandoor-search-option tandoor-recipe-small-units"><input type="checkbox" data-tandoor-skip-small-units ${dialog.skipSmallUnits ? "checked" : ""}><span>${haListManagerShoppingCardText("recipes.skip_small_quantities", {}, this._hass)}</span></label><div class="tandoor-selection-actions"><button type="button" data-tandoor-select-all><ha-icon icon="mdi:checkbox-multiple-marked-outline"></ha-icon>${haListManagerShoppingCardText("ui.select_all", {}, this._hass)}</button><button type="button" data-tandoor-select-none><ha-icon icon="mdi:checkbox-multiple-blank-outline"></ha-icon>${haListManagerShoppingCardText("ui.deselect_all", {}, this._hass)}</button></div><div class="tandoor-ingredients">${rows}</div>`;
     const preparationContent = `<div class="tandoor-steps">${steps.map((step, index) => `<article class="tandoor-step"><span class="tandoor-step-number">${index + 1}</span><div>${step.name ? `<h3>${esc(step.name)}</h3>` : ""}${step.instruction ? `<p>${esc(step.instruction)}</p>` : ""}</div></article>`).join("")}</div>`;
     const servingsControl = servings ? `<div class="tandoor-servings"><span><strong>${haListManagerShoppingCardText("ui.servings", {}, this._hass)}</strong><small>${haListManagerShoppingCardText("recipes.quantity_auto_adjusted", {}, this._hass)}</small></span><div><button type="button" data-tandoor-servings-change="-1" aria-label="${haListManagerShoppingCardText("recipes.one_serving_less", {}, this._hass)}"><ha-icon icon="mdi:minus"></ha-icon></button><input type="number" min="1" max="100" step="1" value="${esc(servings)}" data-tandoor-servings aria-label="${haListManagerShoppingCardText("recipes.servings", {}, this._hass)}"><button type="button" data-tandoor-servings-change="1" aria-label="${haListManagerShoppingCardText("recipes.increase_serving", {}, this._hass)}"><ha-icon icon="mdi:plus"></ha-icon></button></div></div>` : "";
-    return `<div class="backdrop tandoor-backdrop" data-close-tandoor><section class="dialog tandoor-dialog tandoor-recipe-dialog" role="dialog" aria-modal="true"><header class="tandoor-recipe-header"><button class="icon-button tandoor-recipe-back" data-tandoor-back title="${haListManagerShoppingCardText("recipes.back_to_selection", {}, this._hass)}"><ha-icon icon="mdi:arrow-left"></ha-icon></button><div><h2>${esc(recipe?.name || haListManagerShoppingCardText("ui.recipe", {}, this._hass))}</h2><p>${servings ? haListManagerShoppingCardText("recipes.serving_count", {p0:(esc(servings))}, this._hass) : haListManagerShoppingCardText("recipes.select_ingredients", {}, this._hass)}</p></div><button class="icon-button" data-close-tandoor title="${haListManagerShoppingCardText("ui.close", {}, this._hass)}"><ha-icon icon="mdi:close"></ha-icon></button></header>${recipe?.image ? `<img class="tandoor-hero" src="${esc(recipe.image)}" alt="${esc(recipe.name)}">` : ""}${dialog.status ? `<div class="dialog-status error"><ha-icon icon="mdi:alert-circle-outline"></ha-icon>${esc(dialog.status)}</div>` : ""}${servingsControl}${tabs}${recipeTab === "preparation" ? preparationContent : ingredientContent}<footer><button class="primary" data-add-tandoor ${this._busy || !dialog.selected.size ? "disabled" : ""}>${this._busy ? haListManagerShoppingCardText("ui.adding", {}, this._hass) : haListManagerShoppingCardText("ui.add_selection", {}, this._hass)}</button><button data-tandoor-back>${haListManagerShoppingCardText("ui.back", {}, this._hass)}</button><button data-close-tandoor>${haListManagerShoppingCardText("ui.cancel", {}, this._hass)}</button></footer></section></div>`;
+    return `<div class="backdrop tandoor-backdrop" data-close-tandoor><section class="dialog tandoor-dialog tandoor-recipe-dialog" role="dialog" aria-modal="true"><header class="tandoor-recipe-header"><button class="icon-button tandoor-recipe-back" data-tandoor-back title="${haListManagerShoppingCardText("recipes.back_to_selection", {}, this._hass)}"><ha-icon icon="mdi:arrow-left"></ha-icon></button><div><h2>${esc(recipe?.name || haListManagerShoppingCardText("ui.recipe", {}, this._hass))}</h2><p>${servings ? haListManagerShoppingCardText("recipes.serving_count", {p0:(esc(servings))}, this._hass) : haListManagerShoppingCardText("recipes.select_ingredients", {}, this._hass)}</p></div><button class="icon-button" data-close-tandoor title="${haListManagerShoppingCardText("ui.close", {}, this._hass)}"><ha-icon icon="mdi:close"></ha-icon></button></header>${recipe?.image ? `<img class="tandoor-hero" src="${esc(recipe.image)}" alt="${esc(recipe.name)}">` : ""}${this._notice(dialog.status, "tandoor", "dialog-status error")}${servingsControl}${tabs}${recipeTab === "preparation" ? preparationContent : ingredientContent}<footer><button class="primary" data-add-tandoor ${this._busy || !dialog.selected.size ? "disabled" : ""}>${this._busy ? haListManagerShoppingCardText("ui.adding", {}, this._hass) : haListManagerShoppingCardText("ui.add_selection", {}, this._hass)}</button><button data-tandoor-back>${haListManagerShoppingCardText("ui.back", {}, this._hass)}</button><button data-close-tandoor>${haListManagerShoppingCardText("ui.cancel", {}, this._hass)}</button></footer></section></div>`;
   }
 
   _renderBrowserChipMenu() {
@@ -2864,7 +3087,7 @@ class HaListManagerShoppingCard extends HTMLElement {
       : menu.chip.categoryProduct
         ? haListManagerShoppingCardText("ui.quick_entry_product_linked", {}, this._hass)
         : haListManagerShoppingCardText("help.chip_mark_important", {}, this._hass);
-    return `<div class="backdrop browser-chip-backdrop" data-close-browser-chip-menu><section class="dialog browser-chip-menu" role="dialog" aria-modal="true" aria-label="${haListManagerShoppingCardText("chips.manage", {}, this._hass)}"><header><div><h2>${esc(menu.chip.name)}</h2><p>${esc(description)}</p></div><button class="icon-button" data-close-browser-chip-menu title="${haListManagerShoppingCardText("ui.close", {}, this._hass)}"><ha-icon icon="mdi:close"></ha-icon></button></header>${menu.status ? `<div class="dialog-status error"><ha-icon icon="mdi:alert-circle-outline"></ha-icon>${esc(menu.status)}</div>` : ""}<div class="browser-chip-actions">${importantAction}${browserActions}</div></section></div>`;
+    return `<div class="backdrop browser-chip-backdrop" data-close-browser-chip-menu><section class="dialog browser-chip-menu" role="dialog" aria-modal="true" aria-label="${haListManagerShoppingCardText("chips.manage", {}, this._hass)}"><header><div><h2>${esc(menu.chip.name)}</h2><p>${esc(description)}</p></div><button class="icon-button" data-close-browser-chip-menu title="${haListManagerShoppingCardText("ui.close", {}, this._hass)}"><ha-icon icon="mdi:close"></ha-icon></button></header>${this._notice(menu.status, "browser-chip", "dialog-status error")}<div class="browser-chip-actions">${importantAction}${browserActions}</div></section></div>`;
   }
 
   _closeBrowserChipMenu() {
@@ -3173,7 +3396,7 @@ class HaListManagerShoppingCard extends HTMLElement {
   }
 
   _styles() {
-    return `
+    return `.dismissible-notice{align-items:center}.dismissible-notice .notice-text{flex:1;min-width:0;overflow-wrap:anywhere}.notice-dismiss{display:inline-grid!important;place-items:center;flex:0 0 32px;width:32px!important;height:32px!important;min-height:32px!important;padding:0!important;margin-left:auto;border:0!important;border-radius:50%!important;background:transparent!important;color:inherit!important;cursor:pointer}.notice-dismiss:hover,.notice-dismiss:focus-visible{background:color-mix(in srgb,currentColor 12%,transparent)!important}.notice-dismiss ha-icon{--mdc-icon-size:20px}.selection-field-heading{display:block;min-height:30px}.picker-popup-host{position:relative}.picker-trigger-host.picker-popup-host input{padding-right:86px!important}.picker-popup-host>.picker-list-trigger{right:44px}.picker-popup-host>.selection-open{position:absolute;z-index:4;right:4px;top:50%;display:grid;place-items:center;width:34px;height:34px;min-width:34px;min-height:34px;padding:0;transform:translateY(-50%);border:0;border-radius:50%;color:var(--primary-color);background:transparent;cursor:pointer}.selection-open:hover,.selection-open:focus-visible{background:color-mix(in srgb,var(--primary-color) 16%,transparent)}.selection-open:disabled,.picker-list-trigger:disabled{opacity:.4;cursor:default}.selection-open ha-icon{--mdc-icon-size:21px}.selection-backdrop{z-index:1250}.dialog.selection-dialog{width:min(640px,100%);display:flex;flex-direction:column;max-height:calc(100dvh - 36px)}.selection-dialog header{flex:0 0 auto}.selection-dialog header h2{min-width:0;overflow-wrap:anywhere}.selection-search{flex:0 0 auto;margin-top:14px}.selection-grid{display:flex;flex-wrap:wrap;align-content:flex-start;gap:9px;overflow:auto;overscroll-behavior:contain;min-height:0;margin-top:16px;padding:3px;max-height:55dvh}.selection-chip{display:flex;align-items:center;gap:8px;min-height:46px;max-width:100%;padding:7px 11px;border:1px solid color-mix(in srgb,var(--selection-color,var(--primary-color)) 60%,var(--divider-color));border-radius:22px;color:var(--primary-text-color);background:color-mix(in srgb,var(--selection-color,var(--primary-color)) 16%,var(--card-background-color));text-align:left;cursor:pointer}.selection-chip.selected{outline:2px solid var(--primary-color);outline-offset:1px}.selection-chip>span{display:flex;flex-direction:column;min-width:0;gap:2px}.selection-chip strong{font-size:14px;overflow-wrap:anywhere}.selection-chip small{font-size:11px;color:var(--secondary-text-color)}.selection-chip>ha-icon:not(.selection-check){--mdc-icon-size:20px;box-sizing:content-box;padding:4px;border-radius:50%;color:var(--selection-ink,#fff);background:var(--selection-color,var(--primary-color));flex:0 0 auto}.selection-chip .selection-check{--mdc-icon-size:18px;color:var(--primary-text-color)}.selection-dialog footer{flex:0 0 auto;margin-top:18px}.selection-dialog input[type=search]{width:100%}@media(max-width:600px){.selection-grid{gap:8px}.selection-chip{padding:7px 9px}.dialog.selection-dialog{max-height:calc(100dvh - 24px)}}
       .item-dialog-header-actions{display:flex;align-items:center;gap:4px;margin-left:auto}.item-actions{position:relative;flex:0 0 auto}.item-actions-menu{position:absolute;z-index:20;top:calc(100% + 5px);right:0;display:grid;width:min(290px,calc(100vw - 60px));overflow:hidden;border:1px solid var(--divider-color);border-radius:10px;background:var(--card-background-color);box-shadow:0 8px 26px rgba(0,0,0,.38)}.item-actions-menu>button{display:flex;align-items:center;gap:9px;min-height:46px;width:100%;padding:10px 12px;border:0;border-radius:0;text-align:left;white-space:normal;background:transparent}.item-actions-menu>button:not(:disabled):hover{background:var(--secondary-background-color)}.item-actions-menu>button>ha-icon{flex:0 0 auto;--mdc-icon-size:21px;color:var(--primary-color)}.item-actions-menu>small{padding:0 12px 12px;color:var(--secondary-text-color);font-size:12px;line-height:1.4}.item-action-dialog{width:min(480px,100%)}.item-action-dialog>p{line-height:1.5}.item-action-dialog select{width:100%;min-height:45px;padding:10px 12px;border:1px solid var(--divider-color);border-radius:7px;color:var(--primary-text-color);background:var(--secondary-background-color);font:inherit}.item-action-result{margin:10px 0}.dialog-status.success{color:var(--success-color,#43a047)}
 
     .off-refresh{margin:14px 0;padding:12px;border:1px solid var(--divider-color);border-left:3px solid var(--primary-color);border-radius:8px}.off-refresh>p{margin:6px 0 10px;color:var(--secondary-text-color);font-size:14px;line-height:1.4}.off-refresh label{display:flex!important;flex-direction:row!important;align-items:flex-start;gap:10px;margin:10px 0!important}.off-refresh input[type=checkbox]{flex:0 0 auto;width:20px!important;min-height:20px!important;height:20px;margin:2px 0 0;padding:0;accent-color:var(--primary-color)}.off-refresh label>span{display:flex;flex-direction:column;min-width:0;gap:4px}.off-refresh small{overflow-wrap:anywhere;white-space:normal;color:var(--secondary-text-color)}
@@ -3243,9 +3466,9 @@ class HaListManagerShoppingCard extends HTMLElement {
       : collapsible ? `<button type="button" class="card-title-copy" data-toggle-list aria-expanded="${collapsed ? "false" : "true"}">${titleContent}</button>` : `<div class="card-title-copy">${titleContent}</div>`;
     const titleToggle = `<div class="card-title-toggle">${expandedToggle}${titleCopy}</div>`;
     const options = this._optionRowHtml();
-    const listBody = `${this._config.input_row_position === "top" ? input : ""}${this._config.option_row_position === "top" ? options : ""}<div class="status-region" data-status-region>${this._notificationStatus ? `<div class="send-status"><ha-icon icon="mdi:check-circle-outline"></ha-icon>${esc(this._notificationStatus)}</div>` : ""}</div>${this._error ? `<div class="error"><ha-icon icon="mdi:alert-circle-outline"></ha-icon>${esc(this._error)}</div>` : ""}<main>${content}</main>${this._config.option_row_position === "bottom" ? options : ""}${this._config.input_row_position === "bottom" ? input : ""}`;
+    const listBody = `${this._config.input_row_position === "top" ? input : ""}${this._config.option_row_position === "top" ? options : ""}<div class="status-region" data-status-region>${this._notice(this._notificationStatus, "notification", "send-status", "check-circle-outline")}</div>${this._notice(this._error, "error", "error")}<main>${content}</main>${this._config.option_row_position === "bottom" ? options : ""}${this._config.input_row_position === "bottom" ? input : ""}`;
     const cardBody = collapsed ? "" : `<div class="card-layout"><div class="list-column">${listBody}</div>${this._renderChips()}</div>`;
-    this.shadowRoot.innerHTML = `<style>${this._styles()}</style><ha-card class="view-${view} chips-position-${esc(this._config.chips_position)} ${dividerClass} ${collapsed ? "list-collapsed" : ""}" style="${appearanceStyle}"><div class="card-title">${titleToggle}${titleActions}</div>${cardBody}${this._renderDialog()}${this._renderProductPicker()}${this._renderConfirmation()}${this._renderChipDialog()}${this._renderDishDialog()}${this._renderTandoorDialog()}${this._renderBrowserChipMenu()}${this._renderImageDialog()}</ha-card>`;
+    this.shadowRoot.innerHTML = `<style>${this._styles()}</style><ha-card class="view-${view} chips-position-${esc(this._config.chips_position)} ${dividerClass} ${collapsed ? "list-collapsed" : ""}" style="${appearanceStyle}"><div class="card-title">${titleToggle}${titleActions}</div>${cardBody}${this._renderDialog()}${this._renderProductPicker()}${this._renderConfirmation()}${this._renderChipDialog()}${this._renderDishDialog()}${this._renderTandoorDialog()}${this._renderBrowserChipMenu()}${this._renderImageDialog()}${this._renderSelectionPopup()}</ha-card>`;
     this._bind();
     if (focusAttribute) {
       const next = [...this.shadowRoot.querySelectorAll(`[${focusAttribute}]`)]
@@ -3268,11 +3491,12 @@ class HaListManagerShoppingCard extends HTMLElement {
       const menu = menuHost?.querySelector(menuSelector);
       if (!triggerHost || !menu || triggerHost.querySelector(":scope > [data-picker-list-trigger]")) return;
       triggerHost.classList.add("picker-trigger-host");
-      input.style.setProperty("padding-right", "44px", "important");
+      input.style.setProperty("padding-right", triggerHost.classList.contains("picker-popup-host") ? "86px" : "44px", "important");
       const trigger = document.createElement("button");
       trigger.type = "button";
       trigger.className = "picker-list-trigger";
       trigger.dataset.pickerListTrigger = "";
+      trigger.disabled = this._busy || input.disabled;
       trigger.title = haListManagerShoppingCardText("ui.open_picker_close_keyboard", {}, this._hass);
       trigger.setAttribute("aria-label", trigger.title);
       trigger.innerHTML = '<ha-icon icon="mdi:gesture-tap-button"></ha-icon>';
@@ -3297,6 +3521,7 @@ class HaListManagerShoppingCard extends HTMLElement {
         const currentValue = input.value.trim();
         input.blur();
         setTimeout(() => {
+          if (input.isConnected === false || input.disabled || this._busy || this._selectionPopup) return;
           input.value = "";
           input.dispatchEvent(new Event("focus"));
           input.value = currentValue;
@@ -3607,6 +3832,9 @@ class HaListManagerShoppingCard extends HTMLElement {
 
   _bind() {
     const root = this.shadowRoot;
+    this._bindNotices();
+    this._bindSelectionPopup();
+    this._bindSelectionTriggers(root);
     root.querySelector("[data-toggle-item-actions]")?.addEventListener("click", () => this._toggleItemActions());
     root.querySelectorAll("[data-item-action]").forEach((button) => button.addEventListener("click", () => this._openItemAction(button.dataset.itemAction)));
     root.querySelector("[data-confirm-item-action]")?.addEventListener("click", () => this._confirmItemAction());
