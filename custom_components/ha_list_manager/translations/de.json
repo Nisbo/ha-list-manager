@@ -458,7 +458,17 @@
     "import_ean_unresolved": "Kläre die mehrdeutigen EAN-Zuordnungen in der Vorschau und prüfe sie vor der Übernahme erneut.",
     "import_reason_inventory_ean": "EAN-Produkte werden in die zentrale Produktdatenbank übernommen und stehen allen Listen zur Verfügung. Inventarbestände werden ohne Vervielfachung mit dem gewählten Produkt verknüpft. Vorhandene Produkte mit derselben EAN bleiben unverändert.",
     "import_reason_ean_rules_omitted": "Alte Mindestbestände und automatische Transferregeln werden nicht übernommen. Stelle Mindestbestand und Nachbestellung in den neuen Inventareinstellungen ein.",
-    "import_reason_ean_category_conflict": "Einträge mit derselben EAN haben unterschiedliche Kategorien. Ihre Bestände werden zu einem Inventareintrag zusammengefasst; die Kategorie des ersten Quelleintrags bleibt erhalten."
+    "import_reason_ean_category_conflict": "Einträge mit derselben EAN haben unterschiedliche Kategorien. Ihre Bestände werden zu einem Inventareintrag zusammengefasst; die Kategorie des ersten Quelleintrags bleibt erhalten.",
+    "backend_scan_edit_locked": "Dieser Scan wird bereits auf einem anderen Gerät bearbeitet.",
+    "backend_scan_edit_required": "Übernimm den Scan zuerst über „Bearbeiten“.",
+    "backend_scan_session_invalid": "Die Scan-Sitzung ist nicht mehr gültig. Öffne den Scan erneut.",
+    "actions_article_list_required": "Diese Aktion benötigt eine aktive Einkaufs- oder Inventarliste.",
+    "actions_chip_name_length": "Der Chipname muss zwischen 1 und 100 Zeichen lang sein.",
+    "actions_rule_name_length": "Die genaue Zuordnung benötigt einen Artikelnamen mit höchstens 100 Zeichen.",
+    "actions_exact_rule_required": "Für Namen mit * kann hier keine genaue Zuordnung erstellt werden. Verwende dafür die Regelverwaltung.",
+    "actions_source_required": "Wähle genau einen gespeicherten Artikel als Quelle.",
+    "actions_different_list_required": "Wähle eine andere Zielliste.",
+    "actions_shopping_target_required": "Wähle eine aktive lokale Einkaufsliste als Ziel."
   },
   "config_panel": {
     "backup": {
@@ -554,7 +564,7 @@
       "todo_search_filter": "Filtert die sichtbaren Aufgaben während der Eingabe nach Name, Beschreibung, Kategorie und Label. Hinzufügen und Enter bleiben verfügbar.",
       "offer_global_categories": "Für alle Listen angelegte Kategorien zusätzlich anbieten.",
       "offer_shared_quick_actions": "Gemeinsame Schnellaktionen für Einkaufs- und Inventarlisten zusätzlich anbieten.",
-      "history_sample_storage": "Gespeichert werden Zustand, Attribute und der Zeitpunkt jeder neuen HA-Übermittlung – auch bei gleichem Wert. Das bloße Einlesen eines unveränderten Zustands beim Start erzeugt keinen zusätzlichen Messpunkt.",
+      "history_sample_storage": "Gespeichert werden Zustand, Attribute und Zeitpunkt jeder neuen HA-Übermittlung – auch bei gleichem Wert. Während des HA-Starts wird nichts aufgezeichnet.",
       "history_axis_decimals": "Gilt ausschließlich für die Beschriftung und die kleinste mögliche gleichmäßige Schrittweite der linken Diagrammskala.",
       "inventory_category_grouping": "Gruppiert die Inventarartikel in aufklappbaren Kategorien. Aus zeigt eine gemeinsame flache Liste.",
       "select_saved_categories": "Hier können nur bereits unter „Kategorien“ gespeicherte Kategorien gewählt werden.",
@@ -941,7 +951,16 @@
       "minimum_value": "ab {value}",
       "fill": "Auffüllen",
       "record": "Protokollieren",
-      "resume": "Fortsetzen"
+      "resume": "Fortsetzen",
+      "ignore_unavailable": "unknown und unavailable nicht aufzeichnen",
+      "ignore_unavailable_help": "Gilt für neue Live-Aufzeichnungen und Historienimporte. Bereits gespeicherte Werte bleiben erhalten.",
+      "recording_saved": "Aufzeichnungseinstellung gespeichert.",
+      "hide_unavailable": "Vorhandene unknown-/unavailable-Werte ausblenden",
+      "hide_unavailable_title": "unknown-/unavailable-Werte ausblenden?",
+      "hide_unavailable_confirm": "Alle {count} aufgezeichneten oder importierten unknown-/unavailable-Werte dieses Archivs ausblenden? Die Originaldaten bleiben erhalten. Über „Ausgeblendete Werte anzeigen“ kannst du sie einzeln wieder einblenden. Manuell ergänzte Werte bleiben unverändert.",
+      "hide_values": "Werte ausblenden",
+      "unavailable_hidden": "{count} unknown-/unavailable-Werte ausgeblendet.",
+      "ignored_unavailable": "{count} unknown-/unavailable-Werte ignoriert"
     },
     "scripts": {
       "enabled": "Skript-Anbindung aktivieren",
@@ -1961,7 +1980,21 @@
       "open_target_or_queue": "Öffne die Zielkarte oder bearbeite den Scan unter Scanner → Warteliste.",
       "scan_processed": "Scan wurde verarbeitet.",
       "waiting_process_here": "Wartet auf Bearbeitung. Öffne die Zielkarte oder bearbeite den Scan hier.",
-      "hardware_requirements": "Für echte Scans wird aktuell der {model} im Bluetooth-LE-Modus zusammen mit der Home-Assistant-Integration „Eyoyo EY-015P Barcode Scanner (BLE)“ benötigt. Die Verbindung kann direkt über Bluetooth oder über einen ESPHome Bluetooth-Proxy erfolgen."
+      "hardware_requirements": "Für echte Scans wird aktuell der {model} im Bluetooth-LE-Modus zusammen mit der Home-Assistant-Integration „Eyoyo EY-015P Barcode Scanner (BLE)“ benötigt. Die Verbindung kann direkt über Bluetooth oder über einen ESPHome Bluetooth-Proxy erfolgen.",
+      "shared_open": "Dieser Scan ist auch auf einem anderen Gerät geöffnet.",
+      "edit_elsewhere": "Wird auf einem anderen Gerät bearbeitet.",
+      "edit_prompt": "Zum Ändern zuerst „Bearbeiten“ wählen.",
+      "edit_here": "Du bearbeitest diesen Scan.",
+      "lease_lost": "Die Bearbeitung wurde freigegeben. Bitte erneut „Bearbeiten“ wählen.",
+      "discard": "Scan verwerfen",
+      "discard_title": "Scan verwerfen?",
+      "discard_help": "Dieser wartende Scan wird auf allen Geräten verworfen. Es wird kein Bestand gebucht. Der Vorgang bleibt im Scan-Verlauf erhalten.",
+      "discarded": "Scan wurde verworfen.",
+      "resolved_elsewhere": "Scan wurde auf einem anderen Gerät abgeschlossen.",
+      "session_error": "Scan konnte nicht synchronisiert werden.",
+      "edit_failed": "Scan kann gerade nicht zur Bearbeitung übernommen werden.",
+      "discard_failed": "Scan konnte nicht verworfen werden.",
+      "no_longer_pending": "Dieser Scan ist nicht mehr offen."
     },
     "inventory": {
       "no_shortage": "Aktuell gibt es keinen Fehlbestand.",
@@ -2386,7 +2419,9 @@
       "ean_unknown_manual": "Für diese EAN wurden keine Produktdaten gefunden. Du kannst den Artikel manuell anlegen.",
       "local_match_found": "Lokales Produkt gefunden.",
       "name_multiple_matches": "Mehrere Produkte heißen „{p0}“. Wähle den passenden Eintrag aus.",
-      "loaded_unsaved": "Produktdaten geladen – noch nicht gespeichert."
+      "loaded_unsaved": "Produktdaten geladen – noch nicht gespeichert.",
+      "refresh_changes": "Änderungen aus Open Food Facts",
+      "refresh_review": "Leere Felder wurden ergänzt. Wähle aus, welche vorhandenen Angaben ersetzt werden sollen. Gespeichert wird erst mit „Speichern“."
     },
     "labels": {
       "no_own_list_labels": "Für diese Liste wurden noch keine eigenen Labels angelegt.",
@@ -2505,6 +2540,33 @@
       "ean_recheck": "EAN-Zuordnungen prüfen",
       "ean_choice_pending": "Zuordnung geändert. Prüfe die Vorschau vor der Übernahme erneut.",
       "ean_result": "{created} EAN-Produkte hinzugefügt · {reused} vorhandene Produkte wiederverwendet"
+    },
+    "quick_actions": {
+      "menu": "Artikelaktionen",
+      "send": "Zu anderer Liste hinzufügen …",
+      "chip": "Chip für diese Liste erstellen",
+      "rule": "Kategoriezuordnung erstellen",
+      "title_chip": "Chip erstellen",
+      "title_rule": "Kategoriezuordnung erstellen",
+      "title_send": "Zu anderer Liste hinzufügen",
+      "confirm_chip": "Soll „{p0}“ als Schnelleingabe für „{p1}“ gespeichert werden?",
+      "confirm_rule": "Soll „{p0}“ in „{p2}“ künftig automatisch der Kategorie „{p1}“ zugeordnet werden?",
+      "local_category_help": "Bei Bedarf wird dafür eine Kategorie mit demselben Namen nur für diese Liste angelegt. Globale und listentypbezogene Kategorien bleiben unverändert.",
+      "rule_unavailable": "Wähle zuerst eine dauerhaft gespeicherte Kategorie. Für „Allgemein“ und dynamische Kategorien ist diese Aktion nicht verfügbar.",
+      "source_unchanged": "Der ursprüngliche Eintrag und sein Bestand bleiben unverändert.",
+      "saved_source_note": "Es wird der gespeicherte Artikel übernommen. Änderungen im Bearbeiten-Dialog bitte zuerst speichern.",
+      "no_targets": "Keine andere lokale Einkaufsliste verfügbar.",
+      "target": "Zielliste",
+      "choose_target": "Bitte eine Zielliste auswählen.",
+      "quantity_range": "Die Anzahl muss eine ganze Zahl zwischen 1 und 1.000.000 sein.",
+      "created_chip": "Der Chip wurde für diese Liste erstellt.",
+      "existing_chip": "Für diese Liste ist bereits ein Chip mit diesem Namen vorhanden.",
+      "created_rule": "Die Kategoriezuordnung wurde für diese Liste erstellt.",
+      "existing_rule": "Diese Kategoriezuordnung ist für diese Liste bereits vorhanden.",
+      "sent": "{p0}× zu „{p1}“ hinzugefügt.",
+      "merged": "Vorhandenen Artikel auf „{p1}“ um {p0} ergänzt.",
+      "error": "Die Artikelaktion konnte nicht ausgeführt werden.",
+      "create": "Erstellen"
     }
   },
   "exceptions": {
@@ -3233,6 +3295,36 @@
     },
     "import_ean_unresolved": {
       "message": "Kläre die mehrdeutigen EAN-Zuordnungen in der Vorschau und prüfe sie vor der Übernahme erneut."
+    },
+    "backend_scan_edit_locked": {
+      "message": "Dieser Scan wird bereits auf einem anderen Gerät bearbeitet."
+    },
+    "backend_scan_edit_required": {
+      "message": "Übernimm den Scan zuerst über „Bearbeiten“."
+    },
+    "backend_scan_session_invalid": {
+      "message": "Die Scan-Sitzung ist nicht mehr gültig. Öffne den Scan erneut."
+    },
+    "actions_article_list_required": {
+      "message": "Diese Aktion benötigt eine aktive Einkaufs- oder Inventarliste."
+    },
+    "actions_chip_name_length": {
+      "message": "Der Chipname muss zwischen 1 und 100 Zeichen lang sein."
+    },
+    "actions_rule_name_length": {
+      "message": "Die genaue Zuordnung benötigt einen Artikelnamen mit höchstens 100 Zeichen."
+    },
+    "actions_exact_rule_required": {
+      "message": "Für Namen mit * kann hier keine genaue Zuordnung erstellt werden. Verwende dafür die Regelverwaltung."
+    },
+    "actions_source_required": {
+      "message": "Wähle genau einen gespeicherten Artikel als Quelle."
+    },
+    "actions_different_list_required": {
+      "message": "Wähle eine andere Zielliste."
+    },
+    "actions_shopping_target_required": {
+      "message": "Wähle eine aktive lokale Einkaufsliste als Ziel."
     }
   }
 }

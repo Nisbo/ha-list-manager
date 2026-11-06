@@ -160,6 +160,9 @@ def async_register_websocket_commands(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, websocket_sync_external_list)
     websocket_api.async_register_command(hass, websocket_list_items)
     websocket_api.async_register_command(hass, websocket_create_item)
+    websocket_api.async_register_command(hass, websocket_item_action_chip)
+    websocket_api.async_register_command(hass, websocket_item_action_rule)
+    websocket_api.async_register_command(hass, websocket_item_action_send)
     websocket_api.async_register_command(hass, websocket_update_item)
     websocket_api.async_register_command(hass, websocket_set_item_completed)
     websocket_api.async_register_command(hass, websocket_reorder_items)
@@ -235,6 +238,10 @@ def async_register_websocket_commands(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, websocket_pending_scans)
     websocket_api.async_register_command(hass, websocket_pending_scans_for_list)
     websocket_api.async_register_command(hass, websocket_hold_pending_scan)
+    websocket_api.async_register_command(hass, websocket_view_pending_scan)
+    websocket_api.async_register_command(hass, websocket_edit_pending_scan)
+    websocket_api.async_register_command(hass, websocket_release_pending_scan)
+    websocket_api.async_register_command(hass, websocket_discard_pending_scan)
     websocket_api.async_register_command(hass, websocket_resolve_pending_scan)
     websocket_api.async_register_command(hass, websocket_dismiss_pending_scan)
     websocket_api.async_register_command(hass, websocket_scan_history)
@@ -249,6 +256,7 @@ def async_register_websocket_commands(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, websocket_list_tracked_entities)
     websocket_api.async_register_command(hass, websocket_set_entity_tracking)
     websocket_api.async_register_command(hass, websocket_delete_entity_history)
+    websocket_api.async_register_command(hass, websocket_hide_unavailable_entity_states)
     websocket_api.async_register_command(hass, websocket_get_entity_history)
     websocket_api.async_register_command(hass, websocket_save_entity_sample)
     websocket_api.async_register_command(hass, websocket_delete_entity_sample)
@@ -344,6 +352,7 @@ async def websocket_legacy_import_apply(hass, connection, msg):
     probatio.Required("type"): f"{DOMAIN}/subscribe",
     probatio.Required("event_type"): probatio.In({
         EVENT_ITEMS_CHANGED,
+        EVENT_LISTS_CHANGED,
         EVENT_INVENTORY_CHANGED,
         EVENT_SCANNER_TARGET_CHANGED,
         EVENT_SCAN_PROCESSED,
@@ -387,6 +396,7 @@ async def websocket_list_tracked_entities(
         probatio.Required("type"): f"{DOMAIN}/entity_history/set",
         probatio.Required("entity_id"): str,
         probatio.Required("enabled"): bool,
+        probatio.Optional("ignore_unavailable"): bool,
     }
 )
 async def websocket_set_entity_tracking(
@@ -407,10 +417,36 @@ async def websocket_set_entity_tracking(
             msg["id"], websocket_api.ERR_UNKNOWN_ERROR, localized_text("errors.history_unavailable")
         )
         return
-    await runtime.entity_history.async_set_tracking(entity_id, msg["enabled"])
+    options = {"ignore_unavailable": msg["ignore_unavailable"]} if "ignore_unavailable" in msg else {}
+    await runtime.entity_history.async_set_tracking(entity_id, msg["enabled"], **options)
     records = await runtime.database.async_list_tracked_entities()
     record = next(item for item in records if item.entity_id == entity_id)
     connection.send_result(msg["id"], {"entity": record.as_dict()})
+
+
+@websocket_api.require_admin
+@localized_command(
+    {
+        probatio.Required("type"): f"{DOMAIN}/entity_history/hide_unavailable",
+        probatio.Required("entity_id"): str,
+    }
+)
+async def websocket_hide_unavailable_entity_states(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Hide unavailable originals without deleting their import identities."""
+    entity_id = msg["entity_id"].strip().lower()
+    database = _runtime(hass).database
+    try:
+        hidden = await database.async_hide_unavailable_entity_states(entity_id)
+    except ValueError as error:
+        _send_input_error(connection, msg, error)
+        return
+    records = await database.async_list_tracked_entities()
+    record = next(item for item in records if item.entity_id == entity_id)
+    connection.send_result(msg["id"], {"hidden": hidden, "entity": record.as_dict()})
 
 
 @websocket_api.require_admin
@@ -1018,21 +1054,25 @@ async def websocket_create_list(
             msg.get("tandoor_excluded_units"), maximum=500, required=False
         ) or ""
         record = await _runtime(hass).database.async_create_list(
-            name, list_type, icon, provider, external_entity_id,
-            msg["label_conflict_policy"],
-            msg["use_global_labels"],
-            msg["use_type_labels"],
-            msg["use_list_labels"],
-            msg["use_global_categories"],
-            msg["use_type_categories"],
-            msg["use_global_chips"],
-            msg["use_type_chips"],
-            msg["use_dishes"],
-            msg["use_tandoor"],
-            msg["tandoor_skip_small_units"],
-            msg["tandoor_include_ingredients"],
-            tandoor_excluded_units,
-            msg["tandoor_result_limit"],
+            name=name,
+            list_type=list_type,
+            icon=icon,
+            provider=provider,
+            external_entity_id=external_entity_id,
+            label_conflict_policy=msg["label_conflict_policy"],
+            use_global_categories=msg["use_global_categories"],
+            use_type_categories=msg["use_type_categories"],
+            use_global_labels=msg["use_global_labels"],
+            use_type_labels=msg["use_type_labels"],
+            use_list_labels=msg["use_list_labels"],
+            use_global_chips=msg["use_global_chips"],
+            use_type_chips=msg["use_type_chips"],
+            use_dishes=msg["use_dishes"],
+            use_tandoor=msg["use_tandoor"],
+            tandoor_skip_small_units=msg["tandoor_skip_small_units"],
+            tandoor_include_ingredients=msg["tandoor_include_ingredients"],
+            tandoor_excluded_units=tandoor_excluded_units,
+            tandoor_result_limit=msg["tandoor_result_limit"],
         )
     except ValueError as error:
         _send_input_error(connection, msg, error)
@@ -1262,7 +1302,11 @@ async def websocket_list_items(
     except ExternalListError as error:
         _send_error(connection, msg["id"], "external_list_error", error)
         return
-    result: dict[str, Any] = {"items": [item.as_dict() for item in records]}
+    category_names = await _runtime(hass).database.async_get_item_category_names(msg["list_id"])
+    result: dict[str, Any] = {"items": [
+        {**item.as_dict(), "category_name": category_names.get(item.category_id)}
+        for item in records
+    ]}
     if list_record.provider == "bring":
         statuses = await _runtime(hass).database.async_list_external_sync_statuses()
         result["sync_status"] = statuses.get(list_record.id)
@@ -1343,6 +1387,85 @@ async def websocket_create_item(
     if list_record.provider != "bring":
         _fire_items_changed(hass, record.list_id)
     connection.send_result(msg["id"], {"item": record.as_dict()})
+
+
+@localized_command({
+    probatio.Required("type"): f"{DOMAIN}/item_actions/chip",
+    probatio.Required("list_id"): str,
+    probatio.Required("name"): str,
+    probatio.Optional("product_id"): probatio.Any(str, None),
+})
+async def websocket_item_action_chip(hass, connection, msg) -> None:
+    """Save an entry chip only for the list operated by the card."""
+    try:
+        chip, created = await _runtime(hass).database.async_create_item_action_chip(
+            _clean_text(msg["list_id"], maximum=64, required=True),
+            _clean_text(msg["name"], maximum=100, required=True),
+            _clean_text(msg.get("product_id"), maximum=64, required=False),
+        )
+    except ValueError as error:
+        _send_input_error(connection, msg, error)
+        return
+    except (ListNotFoundError, ProductNotFoundError):
+        _send_error(connection, msg["id"], websocket_api.ERR_NOT_FOUND, localized_text("errors.product_definition_missing"))
+        return
+    if created:
+        _fire_lists_changed(hass, msg["list_id"])
+    connection.send_result(msg["id"], {"chip": chip.as_dict(), "created": created})
+
+
+@websocket_api.require_admin
+@localized_command({
+    probatio.Required("type"): f"{DOMAIN}/item_actions/rule",
+    probatio.Required("list_id"): str,
+    probatio.Required("name"): str,
+    probatio.Required("category_id"): str,
+})
+async def websocket_item_action_rule(hass, connection, msg) -> None:
+    """Append an exact rule without mutating shared category definitions."""
+    try:
+        category, created = await _runtime(hass).database.async_create_item_action_rule(
+            _clean_text(msg["list_id"], maximum=64, required=True),
+            _clean_text(msg["name"], maximum=100, required=True),
+            _clean_text(msg["category_id"], maximum=64, required=True),
+        )
+    except ValueError as error:
+        _send_input_error(connection, msg, error)
+        return
+    except (ListNotFoundError, CategoryNotFoundError):
+        _send_error(connection, msg["id"], websocket_api.ERR_NOT_FOUND, localized_text("errors.category_or_list_missing"))
+        return
+    if created:
+        _fire_lists_changed(hass, msg["list_id"])
+    connection.send_result(msg["id"], {"category": category.as_dict(), "created": created})
+
+
+@localized_command({
+    probatio.Required("type"): f"{DOMAIN}/item_actions/send",
+    probatio.Required("source_list_id"): str,
+    probatio.Optional("source_item_id"): str,
+    probatio.Optional("source_entry_id"): str,
+    probatio.Required("target_list_id"): str,
+    probatio.Required("quantity"): int,
+})
+async def websocket_item_action_send(hass, connection, msg) -> None:
+    """Copy one persisted article into another local shopping list."""
+    try:
+        item, merged, target = await _runtime(hass).database.async_send_item_action(
+            _clean_text(msg["source_list_id"], maximum=64, required=True),
+            _clean_text(msg.get("source_item_id"), maximum=64, required=False),
+            _clean_text(msg.get("source_entry_id"), maximum=64, required=False),
+            _clean_text(msg["target_list_id"], maximum=64, required=True),
+            _clean_quantity(msg["quantity"]),
+        )
+    except ValueError as error:
+        _send_input_error(connection, msg, error)
+        return
+    except (ListNotFoundError, ListItemNotFoundError, InventoryEntryNotFoundError, ProductNotFoundError):
+        _send_error(connection, msg["id"], websocket_api.ERR_NOT_FOUND, localized_text("errors.product_definition_missing"))
+        return
+    _fire_items_changed(hass, target.id)
+    connection.send_result(msg["id"], {"item": item.as_dict(), "merged": merged, "list": target.as_dict()})
 
 
 @localized_command(
@@ -1722,6 +1845,7 @@ async def websocket_create_product(
     except (LabelNotFoundError, CategoryNotFoundError):
         _send_error(connection, msg["id"], websocket_api.ERR_NOT_FOUND, localized_text("errors.category_or_label_missing"))
         return
+    _fire_lists_changed(hass)
     connection.send_result(msg["id"], {"product": product.as_dict()})
 
 
@@ -1729,6 +1853,7 @@ async def websocket_create_product(
     {
         probatio.Required("type"): f"{DOMAIN}/products/update",
         probatio.Required("product_id"): str,
+        probatio.Optional("list_id"): str,
         probatio.Optional("ean"): probatio.Any(str, None),
         probatio.Required("name"): str,
         probatio.Optional("original_name"): probatio.Any(str, None),
@@ -1761,6 +1886,7 @@ async def websocket_update_product(
             category=_clean_text(msg.get("category"), maximum=100, required=False),
             image_url=_clean_text(msg.get("image_url"), maximum=1000, required=False),
             label_ids=_clean_label_ids(msg.get("label_ids")),
+            list_id=msg.get("list_id"),
             category_ids=(
                 _clean_category_ids(msg.get("category_ids"))
                 if "category_ids" in msg else None
@@ -1779,9 +1905,10 @@ async def websocket_update_product(
             msg["id"], websocket_api.ERR_NOT_FOUND, localized_text("errors.product_not_found")
         )
         return
-    except (LabelNotFoundError, CategoryNotFoundError):
+    except (LabelNotFoundError, CategoryNotFoundError, ListNotFoundError):
         _send_error(connection, msg["id"], websocket_api.ERR_NOT_FOUND, localized_text("errors.category_or_label_missing"))
         return
+    _fire_lists_changed(hass)
     connection.send_result(msg["id"], {"product": product.as_dict()})
 
 
@@ -2244,6 +2371,7 @@ async def websocket_set_category_rules(
             msg["id"], websocket_api.ERR_NOT_FOUND, localized_text("errors.category_not_found")
         )
         return
+    _fire_lists_changed(hass)
     connection.send_result(msg["id"], {"rules": rules})
 
 
@@ -2401,6 +2529,7 @@ async def websocket_create_category(
     except ListNotFoundError:
         _send_error(connection, msg["id"], websocket_api.ERR_NOT_FOUND, localized_text("errors.list_not_found"))
         return
+    _fire_lists_changed(hass)
     connection.send_result(
         msg["id"], {"category": category.as_dict(), "rules": rules}
     )
@@ -2460,6 +2589,7 @@ async def websocket_update_category(
             msg["id"], websocket_api.ERR_NOT_FOUND, localized_text("errors.category_or_list_missing")
         )
         return
+    _fire_lists_changed(hass)
     connection.send_result(
         msg["id"], {"category": category.as_dict(), "rules": rules}
     )
@@ -2485,6 +2615,7 @@ async def websocket_delete_category(
             msg["id"], websocket_api.ERR_NOT_FOUND, localized_text("errors.category_not_found")
         )
         return
+    _fire_lists_changed(hass)
     connection.send_result(msg["id"])
 
 
@@ -2570,6 +2701,7 @@ async def websocket_set_category_order(
     except ListNotFoundError:
         _send_error(connection, msg["id"], websocket_api.ERR_NOT_FOUND, localized_text("errors.list_not_found"))
         return
+    _fire_lists_changed(hass, msg.get("list_id") if "scope" not in msg else None)
     connection.send_result(
         msg["id"],
         {
@@ -2599,6 +2731,7 @@ async def websocket_reset_category_order(
     except ListNotFoundError:
         _send_error(connection, msg["id"], websocket_api.ERR_NOT_FOUND, localized_text("errors.list_not_found"))
         return
+    _fire_lists_changed(hass, msg.get("list_id") if "scope" not in msg else None)
     connection.send_result(
         msg["id"],
         {
@@ -2669,6 +2802,7 @@ async def websocket_create_label(
     except DuplicateLabelError:
         _send_error(connection, msg["id"], "label_already_exists", localized_text("errors.label_exists"))
         return
+    _fire_lists_changed(hass)
     connection.send_result(msg["id"], {"label": label.as_dict()})
 
 
@@ -2714,6 +2848,7 @@ async def websocket_update_label(
     except LabelNotFoundError:
         _send_error(connection, msg["id"], websocket_api.ERR_NOT_FOUND, localized_text("errors.label_not_found"))
         return
+    _fire_lists_changed(hass)
     connection.send_result(msg["id"], {"label": label.as_dict()})
 
 
@@ -2735,6 +2870,7 @@ async def websocket_delete_label(
     except LabelNotFoundError:
         _send_error(connection, msg["id"], websocket_api.ERR_NOT_FOUND, localized_text("errors.label_not_found"))
         return
+    _fire_lists_changed(hass)
     connection.send_result(msg["id"])
 
 
@@ -2812,6 +2948,7 @@ async def websocket_create_chip(
     except ProductNotFoundError:
         _send_error(connection, msg["id"], websocket_api.ERR_NOT_FOUND, localized_text("errors.product_not_found"))
         return
+    _fire_lists_changed(hass)
     connection.send_result(msg["id"], {"chip": chip.as_dict()})
 
 
@@ -2867,6 +3004,7 @@ async def websocket_update_chip(
     except (ChipNotFoundError, ProductNotFoundError):
         _send_error(connection, msg["id"], websocket_api.ERR_NOT_FOUND, localized_text("errors.chip_or_product_missing"))
         return
+    _fire_lists_changed(hass)
     connection.send_result(msg["id"], {"chip": chip.as_dict()})
 
 
@@ -2888,6 +3026,7 @@ async def websocket_delete_chip(
     except ChipNotFoundError:
         _send_error(connection, msg["id"], websocket_api.ERR_NOT_FOUND, localized_text("errors.chip_not_found"))
         return
+    _fire_lists_changed(hass)
     connection.send_result(msg["id"])
 
 
@@ -3177,7 +3316,8 @@ async def websocket_inventory_options(
     list_id = msg["list_id"]
     try:
         inventory_lists = await database.async_list_inventory_lists()
-        if not any(record.id == list_id for record in inventory_lists):
+        inventory_list = next((record for record in inventory_lists if record.id == list_id), None)
+        if inventory_list is None:
             raise InventoryListRequiredError(list_id)
         products = await database.async_list_products(
             _clean_text(msg.get("search"), maximum=200, required=False), None
@@ -3193,10 +3333,26 @@ async def websocket_inventory_options(
         {**category.as_dict(), "manual_position": position}
         for position, category in enumerate(ordered_categories)
     ]
+    effective_labels = {label.name.casefold(): label for label in labels}
+
+    def product_labels(product):
+        return list({
+            label.name.casefold(): effective_labels[label.name.casefold()].as_dict()
+            for label in product.labels
+            if label.name.casefold() in effective_labels and (
+                label.scope == "global" and inventory_list.use_global_labels
+                or label.scope == "list_type" and label.list_type == inventory_list.list_type
+                and inventory_list.use_type_labels
+                or label.scope == "list" and label.list_id == list_id
+            )
+        }.values())
+
     connection.send_result(
         msg["id"],
         {
-            "products": [product.as_dict() for product in products],
+            "products": [
+                {**product.as_dict(), "labels": product_labels(product)} for product in products
+            ],
             "categories": allowed_categories,
             "labels": [label.as_dict() for label in labels],
         },
@@ -3387,7 +3543,9 @@ async def websocket_add_inventory_product(
                 category=None,
                 image_url=product.image_url,
                 label_ids=explicit_label_ids,
+                list_id=msg["list_id"],
             )
+            _fire_lists_changed(hass)
 
         existing = next(
             (
@@ -4092,8 +4250,8 @@ async def _async_delayed_simulation(
 )
 async def websocket_pending_scans(hass, connection, msg) -> None:
     """Return scans waiting for product data or a corrected stock value."""
-    records = await _runtime(hass).database.async_list_pending_scans()
-    connection.send_result(msg["id"], {"scans": [item.as_dict() for item in records]})
+    records = await _runtime(hass).scanner.async_pending_scans()
+    connection.send_result(msg["id"], {"scans": records})
 
 
 @localized_command(
@@ -4104,11 +4262,7 @@ async def websocket_pending_scans(hass, connection, msg) -> None:
 )
 async def websocket_pending_scans_for_list(hass, connection, msg) -> None:
     """Return actionable scans for one inventory card."""
-    records = await _runtime(hass).database.async_list_pending_scans()
-    scans = [
-        item.as_dict() for item in records
-        if item.list_id == msg["list_id"] and item.status in {"queued", "needs_input"}
-    ]
+    scans = await _runtime(hass).scanner.async_pending_scans(msg["list_id"])
     connection.send_result(msg["id"], {"scans": scans})
 
 
@@ -4119,18 +4273,84 @@ async def websocket_pending_scans_for_list(hass, connection, msg) -> None:
     }
 )
 async def websocket_hold_pending_scan(hass, connection, msg) -> None:
-    """Let exactly one visible target card take over an offered scan."""
-    record = await _runtime(hass).database.async_hold_offered_scan(msg["scan_id"])
-    if record is None:
+    """Legacy view notification; opening a scan never claims its editor slot."""
+    record = await _runtime(hass).database.async_get_scan_history_record(msg["scan_id"])
+    if record is None or record.status not in {"queued", "offered", "needs_input"}:
         _send_error(connection, msg["id"], websocket_api.ERR_NOT_FOUND, localized_text("errors.offered_scan_missing"))
         return
     connection.send_result(msg["id"], {"scan": record.as_dict()})
+
+
+def _clean_scan_session(value: str) -> str:
+    return _clean_text(value, maximum=100, required=True)
+
+
+@localized_command({
+    probatio.Required("type"): f"{DOMAIN}/scanner/queue/view",
+    probatio.Required("scan_id"): str,
+    probatio.Required("session_id"): str,
+    probatio.Optional("open", default=True): bool,
+})
+async def websocket_view_pending_scan(hass, connection, msg) -> None:
+    try:
+        record = await _runtime(hass).scanner.async_view_pending_scan(
+            msg["scan_id"], _clean_scan_session(msg["session_id"]), connection, msg["open"])
+    except ValueError as error:
+        _send_input_error(connection, msg, error)
+        return
+    connection.send_result(msg["id"], {"scan": record})
+
+
+@localized_command({
+    probatio.Required("type"): f"{DOMAIN}/scanner/queue/edit",
+    probatio.Required("scan_id"): str,
+    probatio.Required("session_id"): str,
+})
+async def websocket_edit_pending_scan(hass, connection, msg) -> None:
+    try:
+        record = await _runtime(hass).scanner.async_edit_pending_scan(
+            msg["scan_id"], _clean_scan_session(msg["session_id"]), connection)
+    except ValueError as error:
+        _send_input_error(connection, msg, error)
+        return
+    connection.send_result(msg["id"], {"scan": record})
+
+
+@localized_command({
+    probatio.Required("type"): f"{DOMAIN}/scanner/queue/release",
+    probatio.Required("scan_id"): str,
+    probatio.Required("session_id"): str,
+})
+async def websocket_release_pending_scan(hass, connection, msg) -> None:
+    try:
+        record = await _runtime(hass).scanner.async_release_pending_scan(
+            msg["scan_id"], _clean_scan_session(msg["session_id"]), connection)
+    except ValueError as error:
+        _send_input_error(connection, msg, error)
+        return
+    connection.send_result(msg["id"], {"scan": record})
+
+
+@localized_command({
+    probatio.Required("type"): f"{DOMAIN}/scanner/queue/discard",
+    probatio.Required("scan_id"): str,
+    probatio.Required("session_id"): str,
+})
+async def websocket_discard_pending_scan(hass, connection, msg) -> None:
+    try:
+        record = await _runtime(hass).scanner.async_discard_pending_scan(
+            msg["scan_id"], session_id=_clean_scan_session(msg["session_id"]), connection=connection)
+    except ValueError as error:
+        _send_input_error(connection, msg, error)
+        return
+    connection.send_result(msg["id"], {"success": True, "scan": record})
 
 
 @localized_command(
     {
         probatio.Required("type"): f"{DOMAIN}/scanner/queue/resolve",
         probatio.Required("scan_id"): str,
+        probatio.Optional("session_id"): str,
         probatio.Optional("corrected_stock"): probatio.Any(int, None),
         probatio.Optional("minimum_stock"): probatio.Any(int, None),
         probatio.Optional("restock_quantity"): int,
@@ -4167,6 +4387,8 @@ async def websocket_resolve_pending_scan(hass, connection, msg) -> None:
             }
         result = await _runtime(hass).scanner.async_resolve_pending_scan(
             msg["scan_id"], corrected_stock=corrected_stock,
+            session_id=_clean_scan_session(msg["session_id"]) if "session_id" in msg else None,
+            connection=connection,
             minimum_stock=_clean_stock(msg.get("minimum_stock"), optional=True),
             restock_quantity=_clean_stock(msg.get("restock_quantity"), optional=True),
             restock_mode=msg.get("restock_mode"),
@@ -4191,14 +4413,12 @@ async def websocket_resolve_pending_scan(hass, connection, msg) -> None:
 )
 async def websocket_dismiss_pending_scan(hass, connection, msg) -> None:
     """Dismiss a queued scan without applying it."""
-    claimed = await _runtime(hass).database.async_claim_pending_scan(msg["scan_id"])
-    if claimed is None:
-        _send_error(connection, msg["id"], websocket_api.ERR_NOT_FOUND, localized_text("errors.pending_scan_missing"))
+    try:
+        record = await _runtime(hass).scanner.async_discard_pending_scan(msg["scan_id"])
+    except ValueError as error:
+        _send_input_error(connection, msg, error)
         return
-    await _runtime(hass).database.async_finish_pending_scan(
-        msg["scan_id"], "dismissed", localized_text("backend.queued_scan_discarded")
-    )
-    connection.send_result(msg["id"], {"success": True})
+    connection.send_result(msg["id"], {"success": True, "scan": record})
 
 
 @websocket_api.require_admin

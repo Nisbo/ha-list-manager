@@ -458,7 +458,17 @@
     "import_ean_unresolved": "Resolve the ambiguous EAN assignments in the preview and check them again before importing.",
     "import_reason_inventory_ean": "EAN products are imported into the central product database and remain available to all lists. Inventory stock is linked to the chosen product without duplicating quantities. Existing products with the same EAN are preserved.",
     "import_reason_ean_rules_omitted": "Old minimum stocks and automatic-transfer settings are not imported. Configure minimum stock and replenishment using the new inventory settings.",
-    "import_reason_ean_category_conflict": "Entries linked to the same EAN have different categories. Their stock is combined into one inventory entry, retaining the category of the first source entry."
+    "import_reason_ean_category_conflict": "Entries linked to the same EAN have different categories. Their stock is combined into one inventory entry, retaining the category of the first source entry.",
+    "backend_scan_edit_locked": "This scan is already being edited on another device.",
+    "backend_scan_edit_required": "Select “Edit” to take over the scan first.",
+    "backend_scan_session_invalid": "The scan session is no longer valid. Open the scan again.",
+    "actions_article_list_required": "This action requires an enabled shopping or inventory list.",
+    "actions_chip_name_length": "The chip name must contain between 1 and 100 characters.",
+    "actions_rule_name_length": "The exact assignment requires an item name of at most 100 characters.",
+    "actions_exact_rule_required": "Names containing * cannot be assigned exactly here. Use the rule editor instead.",
+    "actions_source_required": "Select exactly one saved article as the source.",
+    "actions_different_list_required": "Select a different target list.",
+    "actions_shopping_target_required": "Select an enabled local shopping list as the target."
   },
   "config_panel": {
     "backup": {
@@ -554,7 +564,7 @@
       "todo_search_filter": "Filters visible tasks by name, description, category, and label as you type. Adding and Enter remain available.",
       "offer_global_categories": "Also offer categories created for all lists.",
       "offer_shared_quick_actions": "Also offer shared quick actions for shopping and inventory lists.",
-      "history_sample_storage": "Stores the state, attributes, and timestamp of every new HA update, even when the value is unchanged. Simply reading an unchanged state at startup does not create an additional data point.",
+      "history_sample_storage": "Stores the state, attributes, and timestamp of every new HA update, even when the value is unchanged. Nothing is recorded during Home Assistant startup.",
       "history_axis_decimals": "Applies only to labels and the smallest possible uniform tick interval on the left chart axis.",
       "inventory_category_grouping": "Groups inventory items into collapsible categories. Off shows one flat list.",
       "select_saved_categories": "Only categories already saved under “Categories” can be selected here.",
@@ -941,7 +951,16 @@
       "minimum_value": "from {value}",
       "fill": "Fill history",
       "record": "Record",
-      "resume": "Resume"
+      "resume": "Resume",
+      "ignore_unavailable": "Do not record unknown and unavailable",
+      "ignore_unavailable_help": "Applies to new live recordings and history imports. Previously saved values are retained.",
+      "recording_saved": "Recording setting saved.",
+      "hide_unavailable": "Hide existing unknown/unavailable values",
+      "hide_unavailable_title": "Hide unknown/unavailable values?",
+      "hide_unavailable_confirm": "Hide all {count} recorded or imported unknown/unavailable values in this archive? Original data is retained. Use “Show hidden values” to restore individual values. Manually added values remain unchanged.",
+      "hide_values": "Hide values",
+      "unavailable_hidden": "{count} unknown/unavailable values hidden.",
+      "ignored_unavailable": "{count} unknown/unavailable values ignored"
     },
     "scripts": {
       "enabled": "Enable script integration",
@@ -1961,7 +1980,21 @@
       "open_target_or_queue": "Open the destination card or process the scan under Scanners → Queue.",
       "scan_processed": "Scan was processed.",
       "waiting_process_here": "Awaiting processing. Open the destination card or process the scan here.",
-      "hardware_requirements": "Real scans currently require the {model} in Bluetooth LE mode together with the Home Assistant integration “Eyoyo EY-015P Barcode Scanner (BLE)”. The connection can use Bluetooth directly or an ESPHome Bluetooth proxy."
+      "hardware_requirements": "Real scans currently require the {model} in Bluetooth LE mode together with the Home Assistant integration “Eyoyo EY-015P Barcode Scanner (BLE)”. The connection can use Bluetooth directly or an ESPHome Bluetooth proxy.",
+      "shared_open": "This scan is also open on another device.",
+      "edit_elsewhere": "Being edited on another device.",
+      "edit_prompt": "Select “Edit” before making changes.",
+      "edit_here": "You are editing this scan.",
+      "lease_lost": "The editing lock was released. Select “Edit” again to continue.",
+      "discard": "Discard scan",
+      "discard_title": "Discard scan?",
+      "discard_help": "This pending scan will be discarded on all devices. Stock will not be changed. The event remains in the scan history.",
+      "discarded": "Scan was discarded.",
+      "resolved_elsewhere": "Scan was completed on another device.",
+      "session_error": "The scan could not be synchronized.",
+      "edit_failed": "The scan cannot be opened for editing right now.",
+      "discard_failed": "The scan could not be discarded.",
+      "no_longer_pending": "This scan is no longer pending."
     },
     "inventory": {
       "no_shortage": "There is currently no shortage.",
@@ -2386,7 +2419,9 @@
       "ean_unknown_manual": "No product data was found for this EAN. You can create the item manually.",
       "local_match_found": "Local product found.",
       "name_multiple_matches": "Several products are named “{p0}”. Select the matching entry.",
-      "loaded_unsaved": "Product data loaded – not saved yet."
+      "loaded_unsaved": "Product data loaded – not saved yet.",
+      "refresh_changes": "Changes from Open Food Facts",
+      "refresh_review": "Empty fields have been filled. Select which existing values to replace. Changes are stored only when you save."
     },
     "labels": {
       "no_own_list_labels": "No labels have been created specifically for this list yet.",
@@ -2505,6 +2540,33 @@
       "ean_recheck": "Check EAN assignments",
       "ean_choice_pending": "Assignment changed. Check the preview again before importing.",
       "ean_result": "{created} EAN products added · {reused} existing products reused"
+    },
+    "quick_actions": {
+      "menu": "Item actions",
+      "send": "Add to another list…",
+      "chip": "Create chip for this list",
+      "rule": "Create category assignment",
+      "title_chip": "Create chip",
+      "title_rule": "Create category assignment",
+      "title_send": "Add to another list",
+      "confirm_chip": "Save “{p0}” as a quick-add chip for “{p1}”?",
+      "confirm_rule": "Always assign “{p0}” to category “{p1}” in “{p2}”?",
+      "local_category_help": "If needed, a category with the same name is created for this list only. Global and list-type categories remain unchanged.",
+      "rule_unavailable": "First select a permanently saved category. This action is unavailable for General and dynamic categories.",
+      "source_unchanged": "The original item and its stock remain unchanged.",
+      "saved_source_note": "The saved item is copied. Please save any changes in the edit dialog first.",
+      "no_targets": "No other local shopping list is available.",
+      "target": "Target list",
+      "choose_target": "Please select a target list.",
+      "quantity_range": "Quantity must be a whole number between 1 and 1,000,000.",
+      "created_chip": "The chip was created for this list.",
+      "existing_chip": "A chip with this name already exists for this list.",
+      "created_rule": "The category assignment was created for this list.",
+      "existing_rule": "This category assignment already exists for this list.",
+      "sent": "Added {p0}× to “{p1}”.",
+      "merged": "Increased the existing item on “{p1}” by {p0}.",
+      "error": "The item action could not be completed.",
+      "create": "Create"
     }
   },
   "exceptions": {
@@ -3233,6 +3295,36 @@
     },
     "import_ean_unresolved": {
       "message": "Resolve the ambiguous EAN assignments in the preview and check them again before importing."
+    },
+    "backend_scan_edit_locked": {
+      "message": "This scan is already being edited on another device."
+    },
+    "backend_scan_edit_required": {
+      "message": "Select “Edit” to take over the scan first."
+    },
+    "backend_scan_session_invalid": {
+      "message": "The scan session is no longer valid. Open the scan again."
+    },
+    "actions_article_list_required": {
+      "message": "This action requires an enabled shopping or inventory list."
+    },
+    "actions_chip_name_length": {
+      "message": "The chip name must contain between 1 and 100 characters."
+    },
+    "actions_rule_name_length": {
+      "message": "The exact assignment requires an item name of at most 100 characters."
+    },
+    "actions_exact_rule_required": {
+      "message": "Names containing * cannot be assigned exactly here. Use the rule editor instead."
+    },
+    "actions_source_required": {
+      "message": "Select exactly one saved article as the source."
+    },
+    "actions_different_list_required": {
+      "message": "Select a different target list."
+    },
+    "actions_shopping_target_required": {
+      "message": "Select an enabled local shopping list as the target."
     }
   }
 }

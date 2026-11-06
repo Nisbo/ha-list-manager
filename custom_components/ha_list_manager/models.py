@@ -414,6 +414,8 @@ class TrackedEntityRecord:
     hidden_count: int = 0
     first_recorded_at: str | None = None
     last_recorded_at: str | None = None
+    ignore_unavailable: bool = True
+    unavailable_count: int = 0
 
     def as_dict(self) -> dict[str, Any]:
         """Return a JSON-serializable representation."""

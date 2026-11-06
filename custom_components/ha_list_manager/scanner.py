@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import asynccontextmanager
 from dataclasses import replace
+from time import monotonic
+from uuid import uuid4
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
@@ -13,6 +16,7 @@ from .localization import async_prepare, text as localized_text
 from .const import (
     EVENT_INVENTORY_CHANGED,
     EVENT_ITEMS_CHANGED,
+    EVENT_LISTS_CHANGED,
     EVENT_SCAN_PROCESSED,
     EVENT_SCANNER_TARGET_CHANGED,
     SCANNER_ACTIONS,
@@ -82,6 +86,15 @@ class ScannerManager:
         self.database = database
         self.config_entry = config_entry
         self._unsubscribe = None
+        self._scan_views: dict[str, dict[str, dict[str, Any]]] = {}
+        self._scan_editors: dict[str, dict[str, Any]] = {}
+        self._scan_operations: dict[str, list[Any]] = {}
+        self._collaboration_task: asyncio.Task | None = None
+        self._offer_tasks: set[asyncio.Task] = set()
+        self._lease_seconds = 45
+        self._collaboration_revision = 0
+        self._collaboration_epoch = str(uuid4())
+        self._scan_connection_callbacks: dict[tuple[int, str], tuple[Any, Any, Any]] = {}
 
     async def async_start(self) -> None:
         """Start the single backend event listener."""
@@ -95,6 +108,234 @@ class ScannerManager:
         if self._unsubscribe is not None:
             self._unsubscribe()
             self._unsubscribe = None
+
+        tasks = [task for task in [self._collaboration_task, *self._offer_tasks] if task]
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        self._collaboration_task = None
+        self._offer_tasks.clear()
+        self._scan_views.clear()
+        self._scan_editors.clear()
+        for connection, key, callback in self._scan_connection_callbacks.values():
+            subscriptions = getattr(connection, "subscriptions", {})
+            if subscriptions.get(key) is callback:
+                subscriptions.pop(key, None)
+        self._scan_connection_callbacks.clear()
+
+    @asynccontextmanager
+    async def _scan_operation(self, scan_id: str):
+        # One operation spans validation, booking and completion. A discard
+        # cannot slip between a successful claim and the actual stock change.
+        operation = self._scan_operations.setdefault(scan_id, [asyncio.Lock(), 0])
+        operation[1] += 1
+        try:
+            async with operation[0]:
+                yield
+        finally:
+            operation[1] -= 1
+            if not operation[1]:
+                self._scan_operations.pop(scan_id, None)
+
+    def _forget_idle_scan_session(self, connection: Any, session_id: str, *, closed: bool = False) -> None:
+        if any(view.get(session_id, {}).get("connection") is connection for view in self._scan_views.values()):
+            return
+        owned = self._scan_connection_callbacks.pop((id(connection), session_id), None)
+        if owned is not None and not closed:
+            _, key, callback = owned
+            subscriptions = getattr(connection, "subscriptions", {})
+            if subscriptions.get(key) is callback:
+                subscriptions.pop(key, None)
+
+    def _clear_scan_sessions(self, scan_id: str) -> None:
+        views = self._scan_views.pop(scan_id, {})
+        self._scan_editors.pop(scan_id, None)
+        for session_id, view in views.items():
+            self._forget_idle_scan_session(view["connection"], session_id)
+
+    def _prune_scan_sessions(self, scan_id: str) -> None:
+        now = monotonic()
+        views = self._scan_views.get(scan_id, {})
+        for session, view in tuple(views.items()):
+            response = getattr(view["connection"], "ws_response", None)
+            if view["expires"] <= now or getattr(response, "closed", False) is True:
+                del views[session]
+                self._forget_idle_scan_session(view["connection"], session)
+        if not views:
+            self._scan_views.pop(scan_id, None)
+        editor = self._scan_editors.get(scan_id)
+        if editor and (editor["expires"] <= now or editor["session_id"] not in views):
+            self._scan_editors.pop(scan_id, None)
+
+    def _scan_collaboration(self, scan_id: str) -> dict[str, Any]:
+        editor = self._scan_editors.get(scan_id)
+        return {"viewers": len(self._scan_views.get(scan_id, {})),
+                "editor_session": editor["session_id"] if editor else None,
+                "lease_seconds": self._lease_seconds,
+                "revision": self._collaboration_revision, "epoch": self._collaboration_epoch}
+
+    def _scan_payload(self, record: ScanHistoryRecord) -> dict[str, Any]:
+        return {**record.as_dict(), "queued": record.status in {"queued", "offered", "needs_input", "processing"},
+                "collaboration": self._scan_collaboration(record.id)}
+
+    def _emit_scan_update(self, record: ScanHistoryRecord) -> dict[str, Any]:
+        self._collaboration_revision += 1
+        payload = {**self._scan_payload(record), "collaboration_update": True}
+        self.hass.bus.async_fire(EVENT_SCAN_PROCESSED, payload)
+        return payload
+
+    def _register_scan_view(self, scan_id: str, session_id: str, connection: Any) -> None:
+        views = self._scan_views.setdefault(scan_id, {})
+        existing = views.get(session_id)
+        if existing and existing["connection"] is not connection:
+            raise ValueError(localized_text("backend.scan_session_invalid"))
+        views[session_id] = {"connection": connection, "expires": monotonic() + self._lease_seconds}
+        subscriptions = getattr(connection, "subscriptions", None)
+        key = ("ha_list_manager", "scan-session", session_id)
+        if subscriptions is not None and key not in subscriptions:
+            # ActiveConnection invokes subscription callbacks on disconnect.
+            # Keep its dictionary untouched while HA iterates those callbacks.
+            def closed() -> None:
+                self.hass.async_create_task(self._close_scan_connection(connection, session_id))
+            subscriptions[key] = closed
+            self._scan_connection_callbacks[(id(connection), session_id)] = (connection, key, closed)
+        if self._collaboration_task is None or self._collaboration_task.done():
+            self._collaboration_task = asyncio.create_task(self._expire_scan_sessions())
+
+    async def _close_scan_connection(self, connection: Any, session_id: str) -> None:
+        for scan_id in tuple(self._scan_views):
+            async with self._scan_operation(scan_id):
+                views = self._scan_views.get(scan_id, {})
+                view = views.get(session_id)
+                if view is None or view["connection"] is not connection:
+                    continue
+                del views[session_id]
+                if not views:
+                    self._scan_views.pop(scan_id, None)
+                editor = self._scan_editors.get(scan_id)
+                if editor and editor["session_id"] == session_id:
+                    self._scan_editors.pop(scan_id, None)
+                record = await self.database.async_get_scan_history_record(scan_id)
+                if record:
+                    self._emit_scan_update(record)
+        # Do not mutate ActiveConnection.subscriptions from its close callback;
+        # HA may still be iterating it when this coroutine starts eagerly.
+        self._forget_idle_scan_session(connection, session_id, closed=True)
+
+    async def _pending_scan(self, scan_id: str) -> ScanHistoryRecord:
+        record = await self.database.async_get_scan_history_record(scan_id)
+        if record is None or record.status not in {"queued", "offered", "needs_input"}:
+            raise ValueError(localized_text("backend.scan_already_handled"))
+        return record
+
+    async def _expire_scan_sessions(self) -> None:
+        while self._scan_views or self._scan_editors:
+            await asyncio.sleep(5)
+            for scan_id in tuple(set(self._scan_views) | set(self._scan_editors)):
+                async with self._scan_operation(scan_id):
+                    previous = self._scan_collaboration(scan_id)
+                    self._prune_scan_sessions(scan_id)
+                    if previous == self._scan_collaboration(scan_id):
+                        continue
+                    record = await self.database.async_get_scan_history_record(scan_id)
+                    if record:
+                        self._emit_scan_update(record)
+
+    async def async_pending_scans(self, list_id: str | None = None) -> list[dict[str, Any]]:
+        records = await self.database.async_list_pending_scans()
+        scans = []
+        for record in records:
+            if list_id is not None and record.list_id != list_id:
+                continue
+            async with self._scan_operation(record.id):
+                # The initial query can overlap a completion. Never stamp its
+                # stale pending row with a newer collaboration revision.
+                current = await self.database.async_get_scan_history_record(record.id)
+                if current and current.status in {"queued", "offered", "needs_input", "processing"}:
+                    previous = self._scan_collaboration(record.id)
+                    self._prune_scan_sessions(record.id)
+                    if previous != self._scan_collaboration(record.id):
+                        scans.append(self._emit_scan_update(current))
+                    else:
+                        scans.append(self._scan_payload(current))
+        return scans
+
+    async def async_view_pending_scan(self, scan_id: str, session_id: str, connection: Any, opened: bool = True) -> dict[str, Any]:
+        async with self._scan_operation(scan_id):
+            record = await self.database.async_get_scan_history_record(scan_id)
+            if record is None:
+                raise ValueError(localized_text("backend.scan_already_handled"))
+            previous = self._scan_collaboration(scan_id)
+            self._prune_scan_sessions(scan_id)
+            if opened:
+                if record.status not in {"queued", "offered", "needs_input"}:
+                    raise ValueError(localized_text("backend.scan_already_handled"))
+                self._register_scan_view(scan_id, session_id, connection)
+                editor = self._scan_editors.get(scan_id)
+                if editor and editor["session_id"] == session_id:
+                    editor["expires"] = monotonic() + self._lease_seconds
+            else:
+                view = self._scan_views.get(scan_id, {}).get(session_id)
+                if view and view["connection"] is not connection:
+                    raise ValueError(localized_text("backend.scan_session_invalid"))
+                self._scan_views.get(scan_id, {}).pop(session_id, None)
+                editor = self._scan_editors.get(scan_id)
+                if editor and editor["session_id"] == session_id:
+                    self._scan_editors.pop(scan_id, None)
+                if not self._scan_views.get(scan_id):
+                    self._scan_views.pop(scan_id, None)
+                self._forget_idle_scan_session(connection, session_id)
+            if previous != self._scan_collaboration(scan_id):
+                self._emit_scan_update(record)
+            return self._scan_payload(record)
+
+    async def async_edit_pending_scan(self, scan_id: str, session_id: str, connection: Any) -> dict[str, Any]:
+        async with self._scan_operation(scan_id):
+            record = await self._pending_scan(scan_id)
+            self._prune_scan_sessions(scan_id)
+            self._register_scan_view(scan_id, session_id, connection)
+            editor = self._scan_editors.get(scan_id)
+            if editor and (editor["session_id"] != session_id or editor["connection"] is not connection):
+                raise ValueError(localized_text("backend.scan_edit_locked"))
+            self._scan_editors[scan_id] = {"session_id": session_id, "connection": connection,
+                                          "expires": monotonic() + self._lease_seconds}
+            return self._emit_scan_update(record)
+
+    async def async_release_pending_scan(self, scan_id: str, session_id: str, connection: Any) -> dict[str, Any]:
+        async with self._scan_operation(scan_id):
+            record = await self.database.async_get_scan_history_record(scan_id)
+            if record is None:
+                raise ValueError(localized_text("backend.scan_already_handled"))
+            self._prune_scan_sessions(scan_id)
+            view = self._scan_views.get(scan_id, {}).get(session_id)
+            if view and view["connection"] is not connection:
+                raise ValueError(localized_text("backend.scan_session_invalid"))
+            editor = self._scan_editors.get(scan_id)
+            if editor and editor["session_id"] == session_id:
+                self._scan_editors.pop(scan_id, None)
+                self._emit_scan_update(record)
+            return self._scan_payload(record)
+
+    def _require_scan_editor(self, scan_id: str, session_id: str | None, connection: Any) -> None:
+        self._prune_scan_sessions(scan_id)
+        editor = self._scan_editors.get(scan_id)
+        if session_id is None and connection is None:
+            return  # Trusted internal calls and existing backend tests.
+        if session_id is None and getattr(getattr(connection, "user", None), "is_admin", False) and not editor:
+            return  # Old administration clients may resolve only an unlocked scan.
+        if not editor or editor["session_id"] != session_id or editor["connection"] is not connection:
+            raise ValueError(localized_text("backend.scan_edit_required"))
+
+    async def async_discard_pending_scan(self, scan_id: str, *, session_id: str | None = None, connection: Any = None) -> dict[str, Any]:
+        async with self._scan_operation(scan_id):
+            record = await self._pending_scan(scan_id)
+            self._prune_scan_sessions(scan_id)
+            if session_id is not None:
+                self._register_scan_view(scan_id, session_id, connection)
+            await self.database.async_finish_pending_scan(scan_id, "dismissed", localized_text("backend.queued_scan_discarded"))
+            self._clear_scan_sessions(scan_id)
+            return self._emit_scan_update(replace(record, status="dismissed", message=localized_text("backend.queued_scan_discarded")))
 
     @callback
     def _handle_scanner_event(self, event: Event) -> None:
@@ -315,10 +556,13 @@ class ScannerManager:
                 category=None,
                 image_url=product.image_url,
                 label_ids=product_label_ids,
+                list_id=target_list_id,
             )
+            self.hass.bus.async_fire(EVENT_LISTS_CHANGED, {"list_id": None})
 
         entry = next((item for item in entries if item.product_id == product.id), None)
         before = entry.stock if entry else None
+        booking_after = None
         message = None
 
         # Existing stock changes are safe to apply headlessly. New inventory
@@ -345,7 +589,9 @@ class ScannerManager:
                 message=review_message,
                 event_extra={"queued": True, "product": product.as_dict()},
             )
-            self.hass.async_create_task(self._async_queue_unclaimed_offer(history.id))
+            task = self.hass.async_create_task(self._async_queue_unclaimed_offer(history.id))
+            self._offer_tasks.add(task)
+            task.add_done_callback(self._offer_tasks.discard)
             return {
                 "history": history.as_dict(), "product": product.as_dict(),
                 "entry": entry.as_dict() if entry else None, "offered": True,
@@ -355,7 +601,13 @@ class ScannerManager:
             if target_action == "add":
                 if entry:
                     if resolved_stock is None:
-                        adjustment = await self.database.async_adjust_inventory_with_restock(entry.id, quantity)
+                        adjustment = await self.database.async_adjust_inventory_with_restock(
+                            entry.id, quantity, minimum_stock=minimum_stock,
+                            restock_quantity=restock_quantity, restock_mode=restock_mode,
+                            category_id=category_id, category=category,
+                        )
+                        before = adjustment["stock_before"]
+                        booking_after = adjustment["stock_after"]
                         entry = next(
                             item for item in await self.database.async_list_inventory(target_list_id)
                             if item.id == entry.id
@@ -391,7 +643,13 @@ class ScannerManager:
                     )
                     return {"history": history.as_dict(), "product": product.as_dict()}
                 if resolved_stock is None:
-                    adjustment = await self.database.async_adjust_inventory_with_restock(entry.id, -quantity)
+                    adjustment = await self.database.async_adjust_inventory_with_restock(
+                        entry.id, -quantity, minimum_stock=minimum_stock,
+                        restock_quantity=restock_quantity, restock_mode=restock_mode,
+                        category_id=category_id, category=category,
+                    )
+                    before = adjustment["stock_before"]
+                    booking_after = adjustment["stock_after"]
                     if adjustment.get("transfer"):
                         self.hass.bus.async_fire(
                             EVENT_ITEMS_CHANGED,
@@ -479,7 +737,13 @@ class ScannerManager:
             # while silently dropping its quantity.
             before = entry.stock
             if target_action == "add" and resolved_stock is None:
-                adjustment = await self.database.async_adjust_inventory_with_restock(entry.id, quantity)
+                adjustment = await self.database.async_adjust_inventory_with_restock(
+                    entry.id, quantity, minimum_stock=minimum_stock,
+                    restock_quantity=restock_quantity, restock_mode=restock_mode,
+                    category_id=category_id, category=category,
+                )
+                before = adjustment["stock_before"]
+                booking_after = adjustment["stock_after"]
                 entry = next(
                     item for item in await self.database.async_list_inventory(target_list_id)
                     if item.id == entry.id
@@ -500,7 +764,9 @@ class ScannerManager:
             else:
                 message = localized_text("backend.product_already_registered")
 
-        if entry and ((category_id is not None and category_id != entry.category_id) or (category is not None and category != entry.category_name)):
+        # Delta bookings already saved these options atomically. Re-saving their
+        # old stock snapshot here could overwrite another concurrent scan.
+        if entry and booking_after is None and ((category_id is not None and category_id != entry.category_id) or (category is not None and category != entry.category_name)):
             entry = await self.database.async_update_inventory_entry(
                 entry.id, stock=entry.stock, minimum_stock=entry.minimum_stock,
                 restock_quantity=restock_quantity,
@@ -510,7 +776,7 @@ class ScannerManager:
                 hidden=entry.hidden,
             )
 
-        after = entry.stock if entry else before
+        after = booking_after if booking_after is not None else entry.stock if entry else before
         self.hass.bus.async_fire(
             EVENT_INVENTORY_CHANGED,
             {"list_id": target_list_id, "entry_id": entry.id if entry else None},
@@ -597,11 +863,35 @@ class ScannerManager:
         await asyncio.sleep(1.5)
         queued = await self.database.async_queue_offered_scan(scan_id)
         if queued is not None:
-            self.hass.bus.async_fire(
-                EVENT_SCAN_PROCESSED, {**queued.as_dict(), "queued": True}
-            )
+            self._emit_scan_update(queued)
 
     async def async_resolve_pending_scan(
+        self, scan_id: str, *, session_id: str | None = None, connection: Any = None,
+        **details: Any,
+    ) -> dict[str, Any]:
+        """Serialize completion against discard and require the current editor."""
+        async with self._scan_operation(scan_id):
+            await self._pending_scan(scan_id)
+            self._require_scan_editor(scan_id, session_id, connection)
+            result = await self._async_apply_pending_scan(scan_id, **details)
+            record = await self.database.async_get_scan_history_record(scan_id)
+            if record and record.status == "resolved":
+                self._clear_scan_sessions(scan_id)
+            if record:
+                self._collaboration_revision += 1
+                payload = self._scan_payload(record)
+                outcome = result.get("history", {})
+                if record.status == "resolved":
+                    for key in ("stock_before", "stock_after", "product_id", "product_name", "inventory_entry_id", "quantity", "action"):
+                        if key in outcome:
+                            payload[key] = outcome[key]
+                    payload["resolved_history_id"] = outcome.get("id")
+                    if result.get("transfer"):
+                        payload["transfer"] = result["transfer"]
+                self.hass.bus.async_fire(EVENT_SCAN_PROCESSED, payload)
+            return result
+
+    async def _async_apply_pending_scan(
         self, scan_id: str, *, corrected_stock: int | None = None,
         minimum_stock: int | None = None,
         restock_quantity: int | None = None,
@@ -629,6 +919,12 @@ class ScannerManager:
                     EVENT_ITEMS_CHANGED, {"list_id": transfer["target_list_id"]}
                 )
                 return {"history": {**pending.as_dict(), "status": "success"}, "transfer": transfer}
+            # The dialog's untouched default expresses this scan's addition,
+            # not an absolute correction. Another queued scan of the same EAN
+            # may already have increased stock while this dialog was open.
+            resolved_stock = corrected_stock if pending.action != "correct" else None
+            if pending.action == "add" and corrected_stock == (pending.stock_before or 0) + pending.quantity:
+                resolved_stock = None
             result = await self.async_process_scan(
                 ean=pending.ean,
                 address=pending.scanner_address,
@@ -638,7 +934,7 @@ class ScannerManager:
                 action=pending.action,
                 quantity=pending.quantity,
                 corrected_stock=corrected_stock if pending.action == "correct" else None,
-                resolved_stock=corrected_stock if pending.action != "correct" else None,
+                resolved_stock=resolved_stock,
                 minimum_stock=minimum_stock,
                 restock_quantity=restock_quantity,
                 restock_mode=restock_mode,

@@ -70,7 +70,7 @@ function haListManagerPanelTextRequest(hass, message) {
   return hass.callWS(message.type?.startsWith("ha_list_manager/") ? { ...message, language: haListManagerPanelTextLanguage(hass) } : message);
 }
 
-const PANEL_VERSION = "1.0.0b5";
+const PANEL_VERSION = "1.0.0b6";
 const GROUP_PICKER_RESULT_LIMIT = 100;
 const API = "ha_list_manager";
 const ITEMS_EVENT = "ha_list_manager_items_changed";
@@ -199,6 +199,7 @@ class HaListManagerPanel extends HTMLElement {
     this._inventoryRestockPreview = [];
     this._trackedEntities = [];
     this._entityHistoryCandidate = "";
+    this._entityHistoryIgnoreUnavailable = true;
     this._entityHistoryTab = "add";
     this._entityHistorySearch = "";
     this._entityHistoryImportOptions = { start: "", end: "", recorder: true, statistics: false };
@@ -211,6 +212,12 @@ class HaListManagerPanel extends HTMLElement {
     this._scanHistoryLoaded = false;
     this._scanHistoryLoading = false;
     this._pendingScans = [];
+    this._scanSessionId = globalThis.crypto?.randomUUID?.() || `panel-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    this._finishedScanIds = new Set();
+    this._scanCollaborationVersions = new Map();
+    this._pendingScanPresenceTimer = null;
+    this._viewedPendingScanId = null;
+    this._pendingScanNotice = "";
     this._scanHistoryTab = null;
     this._scanHistoryPage = 1;
     this._scanHistoryPageSize = 100;
@@ -254,6 +261,7 @@ class HaListManagerPanel extends HTMLElement {
       this._ensureLoaded();
       this._ensureLovelaceSubscription();
       this._ensureItemsSubscription();
+      this._ensureScannerSubscription();
     }
 
     if (translationsChanged) this._render();
@@ -275,6 +283,13 @@ class HaListManagerPanel extends HTMLElement {
     this._ensureLoaded();
     this._ensureLovelaceSubscription();
     this._ensureItemsSubscription();
+    this._ensureScannerSubscription();
+    const pendingDialog = this._pendingScanDialog();
+    if (pendingDialog && !this._viewedPendingScanId) {
+      pendingDialog.scan_sync_error = true;
+      this._startPendingScanPresence(pendingDialog.pendingScan.id);
+      this._refreshPendingScanPresence();
+    }
     if (!this._bringRefreshTimer) {
       this._bringRefreshTimer = setInterval(() => {
         const list = this._findList(this._selectedListId);
@@ -285,6 +300,11 @@ class HaListManagerPanel extends HTMLElement {
   }
 
   disconnectedCallback() {
+    this._stopPendingScanPresence();
+    this._unsubscribeScanner?.();
+    this._unsubscribeScanner = null;
+    this._scannerSubscriptionToken = null;
+    this._scannerSubscriptionRequested = false;
     if (this._backupDownload) URL.revokeObjectURL(this._backupDownload.url);
     this._backupDownload = null;
     clearTimeout(this._productSearchTimer);
@@ -319,6 +339,157 @@ class HaListManagerPanel extends HTMLElement {
       else unsubscribe();
     } catch (_error) {
       if (this._itemsSubscriptionToken === token) this._itemsSubscriptionRequested = false;
+    }
+  }
+
+  async _ensureScannerSubscription() {
+    if (!this._hass?.connection || this._scannerSubscriptionRequested) return;
+    this._scannerSubscriptionRequested = true;
+    const token = this._scannerSubscriptionToken = {};
+    try {
+      const unsubscribe = await this._hass.connection.subscribeEvents((event) => {
+        if (this.isConnected && this._scannerSubscriptionToken === token) this._receivePendingScan(event.data || {});
+      }, "ha_list_manager_scan_processed");
+      if (this.isConnected && this._scannerSubscriptionToken === token) this._unsubscribeScanner = unsubscribe;
+      else unsubscribe();
+    } catch (_error) {
+      if (this._scannerSubscriptionToken === token) this._scannerSubscriptionRequested = false;
+    }
+  }
+
+  _pendingScanDialog() {
+    for (let dialog = this._dialog; dialog; dialog = dialog.return_dialog) {
+      if (dialog.pendingScan) return dialog;
+    }
+    return null;
+  }
+
+  _canEditPendingScan(dialog = this._pendingScanDialog()) {
+    return Boolean(dialog?.pendingScan?.collaboration?.editor_session === this._scanSessionId && !dialog.scan_sync_error);
+  }
+
+  _pendingScanCollaborationText(dialog = this._pendingScanDialog()) {
+    const collaboration = dialog?.pendingScan?.collaboration || {};
+    const lines = [];
+    if (Number(collaboration.viewers) > 1) lines.push(haListManagerPanelText("scanner.shared_open", {}, this._hass));
+    const key = dialog?.scan_sync_error ? "session_error" : this._canEditPendingScan(dialog) ? "edit_here"
+      : collaboration.editor_session ? "edit_elsewhere" : dialog?.scan_lease_lost ? "lease_lost" : "edit_prompt";
+    lines.push(haListManagerPanelText(`scanner.${key}`, {}, this._hass));
+    return lines.join(" ");
+  }
+
+  _updatePendingScanControls() {
+    const dialog = this._pendingScanDialog();
+    if (!dialog) return;
+    const editing = this._canEditPendingScan(dialog);
+    const fields = this.shadowRoot.querySelector("[data-pending-scan-fields]");
+    if (fields) { fields.disabled = !editing; fields.inert = !editing; }
+    const hint = this.shadowRoot.querySelector("[data-pending-scan-collaboration]");
+    if (hint) hint.textContent = this._pendingScanCollaborationText(dialog);
+    const edit = this.shadowRoot.querySelector("[data-take-pending-scan]");
+    if (edit) {
+      edit.hidden = editing;
+      edit.disabled = Boolean(this._busy || dialog.scan_claiming || dialog.pendingScan.collaboration?.editor_session && !editing);
+    }
+    const save = this.shadowRoot.querySelector("[data-save-inventory]");
+    if (save) save.disabled = !editing || this._busy;
+  }
+
+  _updatePendingScanQueueLabel() {
+    const tab = this.shadowRoot.querySelector('[data-history-tab="queue"]');
+    const text = Array.from(tab?.childNodes || []).find((node) => node.nodeType === 3);
+    if (text) text.textContent = haListManagerPanelText("scanner.queue_with_suffix", { p0: this._pendingScans.length ? ` (${this._pendingScans.length})` : "" }, this._hass);
+  }
+
+  _receivePendingScan(scan) {
+    if (!scan?.id) return;
+    const terminal = ["resolved", "dismissed"].includes(scan.status);
+    if (!terminal && this._finishedScanIds.has(scan.id)) return;
+    const collaboration = scan.collaboration;
+    const previousVersion = this._scanCollaborationVersions.get(scan.id);
+    if (!terminal && collaboration?.epoch && Number.isFinite(collaboration.revision)) {
+      if (previousVersion?.epoch === collaboration.epoch && previousVersion.revision > collaboration.revision) return;
+      this._scanCollaborationVersions.set(scan.id, { epoch: collaboration.epoch, revision: collaboration.revision });
+    }
+    const index = this._pendingScans.findIndex((item) => item.id === scan.id);
+    if (terminal) {
+      this._finishedScanIds.add(scan.id);
+      this._scanCollaborationVersions.delete(scan.id);
+      if (this._finishedScanIds.size > 200) this._finishedScanIds.delete(this._finishedScanIds.values().next().value);
+      if (index !== -1) this._pendingScans.splice(index, 1);
+      this._updatePendingScanQueueLabel();
+      const dialog = this._pendingScanDialog();
+      const matchingConfirmation = this._dialog?.kind === "discard-pending-scan" && this._dialog.scan_id === scan.id;
+      if (dialog?.pendingScan.id === scan.id || matchingConfirmation) {
+        this._stopPendingScanPresence(scan.id);
+        this._dialog = null;
+        this._error = "";
+        this._pendingScanNotice = haListManagerPanelText(scan.status === "dismissed" ? "scanner.discarded" : this._savingPendingScanId === scan.id ? "scanner.scan_processed" : "scanner.resolved_elsewhere", {}, this._hass);
+        this._render();
+      } else if (!this._dialog && this._activeSection === "history" && ["queue", "history"].includes(this._scanHistoryTab)) this._render();
+      this._scanHistoryLoaded = false;
+      return;
+    }
+    if (!["queued", "offered", "needs_input", "processing"].includes(scan.status)) return;
+    if (index === -1) this._pendingScans.unshift(scan);
+    else this._pendingScans[index] = { ...this._pendingScans[index], ...scan };
+    this._updatePendingScanQueueLabel();
+    const dialog = this._pendingScanDialog();
+    if (dialog?.pendingScan.id === scan.id) {
+      const wasEditing = this._canEditPendingScan(dialog);
+      dialog.pendingScan = { ...dialog.pendingScan, ...scan };
+      dialog.scan_sync_error = false;
+      if (wasEditing && !this._canEditPendingScan(dialog)) dialog.scan_lease_lost = true;
+      this._updatePendingScanControls();
+    } else if (!this._dialog && this._activeSection === "history" && this._scanHistoryTab === "queue") this._render();
+  }
+
+  async _refreshPendingScanPresence() {
+    const scanId = this._viewedPendingScanId;
+    if (!scanId || !this._hass) return;
+    try {
+      const result = await haListManagerPanelTextRequest(this._hass, {
+        type: `${API}/scanner/queue/view`, scan_id: scanId, session_id: this._scanSessionId, open: true,
+      });
+      if (this._viewedPendingScanId === scanId && result.scan) this._receivePendingScan(result.scan);
+    } catch (_error) {
+      const dialog = this._pendingScanDialog();
+      if (dialog?.pendingScan.id === scanId) { dialog.scan_sync_error = true; this._updatePendingScanControls(); }
+    }
+  }
+
+  _startPendingScanPresence(scanId) {
+    this._stopPendingScanPresence();
+    this._viewedPendingScanId = scanId;
+    this._pendingScanPresenceTimer = setInterval(() => this._refreshPendingScanPresence(), 10000);
+  }
+
+  _stopPendingScanPresence(expectedScanId = null) {
+    const scanId = this._viewedPendingScanId;
+    if (expectedScanId && scanId !== expectedScanId) return;
+    this._viewedPendingScanId = null;
+    clearInterval(this._pendingScanPresenceTimer);
+    this._pendingScanPresenceTimer = null;
+    if (scanId && this._hass) haListManagerPanelTextRequest(this._hass, {
+      type: `${API}/scanner/queue/view`, scan_id: scanId, session_id: this._scanSessionId, open: false,
+    }).catch(() => {});
+  }
+
+  async _takePendingScan() {
+    const dialog = this._pendingScanDialog();
+    if (!dialog || this._busy || dialog.scan_claiming) return;
+    dialog.scan_claiming = true;
+    this._updatePendingScanControls();
+    try {
+      const result = await haListManagerPanelTextRequest(this._hass, {
+        type: `${API}/scanner/queue/edit`, scan_id: dialog.pendingScan.id, session_id: this._scanSessionId,
+      });
+      if (this._pendingScanDialog() === dialog && result.scan) this._receivePendingScan(result.scan);
+    } catch (error) {
+      if (this._pendingScanDialog() === dialog) { this._error = this._formatError(error); this._render(); }
+    } finally {
+      dialog.scan_claiming = false;
+      if (this._pendingScanDialog() === dialog) this._updatePendingScanControls();
     }
   }
 
@@ -879,6 +1050,10 @@ class HaListManagerPanel extends HTMLElement {
         <ha-icon icon="${icon}"></ha-icon><span>${label}</span>
       </button>`).join("");
     const content = this._renderContent();
+    const pendingScanPanel = this.shadowRoot.querySelector("[data-pending-scan-fields]")?.closest?.("[data-dialog-panel]");
+    if (pendingScanPanel && this._pendingScanDialog()) this._pendingScanDialog().panel_scroll_top = pendingScanPanel.scrollTop;
+    const previousSamplesPanel = this.shadowRoot.querySelector(".entity-samples-dialog");
+    if (previousSamplesPanel && this._dialog?.kind === "entity-samples") this._dialog.panel_scroll_top = previousSamplesPanel.scrollTop;
     this.shadowRoot.innerHTML = `
       <style>${this._styles()}</style>
       <div class="page">
@@ -896,9 +1071,16 @@ class HaListManagerPanel extends HTMLElement {
     }));
     this._bindEvents();
     this._initializeRenderedComponents();
+    this._updatePendingScanControls();
+    const restoredScanPanel = this.shadowRoot.querySelector("[data-pending-scan-fields]")?.closest?.("[data-dialog-panel]");
+    if (restoredScanPanel && this._pendingScanDialog()) restoredScanPanel.scrollTop = this._pendingScanDialog().panel_scroll_top || 0;
     this._setPageScrollLocked(Boolean(this._dialog));
     const samplesList = this.shadowRoot.querySelector(".entity-samples-list");
-    if (samplesList && this._dialog?.kind === "entity-samples") samplesList.scrollTop = this._dialog.scroll_top || 0;
+    if (samplesList && this._dialog?.kind === "entity-samples") {
+      samplesList.scrollTop = this._dialog.scroll_top || 0;
+      const samplesPanel = this.shadowRoot.querySelector(".entity-samples-dialog");
+      if (samplesPanel) samplesPanel.scrollTop = this._dialog.panel_scroll_top || 0;
+    }
 
   }
 
@@ -1150,7 +1332,7 @@ class HaListManagerPanel extends HTMLElement {
     }).join("");
     const header = `${this._heading("mdi:database-clock-outline", haListManagerPanelText("ui.entity_inventory", {}, this._hass), haListManagerPanelText("help.history_independent_storage", {}, this._hass))}<div class="scan-history-tabs label-tabs" role="tablist">${[["add", "mdi:database-plus-outline", haListManagerPanelText("history.tab_add", {}, this._hass)], ["manage", "mdi:table-cog", haListManagerPanelText("history.tab_manage", {}, this._hass)]].map(([id, icon, label]) => `<button type="button" role="tab" data-entity-history-tab="${id}" class="${this._entityHistoryTab === id ? "active" : ""}" aria-selected="${this._entityHistoryTab === id}"><ha-icon icon="${icon}"></ha-icon>${label}${id === "manage" ? `<span>${this._trackedEntities.length}</span>` : ""}</button>`).join("")}</div>${this._inlineError()}`;
     if (this._entityHistoryTab === "add") return `${header}<ha-card class="entity-history-intro"><div><strong>${haListManagerPanelText("ui.unchanged_original_values", {}, this._hass)}</strong><p>${haListManagerPanelText("help.history_sample_storage", {}, this._hass)}</p></div></ha-card>
-      <ha-card class="entity-history-add"><ha-entity-picker data-entity-history-picker></ha-entity-picker><button class="ha-button primary" type="button" data-add-entity-history><ha-icon icon="mdi:database-plus-outline"></ha-icon>${haListManagerPanelText("history.record", {}, this._hass)}</button></ha-card>`;
+      <ha-card class="entity-history-add"><ha-entity-picker data-entity-history-picker></ha-entity-picker><button class="ha-button primary" type="button" data-add-entity-history ${this._busy ? "disabled" : ""}><ha-icon icon="mdi:database-plus-outline"></ha-icon>${haListManagerPanelText("history.record", {}, this._hass)}</button>${this._renderEntityRecordingOption(this._entityHistoryIgnoreUnavailable, true)}</ha-card>`;
     return `${header}<div class="search-field"><ha-icon icon="mdi:magnify"></ha-icon><input type="search" data-entity-history-search aria-label="${haListManagerPanelText("history.search_entities", {}, this._hass)}" placeholder="${haListManagerPanelText("history.search_entities", {}, this._hass)}" value="${this._escape(this._entityHistorySearch)}"></div>
       <ha-card class="entity-history-list" data-entity-history-list ${this._trackedEntities.some(matches) ? "" : "hidden"}>${rows}</ha-card>
       <ha-card class="empty-state compact" data-entity-history-empty ${this._trackedEntities.some(matches) ? "hidden" : ""}><ha-icon icon="mdi:database-clock-outline"></ha-icon><h3>${this._trackedEntities.length ? haListManagerPanelText("history.no_matching_entities", {}, this._hass) : haListManagerPanelText("history.no_entity_selected", {}, this._hass)}</h3></ha-card>`;
@@ -1167,6 +1349,76 @@ class HaListManagerPanel extends HTMLElement {
     if (list) list.hidden = !visible;
     const empty = this.shadowRoot.querySelector("[data-entity-history-empty]");
     if (empty) empty.hidden = Boolean(visible);
+  }
+
+  _renderEntityRecordingOption(ignoreUnavailable, adding = false) {
+    return `<label class="entity-history-recording-option"><input type="checkbox" ${adding ? "data-add-history-ignore-unavailable" : "data-history-ignore-unavailable"} ${ignoreUnavailable !== false ? "checked" : ""} ${this._busy ? "disabled" : ""}><span>${haListManagerPanelText("history.ignore_unavailable", {}, this._hass)}<small>${haListManagerPanelText("history.ignore_unavailable_help", {}, this._hass)}</small></span></label>`;
+  }
+
+  async _setEntityRecordingFilter(ignoreUnavailable) {
+    const dialog = this._dialog;
+    const record = this._trackedEntities.find((item) => item.entity_id === dialog?.entity_id);
+    if (this._busy || dialog?.kind !== "entity-samples" || !record) return;
+    this._busy = true;
+    dialog.error = "";
+    dialog.status = "";
+    this._render();
+    try {
+      const result = await haListManagerPanelTextRequest(this._hass, { type: `${API}/entity_history/set`, entity_id: record.entity_id,
+        enabled: Boolean(record.enabled), ignore_unavailable: Boolean(ignoreUnavailable) });
+      if (this._dialog !== dialog) return;
+      Object.assign(record, result.entity);
+      dialog.status = haListManagerPanelText("history.recording_saved", {}, this._hass);
+    } catch (error) {
+      if (this._dialog === dialog) dialog.error = this._formatError(error);
+    } finally {
+      this._busy = false;
+      if (this._dialog === dialog) {
+        this._render();
+        this.shadowRoot.querySelector("[data-history-ignore-unavailable]")?.focus({ preventScroll: true });
+      }
+    }
+  }
+
+  _openHideUnavailableSamples() {
+    const parent = this._dialog;
+    const record = this._trackedEntities.find((item) => item.entity_id === parent?.entity_id);
+    if (this._busy || parent?.kind !== "entity-samples" || !record?.unavailable_count) return;
+    const panel = this.shadowRoot.querySelector(".entity-samples-dialog");
+    if (panel) parent.panel_scroll_top = panel.scrollTop;
+    this._dialog = { kind: "entity-samples-hide-unavailable", entity_id: parent.entity_id,
+      count: record.unavailable_count, return_dialog: parent, error: "" };
+    this._render();
+  }
+
+  _renderHideUnavailableSamples() {
+    const dialog = this._dialog;
+    const name = this._hass?.states?.[dialog.entity_id]?.attributes?.friendly_name || dialog.entity_id;
+    return `<div class="dialog-backdrop" data-close-dialog><section class="dialog" role="alertdialog" aria-modal="true" data-dialog-panel>${this._dialogHeader(haListManagerPanelText("history.hide_unavailable_title", {}, this._hass))}<p><strong>${this._escape(name)}</strong></p><p class="field-help">${haListManagerPanelText("history.hide_unavailable_confirm", { count: dialog.count }, this._hass)}</p>${dialog.error ? `<div class="inline-error" role="alert">${this._escape(dialog.error)}</div>` : ""}<div class="dialog-actions"><button class="ha-button primary" type="button" data-confirm-hide-unavailable ${this._busy ? "disabled" : ""}><ha-icon icon="mdi:eye-off-outline"></ha-icon>${haListManagerPanelText("history.hide_values", {}, this._hass)}</button><button class="ha-button" type="button" data-cancel-dialog ${this._busy ? "disabled" : ""}>${haListManagerPanelText("ui.cancel", {}, this._hass)}</button></div></section></div>`;
+  }
+
+  async _hideUnavailableSamples() {
+    const dialog = this._dialog;
+    if (this._busy || dialog?.kind !== "entity-samples-hide-unavailable") return;
+    this._busy = true;
+    dialog.error = "";
+    this._render();
+    try {
+      const result = await haListManagerPanelTextRequest(this._hass, { type: `${API}/entity_history/hide_unavailable`, entity_id: dialog.entity_id });
+      if (this._dialog !== dialog) return;
+      const record = this._trackedEntities.find((item) => item.entity_id === dialog.entity_id);
+      if (record && result.entity) Object.assign(record, result.entity);
+      this._dialog = dialog.return_dialog;
+      this._dialog.status = haListManagerPanelText("history.unavailable_hidden", { count: result.hidden }, this._hass);
+      this._dialog.cursors = [];
+      this._dialog.before_id = null;
+      await this._loadEntitySamples(this._dialog);
+    } catch (error) {
+      if (this._dialog === dialog) dialog.error = this._formatError(error);
+    } finally {
+      this._busy = false;
+      this._render();
+    }
   }
 
   _entitySampleSource(record) {
@@ -1209,9 +1461,11 @@ class HaListManagerPanel extends HTMLElement {
 
   _renderEntitySamples() {
     const dialog = this._dialog;
+    const record = this._trackedEntities.find((item) => item.entity_id === dialog.entity_id);
+    const busy = dialog.loading || this._busy;
     const name = this._hass?.states?.[dialog.entity_id]?.attributes?.friendly_name || dialog.entity_id;
-    const rows = dialog.records.map((record) => `<div class="entity-sample-row ${record.hidden ? "sample-hidden" : ""}"><div>${record.hidden ? `<span class="entity-sample-hidden"><ha-icon icon="mdi:eye-off-outline"></ha-icon>${haListManagerPanelText("history.hidden", {}, this._hass)}</span>` : ""}<strong>${this._escape(record.state)} ${this._escape(record.attributes?.unit_of_measurement || "")}</strong><small>${this._escape(new Intl.DateTimeFormat(haListManagerPanelTextLocale(this._hass), { dateStyle: "short", timeStyle: "medium" }).format(new Date(record.last_updated)))}</small><small>${this._escape(this._entitySampleSource(record))}</small></div><button class="icon-button" type="button" data-edit-entity-sample="${record.id}" title="${haListManagerPanelText("history.edit_sample", {}, this._hass)}" aria-label="${haListManagerPanelText("history.edit_sample", {}, this._hass)}"><ha-icon icon="mdi:pencil"></ha-icon></button></div>`).join("");
-    return `<div class="dialog-backdrop" data-close-dialog><section class="dialog entity-samples-dialog" role="dialog" aria-modal="true" data-dialog-panel>${this._dialogHeader(haListManagerPanelText("history.measurements", {}, this._hass))}<p><strong>${this._escape(name)}</strong></p><p class="field-help">${haListManagerPanelText("history.archive_help", {}, this._hass)}</p><details class="entity-sample-filters" data-history-filters ${dialog.filter_open ? "open" : ""}><summary>${haListManagerPanelText("history.date_filter", {}, this._hass)}</summary><div class="field-grid"><label class="field"><span>${haListManagerPanelText("history.from", {}, this._hass)}</span><input type="date" data-history-range="from" value="${this._escape(dialog.from)}"></label><label class="field"><span>${haListManagerPanelText("history.until", {}, this._hass)}</span><input type="date" data-history-range="until" value="${this._escape(dialog.until)}"></label></div><div class="dialog-actions"><button class="ha-button" type="button" data-history-filter ${dialog.loading ? "disabled" : ""}><ha-icon icon="mdi:filter-outline"></ha-icon>${haListManagerPanelText("history.apply_filter", {}, this._hass)}</button></div></details><div class="dialog-actions"><button class="ha-button primary" type="button" data-add-entity-sample ${dialog.loading ? "disabled" : ""}><ha-icon icon="mdi:plus"></ha-icon>${haListManagerPanelText("history.add_sample", {}, this._hass)}</button></div><label class="entity-sample-visibility"><input type="checkbox" data-show-hidden-samples ${dialog.show_hidden ? "checked" : ""} ${dialog.loading ? "disabled" : ""}>${haListManagerPanelText("history.show_hidden", {}, this._hass)}</label><small>${haListManagerPanelText("history.page_help", {}, this._hass)}</small>${dialog.error ? `<div class="inline-error">${this._escape(dialog.error)}</div>` : ""}${dialog.status ? `<div class="entity-sample-status" role="status">${this._escape(dialog.status)}</div>` : ""}<div class="entity-samples-list">${dialog.loading ? haListManagerPanelText("history.loading", {}, this._hass) : rows || haListManagerPanelText("history.no_samples", {}, this._hass)}</div><div class="dialog-actions"><button class="ha-button" type="button" data-history-newer ${!dialog.cursors.length || dialog.loading ? "disabled" : ""}>${haListManagerPanelText("history.newer", {}, this._hass)}</button><button class="ha-button" type="button" data-history-older ${!dialog.truncated || dialog.loading ? "disabled" : ""}>${haListManagerPanelText("history.older", {}, this._hass)}</button><button class="ha-button" type="button" data-cancel-dialog>${haListManagerPanelText("ui.close", {}, this._hass)}</button></div></section></div>`;
+    const rows = dialog.records.map((record) => `<div class="entity-sample-row ${record.hidden ? "sample-hidden" : ""}"><div>${record.hidden ? `<span class="entity-sample-hidden"><ha-icon icon="mdi:eye-off-outline"></ha-icon>${haListManagerPanelText("history.hidden", {}, this._hass)}</span>` : ""}<strong>${this._escape(record.state)} ${this._escape(record.attributes?.unit_of_measurement || "")}</strong><small>${this._escape(new Intl.DateTimeFormat(haListManagerPanelTextLocale(this._hass), { dateStyle: "short", timeStyle: "medium" }).format(new Date(record.last_updated)))}</small><small>${this._escape(this._entitySampleSource(record))}</small></div><button class="icon-button" type="button" data-edit-entity-sample="${record.id}" ${busy ? "disabled" : ""} title="${haListManagerPanelText("history.edit_sample", {}, this._hass)}" aria-label="${haListManagerPanelText("history.edit_sample", {}, this._hass)}"><ha-icon icon="mdi:pencil"></ha-icon></button></div>`).join("");
+    return `<div class="dialog-backdrop" data-close-dialog><section class="dialog entity-samples-dialog" role="dialog" aria-modal="true" data-dialog-panel>${this._dialogHeader(haListManagerPanelText("history.measurements", {}, this._hass))}<p><strong>${this._escape(name)}</strong></p><p class="field-help">${haListManagerPanelText("history.archive_help", {}, this._hass)}</p>${this._renderEntityRecordingOption(record?.ignore_unavailable)}<details class="entity-sample-filters" data-history-filters ${dialog.filter_open ? "open" : ""}><summary>${haListManagerPanelText("history.date_filter", {}, this._hass)}</summary><div class="field-grid"><label class="field"><span>${haListManagerPanelText("history.from", {}, this._hass)}</span><input type="date" data-history-range="from" value="${this._escape(dialog.from)}"></label><label class="field"><span>${haListManagerPanelText("history.until", {}, this._hass)}</span><input type="date" data-history-range="until" value="${this._escape(dialog.until)}"></label></div><div class="dialog-actions"><button class="ha-button" type="button" data-history-filter ${busy ? "disabled" : ""}><ha-icon icon="mdi:filter-outline"></ha-icon>${haListManagerPanelText("history.apply_filter", {}, this._hass)}</button></div></details><div class="dialog-actions"><button class="ha-button primary" type="button" data-add-entity-sample ${busy ? "disabled" : ""}><ha-icon icon="mdi:plus"></ha-icon>${haListManagerPanelText("history.add_sample", {}, this._hass)}</button>${record?.unavailable_count ? `<button class="ha-button" type="button" data-hide-unavailable-samples ${busy ? "disabled" : ""}><ha-icon icon="mdi:eye-off-outline"></ha-icon>${haListManagerPanelText("history.hide_unavailable", {}, this._hass)}</button>` : ""}</div><label class="entity-sample-visibility"><input type="checkbox" data-show-hidden-samples ${dialog.show_hidden ? "checked" : ""} ${busy ? "disabled" : ""}>${haListManagerPanelText("history.show_hidden", {}, this._hass)}</label><small>${haListManagerPanelText("history.page_help", {}, this._hass)}</small>${dialog.error ? `<div class="inline-error">${this._escape(dialog.error)}</div>` : ""}${dialog.status ? `<div class="entity-sample-status" role="status">${this._escape(dialog.status)}</div>` : ""}<div class="entity-samples-list">${dialog.loading ? haListManagerPanelText("history.loading", {}, this._hass) : rows || haListManagerPanelText("history.no_samples", {}, this._hass)}</div><div class="dialog-actions"><button class="ha-button" type="button" data-history-newer ${!dialog.cursors.length || busy ? "disabled" : ""}>${haListManagerPanelText("history.newer", {}, this._hass)}</button><button class="ha-button" type="button" data-history-older ${!dialog.truncated || busy ? "disabled" : ""}>${haListManagerPanelText("history.older", {}, this._hass)}</button><button class="ha-button" type="button" data-cancel-dialog>${haListManagerPanelText("ui.close", {}, this._hass)}</button></div></section></div>`;
   }
 
   _entitySampleLocalTime(timestamp) {
@@ -1305,16 +1559,17 @@ class HaListManagerPanel extends HTMLElement {
     }
   }
 
-  async _setEntityTracking(entityId, enabled, askImport = false) {
+  async _setEntityTracking(entityId, enabled, askImport = false, ignoreUnavailable = undefined) {
     if (!entityId || this._busy) return;
     this._busy = true;
     this._error = "";
     try {
-      await haListManagerPanelTextRequest(this._hass, { type: `${API}/entity_history/set`, entity_id: entityId, enabled });
+      await haListManagerPanelTextRequest(this._hass, { type: `${API}/entity_history/set`, entity_id: entityId, enabled, ...(ignoreUnavailable === undefined ? {} : { ignore_unavailable: Boolean(ignoreUnavailable) }) });
       const result = await haListManagerPanelTextRequest(this._hass, { type: `${API}/entity_history/list` });
       this._trackedEntities = result.entities || [];
       if (enabled) {
         this._entityHistoryCandidate = "";
+        this._entityHistoryIgnoreUnavailable = true;
         if (this._entityHistoryTab === "add") this._entityHistorySearch = "";
         this._entityHistoryTab = "manage";
         if (askImport) this._dialog = { kind: "entity-history-import-choice", entity_id: entityId, completed: false, status: "", error: "" };
@@ -1372,8 +1627,9 @@ class HaListManagerPanel extends HTMLElement {
       const values = [haListManagerPanelText("history.imported_count", { count: Number(counts.imported || 0) }, this._hass)];
       if (counts.updated) values.push(haListManagerPanelText("history.imported_values_replaced", {p0: counts.updated}, this._hass));
       if (counts.already_stored) values.push(haListManagerPanelText("history.timestamps_already_saved", {p0: counts.already_stored}, this._hass));
+      if (counts.ignored) values.push(haListManagerPanelText("history.ignored_unavailable", { count: counts.ignored }, this._hass));
       if (counts.unchanged) values.push(haListManagerPanelText("ui.discarded_unchanged", {p0: counts.unchanged}, this._hass));
-      if (!counts.imported && !counts.updated && !counts.already_stored && !counts.unchanged) values.push(haListManagerPanelText("ui.no_data_found_lowercase", {}, this._hass));
+      if (!counts.imported && !counts.updated && !counts.already_stored && !counts.unchanged && !counts.ignored) values.push(haListManagerPanelText("ui.no_data_found_lowercase", {}, this._hass));
       return `${label}: ${values.join(", ")}`;
     };
     if (result.recorder) parts.push(summary(haListManagerPanelText("ui.recorder", {}, this._hass), result.recorder));
@@ -2009,7 +2265,7 @@ class HaListManagerPanel extends HTMLElement {
     const tabs = `<div class="scan-history-tabs" role="tablist">${tab("queue", "mdi:tray-alert", haListManagerPanelText("scanner.queue_with_suffix", {p0:(this._pendingScans.length ? ` (${this._pendingScans.length})` : "")}, this._hass))}${tab("history", "mdi:history", haListManagerPanelText("ui.history", {}, this._hass))}${tab("devices", "mdi:barcode-scan", haListManagerPanelText("ui.devices", {}, this._hass))}${tab("simulation", "mdi:test-tube", haListManagerPanelText("scanner.simulation", {}, this._hass))}</div>`;
     const content = activeTab === "queue" ? queueContent : activeTab === "history" ? historyContent : activeTab === "devices" ? this._renderScannerDevices() : this._renderScannerSimulation();
     const refresh = ["queue", "history"].includes(activeTab) ? `<button class="ha-button" type="button" data-refresh-history><ha-icon icon="mdi:refresh"></ha-icon>${haListManagerPanelText("ui.refresh", {}, this._hass)}</button>` : "";
-    return `<section class="content-header with-action"><div class="heading-wrap"><ha-icon icon="mdi:barcode-scan"></ha-icon><div><h2>${haListManagerPanelText("ui.scanner", {}, this._hass)}</h2><p>${haListManagerPanelText("help.scanner_overview", {}, this._hass)}</p></div></div>${refresh}</section>${this._inlineError()}${tabs}${content}`;
+    return `<section class="content-header with-action"><div class="heading-wrap"><ha-icon icon="mdi:barcode-scan"></ha-icon><div><h2>${haListManagerPanelText("ui.scanner", {}, this._hass)}</h2><p>${haListManagerPanelText("help.scanner_overview", {}, this._hass)}</p></div></div>${refresh}</section>${this._inlineError()}${this._pendingScanNotice ? `<p class="pending-scan-notice" role="status">${this._escape(this._pendingScanNotice)}</p>` : ""}${tabs}${content}`;
   }
 
   _renderSettings() {
@@ -2129,10 +2385,12 @@ class HaListManagerPanel extends HTMLElement {
 
   _renderDialog() {
     if (!this._dialog) return "";
+    if (this._dialog.kind === "discard-pending-scan") return this._renderDiscardPendingScan();
     if (["entity-history-import", "entity-history-import-choice"].includes(this._dialog.kind)) return this._renderEntityHistoryImport();
     if (this._dialog.kind === "entity-samples") return this._renderEntitySamples();
     if (this._dialog.kind === "entity-sample-editor") return this._renderEntitySampleEditor();
     if (this._dialog.kind === "entity-sample-delete") return this._renderDeleteEntitySample();
+    if (this._dialog.kind === "entity-samples-hide-unavailable") return this._renderHideUnavailableSamples();
     if (this._dialog.kind === "data-restore") return this._renderDataRestore();
     if (this._dialog.kind === "data-backup-delete") return this._renderDataBackupDelete();
     if (this._dialog.kind === "image-viewer") {
@@ -2483,10 +2741,13 @@ class HaListManagerPanel extends HTMLElement {
     const { draft, pendingScan, record } = this._dialog;
     const product = this._findInventoryProduct(pendingScan.product_id) || record?.product || null;
     const locked = Boolean(product);
+    const editing = this._canEditPendingScan(this._dialog);
     const image = draft.image_url ? `<img class="contained-product-image" src="${this._escape(this._openFoodFactsImageUrl(draft.image_url, "400"))}" alt="${haListManagerPanelText("ui.product_image", {}, this._hass)}">` : `<ha-icon icon="mdi:image-outline"></ha-icon>`;
     return `<div class="dialog-backdrop" data-close-dialog><section class="dialog product-dialog" role="dialog" aria-modal="true" data-dialog-panel>
       ${this._dialogHeader(haListManagerPanelText("ui.edit_pending_scan", {}, this._hass))}
       <div class="pending-scan-notice"><ha-icon icon="mdi:barcode-scan"></ha-icon><div><strong>${haListManagerPanelText("ui.name_quantity", {p0:(this._escape(SCANNER_ACTIONS(this._hass)[pendingScan.action]?.label || pendingScan.action)), p1:(this._escape(pendingScan.quantity || 1))}, this._hass)}</strong><span>${haListManagerPanelText("ui.scan_stock_pending_save", {}, this._hass)}</span></div></div>
+      <p class="field-help pending-scan-collaboration" role="status" data-pending-scan-collaboration>${this._escape(this._pendingScanCollaborationText(this._dialog))}</p>
+      <fieldset class="pending-scan-fields" data-pending-scan-fields ${editing ? "" : "disabled inert"}>
       <div class="product-dialog-top"><div>
         <label class="field"><span>${haListManagerPanelText("products.custom_name", {}, this._hass)}</span><input type="text" maxlength="200" data-scan-product-name value="${this._escape(draft.name)}" ${locked ? "readonly" : ""}></label>
         <label class="field"><span>EAN</span><input type="text" value="${this._escape(draft.ean)}" readonly></label>
@@ -2499,8 +2760,9 @@ class HaListManagerPanel extends HTMLElement {
       <p class="field-help">${haListManagerPanelText("help.inventory_category_link", {}, this._hass)}</p>
       ${this._renderLabelSelector(draft.label_ids || [])}
       <label class="field"><span>${haListManagerPanelText("ui.optional_image_url", {}, this._hass)}</span><input type="url" maxlength="1000" data-scan-product-image value="${this._escape(draft.image_url)}" ${locked ? "readonly" : ""}></label>
+      </fieldset>
       ${this._dialogError()}
-      <div class="dialog-actions"><button class="ha-button primary" data-save-inventory ${this._busy ? "disabled" : ""}>${this._busy ? haListManagerPanelText("ui.save_pending", {}, this._hass) : haListManagerPanelText("ui.save", {}, this._hass)}</button><button class="ha-button" data-cancel-dialog>${haListManagerPanelText("ui.cancel", {}, this._hass)}</button></div>
+      <div class="dialog-actions"><button class="ha-button primary" type="button" data-take-pending-scan ${editing ? "hidden" : ""} ${this._busy || this._dialog.scan_claiming || pendingScan.collaboration?.editor_session && !editing ? "disabled" : ""}><ha-icon icon="mdi:pencil-outline"></ha-icon>${haListManagerPanelText("ui.edit", {}, this._hass)}</button><button class="ha-button primary" data-save-inventory ${this._busy || !editing ? "disabled" : ""}>${this._busy ? haListManagerPanelText("ui.save_pending", {}, this._hass) : haListManagerPanelText("ui.save", {}, this._hass)}</button><button class="ha-button destructive" type="button" data-dismiss-pending-scan="${this._escape(pendingScan.id)}" ${this._busy ? "disabled" : ""}><ha-icon icon="mdi:delete-outline"></ha-icon>${haListManagerPanelText("scanner.discard", {}, this._hass)}</button><button class="ha-button" data-cancel-dialog>${haListManagerPanelText("ui.cancel", {}, this._hass)}</button></div>
     </section></div>`;
   }
 
@@ -2511,10 +2773,14 @@ class HaListManagerPanel extends HTMLElement {
     const groupByEntry = new Map();
     this._inventoryGroups.forEach((group) => (group.member_ids || []).forEach((entryId) => groupByEntry.set(entryId, group)));
     const query = this._inventoryGroupSearch.trim().toLocaleLowerCase();
+    const members = this._inventoryEntries.filter((entry) => selected.has(entry.id))
+      .sort((left, right) => left.product.name.localeCompare(right.product.name, haListManagerPanelTextLocale(this._hass), { sensitivity: "base", numeric: true }));
+    const memberRows = members.map((entry) => `<div class="group-member-choice selected-group-member"><span><strong>${this._escape(entry.product.name)}</strong><small>${haListManagerPanelText("inventory.stock_value", {p0:entry.stock}, this._hass)}</small></span><button class="icon-button danger" type="button" data-remove-admin-group-member="${this._escape(entry.id)}" title="${haListManagerPanelText("inventory.remove_from_group", {}, this._hass)}" aria-label="${haListManagerPanelText("inventory.remove_from_group", {}, this._hass)}: ${this._escape(entry.product.name)}"><ha-icon icon="mdi:close"></ha-icon></button></div>`).join("") || `<p class="field-help">${haListManagerPanelText("ui.no_members_selected", {}, this._hass)}</p>`;
     const matches = this._inventoryEntries
-      .filter((entry) => selected.has(entry.id) || this._inventoryGroupShowGrouped || !groupByEntry.has(entry.id) || groupByEntry.get(entry.id)?.id === currentGroupId)
+      .filter((entry) => !selected.has(entry.id))
+      .filter((entry) => this._inventoryGroupShowGrouped || !groupByEntry.has(entry.id) || groupByEntry.get(entry.id)?.id === currentGroupId)
       .filter((entry) => !query || [entry.product.name, entry.product.original_name, entry.product.brand, entry.product.ean].some((value) => String(value || "").toLocaleLowerCase().includes(query)))
-      .sort((a, b) => a.product.name.localeCompare(b.product.name));
+      .sort((a, b) => a.product.name.localeCompare(b.product.name, haListManagerPanelTextLocale(this._hass), { sensitivity: "base", numeric: true }));
     const choices = matches.slice(0, GROUP_PICKER_RESULT_LIMIT).map((entry) => {
       const source = groupByEntry.get(entry.id);
       const otherGroup = source && source.id !== currentGroupId ? source : null;
@@ -2522,7 +2788,7 @@ class HaListManagerPanel extends HTMLElement {
     }).join("") || `<p class="field-help group-picker-empty">${haListManagerPanelText("ui.no_items_found", {}, this._hass)}</p>`;
     const resultNote = matches.length > GROUP_PICKER_RESULT_LIMIT ? `<p class="group-result-note">${haListManagerPanelText("ui.items_shown_search_more", {p0:(GROUP_PICKER_RESULT_LIMIT), p1:(matches.length)}, this._hass)}</p>` : "";
     const moveConfirmation = this._dialog.move_confirmation ? `<div class="dialog-backdrop nested-confirmation"><section class="dialog confirmation-dialog" role="alertdialog" aria-modal="true" data-dialog-panel><div class="confirmation-icon"><ha-icon icon="mdi:alert-outline"></ha-icon></div><h3>${this._dialog.move_confirmation.dissolves ? haListManagerPanelText("ui.move_dissolve_group_confirm", {}, this._hass) : haListManagerPanelText("ui.move_item_group_confirm", {}, this._hass)}</h3><p>${this._escape(this._dialog.move_confirmation.message)}</p><div class="dialog-actions"><button class="ha-button primary" data-confirm-group-moves>${this._dialog.move_confirmation.action === "select" ? haListManagerPanelText("ui.move_item", {}, this._hass) : haListManagerPanelText("ui.move_and_save", {}, this._hass)}</button><button class="ha-button" data-cancel-group-moves>${haListManagerPanelText("ui.cancel", {}, this._hass)}</button></div></section></div>` : "";
-    return `<div class="dialog-backdrop" data-close-dialog><section class="dialog inventory-group-dialog" role="dialog" aria-modal="true" data-dialog-panel>${this._dialogHeader(this._dialog.record ? haListManagerPanelText("ui.edit_group", {}, this._hass) : haListManagerPanelText("ui.create_group", {}, this._hass))}<label class="field"><span>${haListManagerPanelText("ui.group_name", {}, this._hass)}</span><input type="text" maxlength="200" data-inventory-group-name value="${this._escape(draft.name)}" autocomplete="off"></label><div class="inventory-group-fields"><label class="field"><span>${haListManagerPanelText("ui.minimum_stock_optional", {}, this._hass)}</span><input type="number" min="0" max="1000000" step="1" data-inventory-group-minimum value="${this._escape(draft.minimum_stock)}"></label>${this._inventoryGroupCategoryPickerMarkup()}</div>${this._inventoryRestockRuleMarkup(draft, haListManagerPanelText("inventory.group", {}, this._hass))}<fieldset class="group-member-list"><legend>${haListManagerPanelText("ui.member_count", {p0:(selected.size)}, this._hass)}</legend><div class="group-move-warning"><ha-icon icon="mdi:alert-outline"></ha-icon><span>${haListManagerPanelText("help.single_group_membership", {}, this._hass)}</span><label class="show-grouped-toggle"><input type="checkbox" data-admin-show-grouped ${this._inventoryGroupShowGrouped ? "checked" : ""}>${haListManagerPanelText("ui.show_grouped_items", {}, this._hass)}</label></div><label class="group-member-search"><ha-icon icon="mdi:magnify"></ha-icon><input type="text" value="${this._escape(this._inventoryGroupSearch)}" placeholder="${haListManagerPanelText("ui.search_item_brand_ean", {}, this._hass)}" autocomplete="off" data-inventory-group-search></label><div class="group-member-scroll">${choices}${resultNote}</div></fieldset>${this._dialogError()}<div class="dialog-actions"><button class="ha-button primary" data-save-inventory-group ${this._busy ? "disabled" : ""}>${this._busy ? haListManagerPanelText("ui.save_pending", {}, this._hass) : haListManagerPanelText("ui.save", {}, this._hass)}</button><button class="ha-button" data-cancel-dialog>${haListManagerPanelText("ui.cancel", {}, this._hass)}</button></div></section>${moveConfirmation}</div>`;
+    return `<div class="dialog-backdrop" data-close-dialog><section class="dialog inventory-group-dialog" role="dialog" aria-modal="true" data-dialog-panel>${this._dialogHeader(this._dialog.record ? haListManagerPanelText("ui.edit_group", {}, this._hass) : haListManagerPanelText("ui.create_group", {}, this._hass))}<label class="field"><span>${haListManagerPanelText("ui.group_name", {}, this._hass)}</span><input type="text" maxlength="200" data-inventory-group-name value="${this._escape(draft.name)}" autocomplete="off"></label><div class="inventory-group-fields"><label class="field"><span>${haListManagerPanelText("ui.minimum_stock_optional", {}, this._hass)}</span><input type="number" min="0" max="1000000" step="1" data-inventory-group-minimum value="${this._escape(draft.minimum_stock)}"></label>${this._inventoryGroupCategoryPickerMarkup()}</div>${this._inventoryRestockRuleMarkup(draft, haListManagerPanelText("inventory.group", {}, this._hass))}<fieldset class="group-member-list"><legend>${haListManagerPanelText("ui.member_count", {p0:(selected.size)}, this._hass)}</legend><div class="selected-group-members">${memberRows}</div><h4 class="group-add-title">${haListManagerPanelText("ui.add_members", {}, this._hass)}</h4><div class="group-move-warning"><ha-icon icon="mdi:alert-outline"></ha-icon><span>${haListManagerPanelText("help.single_group_membership", {}, this._hass)}</span><label class="show-grouped-toggle"><input type="checkbox" data-admin-show-grouped ${this._inventoryGroupShowGrouped ? "checked" : ""}>${haListManagerPanelText("ui.show_grouped_items", {}, this._hass)}</label></div><label class="group-member-search"><ha-icon icon="mdi:magnify"></ha-icon><input type="text" value="${this._escape(this._inventoryGroupSearch)}" placeholder="${haListManagerPanelText("ui.search_item_brand_ean", {}, this._hass)}" autocomplete="off" data-inventory-group-search></label><div class="group-member-scroll">${choices}${resultNote}</div></fieldset>${this._dialogError()}<div class="dialog-actions"><button class="ha-button primary" data-save-inventory-group ${this._busy ? "disabled" : ""}>${this._busy ? haListManagerPanelText("ui.save_pending", {}, this._hass) : haListManagerPanelText("ui.save", {}, this._hass)}</button><button class="ha-button" data-cancel-dialog>${haListManagerPanelText("ui.cancel", {}, this._hass)}</button></div></section>${moveConfirmation}</div>`;
   }
 
   _renderScannerDialog() {
@@ -2693,6 +2959,7 @@ class HaListManagerPanel extends HTMLElement {
       </div><div class="product-preview">${image}</div></div>
       <label class="field"><span>${haListManagerPanelText("products.original_name", {}, this._hass)}</span><input type="text" data-product-original-name value="${this._escape(draft.original_name)}" readonly placeholder="${haListManagerPanelText("ui.taken_from_open_food_facts", {}, this._hass)}"></label>
       <div class="field-grid product-grid"><label class="field"><span>${haListManagerPanelText("ui.brand_optional", {}, this._hass)}</span><input type="text" maxlength="200" data-product-brand value="${this._escape(draft.brand)}"></label><label class="field"><span>${haListManagerPanelText("ui.package_quantity_optional", {}, this._hass)}</span><input type="text" maxlength="100" data-product-quantity value="${this._escape(draft.package_quantity)}" placeholder="${haListManagerPanelText("ui.package_volume_example", {}, this._hass)}"></label></div>
+      ${this._renderProductRefresh(draft)}
       ${this._productCategoryAssignmentsMarkup()}
       <label class="field"><span>${haListManagerPanelText("ui.optional_image_url", {}, this._hass)}</span><input type="url" maxlength="1000" data-product-image value="${this._escape(draft.image_url)}" placeholder="${haListManagerPanelText("ui.image_url_example", {}, this._hass)}"></label>
       ${this._renderLabelSelector(draft.label_ids)}
@@ -2798,9 +3065,13 @@ class HaListManagerPanel extends HTMLElement {
     this.shadowRoot.querySelector("[data-hide-entity-sample]")?.addEventListener("change", (event) => { this._dialog.draft.hidden = event.target.checked; });
     this.shadowRoot.querySelector("[data-delete-entity-sample]")?.addEventListener("click", () => this._openDeleteEntitySample());
     this.shadowRoot.querySelector("[data-confirm-delete-entity-sample]")?.addEventListener("click", () => this._deleteEntitySample());
+    this.shadowRoot.querySelector("[data-add-history-ignore-unavailable]")?.addEventListener("change", (event) => { this._entityHistoryIgnoreUnavailable = event.target.checked; });
+    this.shadowRoot.querySelector("[data-history-ignore-unavailable]")?.addEventListener("change", (event) => this._setEntityRecordingFilter(event.target.checked));
+    this.shadowRoot.querySelector("[data-hide-unavailable-samples]")?.addEventListener("click", () => this._openHideUnavailableSamples());
+    this.shadowRoot.querySelector("[data-confirm-hide-unavailable]")?.addEventListener("click", () => this._hideUnavailableSamples());
     this.shadowRoot.querySelector("[data-add-entity-history]")?.addEventListener("click", () => {
       const entityId = this.shadowRoot.querySelector("[data-entity-history-picker]")?.value || this._entityHistoryCandidate;
-      if (entityId) this._setEntityTracking(entityId, true, true);
+      if (entityId) this._setEntityTracking(entityId, true, true, this._entityHistoryIgnoreUnavailable);
     });
     this.shadowRoot.querySelectorAll("[data-toggle-entity-history]").forEach((button) => button.addEventListener("click", () => {
       this._setEntityTracking(button.dataset.toggleEntityHistory, button.dataset.enabled !== "1");
@@ -3126,7 +3397,8 @@ class HaListManagerPanel extends HTMLElement {
       this._updateLocalSearch("_chipSearch", "[data-chip-search]", event.target.value, event.target.selectionStart);
     });
     this.shadowRoot.querySelector("[data-inventory-group-search]")?.addEventListener("input", (event) => {
-      this._updateLocalSearch("_inventoryGroupSearch", "[data-inventory-group-search]", event.target.value, event.target.selectionStart);
+      this._inventoryGroupSearch = event.target.value;
+      this._refreshInventoryGroupDialog("[data-inventory-group-search]", event.target.selectionStart);
     });
     this.shadowRoot.querySelector("[data-category-product-search]")?.addEventListener("input", (event) => {
       if (this._dialog?.kind !== "category-products") return;
@@ -3153,7 +3425,7 @@ class HaListManagerPanel extends HTMLElement {
       this._render();
       this.shadowRoot.querySelector("[data-category-product-search]")?.focus();
     });
-    this.shadowRoot.querySelector("[data-admin-show-grouped]")?.addEventListener("change", (event) => { this._inventoryGroupShowGrouped = event.target.checked; this._render(); });
+    this.shadowRoot.querySelector("[data-admin-show-grouped]")?.addEventListener("change", (event) => { this._inventoryGroupShowGrouped = event.target.checked; this._refreshInventoryGroupDialog("[data-admin-show-grouped]"); });
     this.shadowRoot.querySelectorAll("[data-cancel-dialog]:not([data-backup-dialog] [data-cancel-dialog])").forEach((button) => button.addEventListener("click", () => this._closeDialog()));
     this.shadowRoot.querySelectorAll("[data-dialog-panel]").forEach((panel) => panel.addEventListener("click", (event) => event.stopPropagation()));
     this.shadowRoot.querySelector("[data-save-list]")?.addEventListener("click", () => this._saveList());
@@ -3161,6 +3433,7 @@ class HaListManagerPanel extends HTMLElement {
     this.shadowRoot.querySelector("[data-save-dynamic-category]")?.addEventListener("click", () => this._openDynamicCategoryDialog());
     this.shadowRoot.querySelector("[data-save-product]")?.addEventListener("click", () => this._saveProduct());
     this.shadowRoot.querySelector("[data-lookup-product]")?.addEventListener("click", () => this._lookupProduct());
+    this.shadowRoot.querySelectorAll("[data-off-change]").forEach((input) => input.addEventListener("change", () => this._applyProductRefresh(input.dataset.offChange, input.checked, this._dialog?.draft)));
     this.shadowRoot.querySelector("[data-toggle-product-brand]")?.addEventListener("click", () => { this._dialog.draft.append_brand = !this._dialog.draft.append_brand; this._applyProductNameOptions(); });
     this.shadowRoot.querySelector("[data-toggle-product-quantity]")?.addEventListener("click", () => { this._dialog.draft.append_quantity = !this._dialog.draft.append_quantity; this._applyProductNameOptions(); });
     this._bindBackupEvents();
@@ -3203,6 +3476,8 @@ class HaListManagerPanel extends HTMLElement {
     this.shadowRoot.querySelector("[data-cancel-chip-replace]")?.addEventListener("click", () => { this._dialog.draft.conflict = null; this._render(); });
     this.shadowRoot.querySelector("[data-clear-chip-product]")?.addEventListener("click", () => { this._dialog.draft.product_id = null; this._render(); });
     this.shadowRoot.querySelector("[data-save-inventory]")?.addEventListener("click", () => this._saveInventory());
+    this.shadowRoot.querySelector("[data-take-pending-scan]")?.addEventListener("click", () => this._takePendingScan());
+    this.shadowRoot.querySelector("[data-confirm-discard-scan]")?.addEventListener("click", () => this._confirmDiscardPendingScan());
     this.shadowRoot.querySelector("[data-new-inventory-product]")?.addEventListener("click", () => {
       const returnDialog = this._dialog;
       this._openProductDialog(null, { returnDialog });
@@ -3366,6 +3641,14 @@ class HaListManagerPanel extends HTMLElement {
       }
       this._dialog.draft.member_ids = [...selected];
       this._dialog.move_confirmation = "";
+      this._refreshInventoryGroupDialog("[data-inventory-group-search]");
+    }));
+    this.shadowRoot.querySelectorAll("[data-remove-admin-group-member]").forEach((button) => button.addEventListener("click", () => {
+      if (this._dialog?.kind !== "inventory-group-editor" || this._busy) return;
+      const id = button.dataset.removeAdminGroupMember;
+      this._dialog.draft.member_ids = (this._dialog.draft.member_ids || []).filter((memberId) => memberId !== id);
+      this._dialog.draft.confirmed_move_ids = (this._dialog.draft.confirmed_move_ids || []).filter((memberId) => memberId !== id);
+      this._refreshInventoryGroupDialog("[data-inventory-group-search]");
     }));
     for (const [selector, key] of [["[data-item-name]", "name"], ["[data-item-description]", "description"]]) {
       this.shadowRoot.querySelector(selector)?.addEventListener("input", (event) => { this._dialog.draft[key] = event.target.value; this._updateBringPreview(); });
@@ -3960,9 +4243,53 @@ class HaListManagerPanel extends HTMLElement {
     });
   }
 
+  _stageProductRefresh(draft, product) {
+    const incoming = { original_name: product.original_name || product.name, brand: product.brand, package_quantity: product.package_quantity, image_url: product.image_url };
+    draft.off_changes = [];
+    draft.off_ean = String(draft.ean || "").trim();
+    for (const [field, value] of Object.entries(incoming)) {
+      const after = String(value || "").trim();
+      const before = String(draft[field] || "");
+      // Missing external data must never erase a local value.
+      if (!after) continue;
+      if (!before.trim()) draft[field] = after;
+      else if (before !== after) draft.off_changes.push({ field, before, after, selected: false });
+    }
+  }
+
+  _renderProductRefresh(draft) {
+    if (!draft?.off_changes?.length || draft.off_ean !== String(draft.ean || "").trim()) return "";
+    const fields = { original_name: "products.original_name", brand: "ui.brand", package_quantity: "ui.amount", image_url: "ui.optional_image_url" };
+    return `<section class="off-refresh" aria-label="${haListManagerPanelText("products.refresh_changes", {}, this._hass)}"><strong>${haListManagerPanelText("products.refresh_changes", {}, this._hass)}</strong><p>${haListManagerPanelText("products.refresh_review", {}, this._hass)}</p>${draft.off_changes.map((change) => `<label><input type="checkbox" data-off-change="${change.field}" ${change.selected ? "checked" : ""}><span><strong>${haListManagerPanelText(fields[change.field], {}, this._hass)}</strong><small>${this._escape(change.before)} → ${this._escape(change.after)}</small></span></label>`).join("")}</section>`;
+  }
+
+  _applyProductRefresh(field, selected, draft) {
+    if (!draft || draft.off_ean !== String(draft.ean || "").trim()) return;
+    const change = draft.off_changes?.find((item) => item.field === field);
+    if (!change) return;
+    // Preserve manual edits made after the lookup when the option is toggled off.
+    if (draft[field] !== (change.selected ? change.after : change.before)) change.before = draft[field];
+    draft[field] = selected ? change.after : change.before;
+    change.selected = selected;
+    // Keep the dialog nodes mounted so choosing replacements retains focus and scroll.
+    const input = this.shadowRoot.querySelector(({ original_name: "[data-product-original-name]", brand: "[data-product-brand]", package_quantity: "[data-product-quantity]", image_url: "[data-product-image]" })[field]);
+    if (input) input.value = draft[field];
+    const checkbox = this.shadowRoot.querySelector(`[data-off-change="${field}"]`);
+    if (checkbox) {
+      checkbox.checked = selected;
+      const values = checkbox.closest("label")?.querySelector("small");
+      if (values) values.textContent = `${change.before} → ${change.after}`;
+    }
+    if (field === "image_url") {
+      const image = this.shadowRoot.querySelector(".product-preview img");
+      if (image) image.src = this._openFoodFactsImageUrl(draft.image_url, "400");
+    }
+  }
+
   async _lookupProduct() {
     if (this._busy || this._dialog?.kind !== "product-editor") return;
-    const ean = String(this._dialog.draft.ean || "").trim();
+    const dialog = this._dialog;
+    const ean = String(dialog.draft.ean || "").trim();
     if (!/^\d{4,32}$/.test(ean)) {
       this._dialog.draft.ean_error = haListManagerPanelText("errors.ean_digits_required", {}, this._hass);
       this._dialog.draft.lookup_status = null;
@@ -3975,8 +4302,10 @@ class HaListManagerPanel extends HTMLElement {
     this._render();
     try {
       const result = await haListManagerPanelTextRequest(this._hass, { type: `${API}/products/lookup`, ean, product_id: this._dialog.record?.id || null });
+      if (this._dialog !== dialog || String(dialog.draft.ean || "").trim() !== ean) return;
       if (result.duplicate && result.duplicate.id !== this._dialog.record?.id) {
         const duplicate = result.duplicate;
+        const categoryAssignments = duplicate.category_assignments || [];
         this._dialog.record = duplicate;
         this._dialog.draft = {
           name: duplicate.name || "",
@@ -3986,6 +4315,10 @@ class HaListManagerPanel extends HTMLElement {
           brand: duplicate.brand || "",
           package_quantity: duplicate.package_quantity || "",
           category: duplicate.category || "",
+          global_category_id: categoryAssignments.find((item) => item.scope === "global")?.category_id || "",
+          shopping_category_id: categoryAssignments.find((item) => item.scope === "list_type" && item.list_type === "shopping")?.category_id || "",
+          inventory_category_id: categoryAssignments.find((item) => item.scope === "list_type" && item.list_type === "inventory")?.category_id || "",
+          list_category_assignments: categoryAssignments.filter((item) => item.scope === "list").map((item) => ({ list_id: item.list_id, category_id: item.category_id })),
           image_url: duplicate.image_url || "",
           append_brand: this._parseProductName(duplicate.name || "", duplicate.brand || "", duplicate.package_quantity || "").append_brand,
           append_quantity: this._parseProductName(duplicate.name || "", duplicate.brand || "", duplicate.package_quantity || "").append_quantity,
@@ -4001,11 +4334,8 @@ class HaListManagerPanel extends HTMLElement {
         return;
       }
       const draft = this._dialog.draft;
-      draft.original_name = product.name || "";
+      this._stageProductRefresh(draft, product);
       draft.ean = product.ean || ean;
-      draft.brand = product.brand || "";
-      draft.package_quantity = product.package_quantity || "";
-      draft.image_url = product.image_url || "";
       draft.ean_error = "";
       if (!draft.name.trim()) {
         draft.base_name = product.name || "";
@@ -4013,6 +4343,7 @@ class HaListManagerPanel extends HTMLElement {
       }
       draft.lookup_status = { type: "success", text: haListManagerPanelText("products.loaded_unsaved", {}, this._hass) };
     } catch (error) {
+      if (this._dialog !== dialog) return;
       this._dialog.draft.lookup_status = error?.code === "product_not_found"
         ? { type: "warning", text: haListManagerPanelText("products.ean_data_not_found", {}, this._hass) }
         : { type: "error", text: this._formatError(error) };
@@ -5254,10 +5585,29 @@ class HaListManagerPanel extends HTMLElement {
   }
 
   async _openPendingScanEditor(scan) {
-    if (!scan || this._busy) return;
+    if (!scan || this._busy || this._dialog || this._finishedScanIds.has(scan.id)) return;
+    const openToken = this._pendingScanOpenToken = {};
     this._error = "";
+    this._pendingScanNotice = "";
     this._selectedInventoryListId = scan.list_id;
-    await this._loadInventory();
+    try {
+      const viewed = await haListManagerPanelTextRequest(this._hass, {
+        type: `${API}/scanner/queue/view`, scan_id: scan.id, session_id: this._scanSessionId, open: true,
+      });
+      if (this._pendingScanOpenToken !== openToken || this._finishedScanIds.has(scan.id)) return;
+      if (viewed.scan) this._receivePendingScan(viewed.scan);
+      scan = this._pendingScans.find((item) => item.id === scan.id) || { ...scan, ...(viewed.scan || {}) };
+      await this._loadInventory();
+    } catch (error) {
+      this._error = this._formatError(error);
+      this._render();
+      return;
+    }
+    if (this._pendingScanOpenToken !== openToken || this._dialog || this._finishedScanIds.has(scan.id)) {
+      haListManagerPanelTextRequest(this._hass, { type: `${API}/scanner/queue/view`, scan_id: scan.id, session_id: this._scanSessionId, open: false }).catch(() => {});
+      return;
+    }
+    scan = this._pendingScans.find((item) => item.id === scan.id) || scan;
     const record = this._inventoryEntries.find((entry) => entry.id === scan.inventory_entry_id || entry.product_id === scan.product_id) || null;
     const product = this._findInventoryProduct(scan.product_id) || record?.product || null;
     const quantity = Math.max(1, Number(scan.quantity) || 1);
@@ -5281,6 +5631,7 @@ class HaListManagerPanel extends HTMLElement {
       image_url: product?.image_url || "",
       label_ids: (product?.labels || []).map((label) => label.id),
     } };
+    this._startPendingScanPresence(scan.id);
     this._render();
   }
 
@@ -5299,6 +5650,20 @@ class HaListManagerPanel extends HTMLElement {
     } };
     this._render();
     this.shadowRoot.querySelector("[data-inventory-group-name]")?.focus();
+  }
+
+  _refreshInventoryGroupDialog(focusSelector, cursor) {
+    const panelScroll = this.shadowRoot.querySelector(".inventory-group-dialog")?.scrollTop || 0;
+    const memberScroll = this.shadowRoot.querySelector(".selected-group-members")?.scrollTop || 0;
+    const choiceScroll = this.shadowRoot.querySelector(".group-member-scroll")?.scrollTop || 0;
+    this._render();
+    const field = focusSelector ? this.shadowRoot.querySelector(focusSelector) : null;
+    field?.focus({ preventScroll: true });
+    if (Number.isInteger(cursor)) field?.setSelectionRange?.(cursor, cursor);
+    for (const [selector, position] of [[".inventory-group-dialog", panelScroll], [".selected-group-members", memberScroll], [".group-member-scroll", choiceScroll]]) {
+      const element = this.shadowRoot.querySelector(selector);
+      if (element) element.scrollTop = position;
+    }
   }
 
   _openInventoryRestockSettingsDialog() {
@@ -5566,12 +5931,34 @@ class HaListManagerPanel extends HTMLElement {
     finally { this._busy = false; this._render(); }
   }
 
-  async _dismissPendingScan(scanId) {
-    if (this._busy) return;
+  _dismissPendingScan(scanId) {
+    if (this._busy || !this._pendingScans.some((scan) => scan.id === scanId)) return;
+    this._dialog = { kind: "discard-pending-scan", scan_id: scanId, return_dialog: this._dialog };
+    this._error = "";
+    this._render();
+  }
+
+  _renderDiscardPendingScan() {
+    return `<div class="dialog-backdrop" data-close-dialog><section class="dialog" role="alertdialog" aria-modal="true" data-dialog-panel>${this._dialogHeader(haListManagerPanelText("scanner.discard_title", {}, this._hass))}<p>${haListManagerPanelText("scanner.discard_help", {}, this._hass)}</p>${this._dialogError()}<div class="dialog-actions"><button class="ha-button destructive" type="button" data-confirm-discard-scan ${this._busy ? "disabled" : ""}><ha-icon icon="mdi:delete-outline"></ha-icon>${haListManagerPanelText("scanner.discard", {}, this._hass)}</button><button class="ha-button" type="button" data-cancel-dialog ${this._busy ? "disabled" : ""}>${haListManagerPanelText("ui.cancel", {}, this._hass)}</button></div></section></div>`;
+  }
+
+  async _confirmDiscardPendingScan() {
+    const dialog = this._dialog;
+    if (this._busy || dialog?.kind !== "discard-pending-scan") return;
     this._busy = true;
-    try { await haListManagerPanelTextRequest(this._hass, { type: `${API}/scanner/queue/dismiss`, scan_id: scanId }); }
-    catch (error) { this._error = this._formatError(error); }
-    finally { this._busy = false; this._scanHistoryLoaded = false; await this._loadScanHistory(); }
+    this._error = "";
+    this._render();
+    try {
+      await haListManagerPanelTextRequest(this._hass, { type: `${API}/scanner/queue/dismiss`, scan_id: dialog.scan_id });
+      this._receivePendingScan({ id: dialog.scan_id, status: "dismissed" });
+      if (this._dialog === dialog) this._dialog = null;
+    } catch (error) {
+      if (this._dialog === dialog) this._error = this._formatError(error);
+    } finally {
+      this._busy = false;
+      this._scanHistoryLoaded = false;
+      this._render();
+    }
   }
 
   _inventoryGroupMoveSummary(record, memberIds, excludedIds = []) {
@@ -5621,6 +6008,8 @@ class HaListManagerPanel extends HTMLElement {
   }
   _closeDialog() {
     if (this._busy) return;
+    if (this._dialog?.pendingScan) this._stopPendingScanPresence();
+    this._pendingScanOpenToken = null;
     clearTimeout(this._dialog?.product_search_timer);
     if (this._dialog?.kind === "category-products") clearTimeout(this._categoryProductSearchTimer);
     if (this._dialog?.kind === "dish-editor") clearTimeout(this._dishProductSearchTimer);
@@ -6054,7 +6443,9 @@ class HaListManagerPanel extends HTMLElement {
 
   async _saveInventory() {
     if (this._busy) return;
+    const editingDialog = this._dialog;
     const { record, draft, pendingScan } = this._dialog;
+    if (pendingScan && !this._canEditPendingScan(this._dialog)) return this._showDialogError(haListManagerPanelText("scanner.edit_prompt", {}, this._hass));
     const stock = Number(draft.stock);
     const minimumStock = String(draft.minimum_stock).trim() === "" ? null : Number(draft.minimum_stock);
     const restockQuantity = Number(draft.restock_quantity);
@@ -6069,25 +6460,6 @@ class HaListManagerPanel extends HTMLElement {
       if (pendingScan) {
         const categoryName = String(draft.category_name || "").trim();
         const categoryId = this._matchCategoryId(categoryName, this._selectedInventoryListId) || draft.category_id || null;
-        const existingProduct = this._findInventoryProduct(pendingScan.product_id) || record?.product || null;
-        if (existingProduct) {
-          const updateResult = await haListManagerPanelTextRequest(this._hass, {
-            type: `${API}/products/update`,
-            product_id: existingProduct.id,
-            ean: existingProduct.ean || null,
-            name: existingProduct.name,
-            original_name: existingProduct.original_name || null,
-            brand: existingProduct.brand || null,
-            package_quantity: existingProduct.package_quantity || null,
-            category: existingProduct.category || null,
-            image_url: existingProduct.image_url || null,
-            label_ids: draft.label_ids || [],
-          });
-          if (updateResult?.product) {
-            const productIndex = this._products.findIndex((item) => item.id === existingProduct.id);
-            if (productIndex !== -1) this._products[productIndex] = updateResult.product;
-          }
-        }
         const productData = pendingScan.product_id ? {} : {
           name: String(draft.name || "").trim(),
           original_name: String(draft.original_name || "").trim() || null,
@@ -6097,9 +6469,12 @@ class HaListManagerPanel extends HTMLElement {
           image_url: String(draft.image_url || "").trim() || null,
           label_ids: draft.label_ids || [],
         };
-        await haListManagerPanelTextRequest(this._hass, {
+        this._savingPendingScanId = pendingScan.id;
+        const result = await haListManagerPanelTextRequest(this._hass, {
           type: `${API}/scanner/queue/resolve`,
           scan_id: pendingScan.id,
+          session_id: this._scanSessionId,
+          label_ids: draft.label_ids || [],
           corrected_stock: stock,
           minimum_stock: minimumStock,
           restock_quantity: restockQuantity,
@@ -6107,8 +6482,10 @@ class HaListManagerPanel extends HTMLElement {
           category_id: categoryId,
           category: categoryId ? null : categoryName || null,
           ...productData,
-        });
-        this._dialog = null;
+        }).finally(() => { if (this._savingPendingScanId === pendingScan.id) this._savingPendingScanId = null; });
+        if (result.history?.status !== "success") throw new Error(result.history?.message || haListManagerPanelText("scanner.edit_failed", {}, this._hass));
+        this._stopPendingScanPresence(pendingScan.id);
+        if (this._dialog === editingDialog) this._dialog = null;
         this._scanHistoryLoaded = false;
         await Promise.all([this._loadScanHistory(), this._loadInventory()]);
         return;
@@ -6969,6 +7346,7 @@ class HaListManagerPanel extends HTMLElement {
   }
 
   _styles() { return `
+    .off-refresh{margin:14px 0;padding:12px;border:1px solid var(--divider-color);border-left:3px solid var(--primary-color);border-radius:8px}.off-refresh>p{margin:6px 0 10px;color:var(--secondary-text-color);font-size:14px;line-height:1.4}.off-refresh label{display:flex!important;flex-direction:row!important;align-items:flex-start;gap:10px;margin:10px 0!important}.off-refresh input[type=checkbox]{flex:0 0 auto;width:20px!important;min-height:20px!important;height:20px;margin:2px 0 0;padding:0;accent-color:var(--primary-color)}.off-refresh label>span{display:flex;flex-direction:column;min-width:0;gap:4px}.off-refresh small{overflow-wrap:anywhere;white-space:normal;color:var(--secondary-text-color)}
     .legacy-import-warning-group{margin-top:10px;padding-top:10px;border-top:1px solid var(--divider-color)}.legacy-import-warning-reason{margin-top:10px}.legacy-import-warning-reason p{margin:0}.legacy-import-warning-reason ul{margin-top:6px}.legacy-import-warning-reason code{font-size:12px;overflow-wrap:anywhere;white-space:normal}.legacy-import-type-field{margin-bottom:14px}[data-legacy-inventory-help][hidden]{display:none}
     [data-legacy-input-block][hidden],[data-legacy-source-wrapper][hidden],[data-legacy-ean-section][hidden],[data-legacy-ean-source-wrapper][hidden]{display:none}.legacy-import-ean-conflicts{margin:14px 0;padding:12px;border-left:3px solid var(--warning-color,#ffa600);border-radius:6px;background:color-mix(in srgb,var(--warning-color,#ffa600) 8%,transparent)}[data-legacy-import-view] [data-legacy-source-fields][data-no-source="true"]{grid-template-columns:minmax(0,1fr)}[data-legacy-source-wrapper]{min-width:0}[data-legacy-import-view]>.content-header{padding-right:54px}[data-legacy-import-view] .settings-card{margin-top:16px}[data-legacy-import-view] p{line-height:1.5}[data-legacy-import-view] h4{margin:0 0 10px;font-size:16px}[data-legacy-import-view] h4 small{display:block;margin-top:4px;color:var(--secondary-text-color);font-weight:400}[data-legacy-import-view] .field-grid{grid-template-columns:minmax(0,1fr) minmax(0,1fr);align-items:end}[data-legacy-import-view] .field-grid>.field{margin-top:0}[data-legacy-import-view] ha-selector{min-width:0}[data-legacy-import-view] .setting-row{align-items:center;border-bottom:0}[data-legacy-import-view] .setting-row input{flex:0 0 auto;width:20px;height:20px;accent-color:var(--primary-color)}.legacy-import-yaml{font-family:var(--code-font-family,monospace)!important;font-size:13px!important;line-height:1.5;tab-size:2;white-space:pre;overflow-wrap:normal;overflow:auto}.legacy-import-source,.legacy-import-preview-list{margin-top:18px;padding:14px;border:1px solid var(--divider-color);border-radius:10px;overflow-wrap:anywhere}.legacy-import-notes{margin-top:14px;padding:10px 12px;border-left:3px solid var(--warning-color,#ffa600);border-radius:6px;background:color-mix(in srgb,var(--warning-color,#ffa600) 8%,transparent)}.legacy-import-notes summary{color:var(--warning-color,#ffa600)}.legacy-import-notes ul{padding-left:20px;margin-bottom:0}.legacy-import-notes li+li{margin-top:7px}.legacy-import-preview-list>details{margin-top:12px;padding-top:10px;border-top:1px solid var(--divider-color)}[data-legacy-import-view] summary{cursor:pointer}.legacy-import-definitions,.legacy-import-item-list{display:grid;gap:9px;margin-top:12px}.legacy-import-category{display:flex;align-items:center;gap:10px}.legacy-import-color{display:grid;place-items:center;flex:0 0 auto;width:34px;height:34px;border-radius:8px;color:var(--import-color,var(--primary-color));background:color-mix(in srgb,var(--import-color,var(--primary-color)) 16%,transparent)}.legacy-import-category>span:last-child,.legacy-import-item-list>div{display:flex;min-width:0;flex-direction:column;gap:4px}.legacy-import-category small,.legacy-import-item-list small{color:var(--secondary-text-color);line-height:1.4}.legacy-import-chip-list{display:flex;flex-wrap:wrap;gap:7px;margin-top:12px}.legacy-import-chip-list>span{padding:5px 9px;border:1px solid var(--divider-color);border-radius:999px;background:var(--secondary-background-color)}.legacy-import-chip-list>.field-help{flex-basis:100%}.legacy-import-file,.legacy-import-results>div{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:10px;padding:8px 10px;border:1px solid var(--divider-color);border-radius:8px;overflow-wrap:anywhere}.legacy-import-results>div{flex-wrap:wrap}.legacy-import-file>span{min-width:0}.legacy-import-file .icon-button{flex-shrink:0}[data-legacy-feedback]:empty{display:none}[data-legacy-feedback]{margin-top:12px}@media(max-width:600px){[data-legacy-import-view] .field-grid{grid-template-columns:minmax(0,1fr)}.legacy-import-source,.legacy-import-preview-list{padding:11px}[data-legacy-import-view] .settings-inline-actions>.ha-button{max-width:100%;white-space:normal}}
     .inventory-restock-latch-notice{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:10px;margin-top:10px;padding:11px 13px;border-left:4px solid var(--warning-color,#f0a000);border-radius:7px;background:color-mix(in srgb,var(--warning-color,#f0a000) 10%,transparent)}.inventory-restock-latch-notice>ha-icon{color:var(--warning-color,#f0a000)}.inventory-restock-latch-notice>span{display:flex;flex-direction:column;gap:3px}.inventory-restock-latch-notice small{color:var(--secondary-text-color);line-height:1.45}.inventory-restock-latch-notice .ha-button{white-space:nowrap}.inventory-restock-flag{display:inline-block;margin-left:7px;vertical-align:-3px;--mdc-icon-size:18px;color:var(--warning-color,#f0a000)}@media(max-width:600px){.inventory-restock-latch-notice{grid-template-columns:auto minmax(0,1fr)}.inventory-restock-latch-notice .ha-button{grid-column:2;justify-self:start}}
@@ -6978,12 +7356,13 @@ class HaListManagerPanel extends HTMLElement {
     [data-backup-view]>.content-header{padding-right:54px}.backup-record{margin-top:14px;padding:16px;border:1px solid var(--divider-color);border-left:4px solid var(--primary-color);border-radius:10px}.backup-record-heading{display:flex;align-items:center;gap:10px}.backup-record-heading ha-icon,.backup-origin,.backup-accent{color:var(--primary-color)}.backup-safety{border-left-color:var(--warning-color,#ffa600)}.backup-safety .backup-record-heading ha-icon,.backup-safety .backup-origin{color:var(--warning-color,#ffa600)}.backup-notice{display:flex;align-items:center;gap:10px;padding:12px 14px;border-left:3px solid var(--primary-color);border-radius:8px;background:color-mix(in srgb,var(--primary-color) 10%,transparent);line-height:1.5}.backup-notice ha-icon{flex-shrink:0;color:var(--primary-color)}.backup-success{border-color:var(--success-color,#43a047);background:color-mix(in srgb,var(--success-color,#43a047) 10%,transparent)}.backup-success ha-icon{color:var(--success-color,#43a047)}.data-backup-card .ha-button.backup-accent{color:var(--primary-color);border-color:var(--primary-color)}.backup-record strong{overflow-wrap:anywhere}.data-backup-card{margin-top:16px}.data-backup-card p{margin-top:10px}.data-backup-card .settings-inline-actions{margin-top:16px}.data-backup-card a.ha-button,[data-backup-feedback] a.ha-button{text-decoration:none}[data-backup-feedback]{margin-top:12px}[data-backup-feedback]:empty{display:none}[data-backup-feedback] .ha-button{margin-top:10px}.data-backup-card code{overflow-wrap:anywhere;white-space:normal}.data-backup-card li{margin-bottom:8px}.data-backup-card summary{cursor:pointer;color:var(--primary-color);margin-top:16px}
     .list-script-dialog{width:min(720px,100%)}.list-script-dialog input[type=checkbox]{width:20px;min-height:20px;flex:0 0 auto}.list-script-dialog .setting-row{padding:9px 0}
     .inventory-restock-dialog{width:min(680px,100%)}.inventory-restock-toggle{align-items:center}.inventory-restock-toggle input{flex:0 0 auto;width:22px;height:22px}.restock-mode-help{margin-top:16px;padding:11px 13px;border-left:4px solid var(--primary-color);border-radius:7px;background:color-mix(in srgb,var(--primary-color) 8%,transparent)}.restock-mode-help p{margin:6px 0;color:var(--secondary-text-color);font-size:14px;line-height:1.45}.inventory-restock-notice{display:flex;align-items:flex-start;gap:9px;margin-top:10px;padding:11px 13px;border-left:4px solid var(--warning-color,#f0a000);border-radius:7px;background:color-mix(in srgb,var(--warning-color,#f0a000) 10%,transparent)}.inventory-restock-notice ha-icon{flex:0 0 auto;--mdc-icon-size:21px;color:var(--warning-color,#f0a000)}.inventory-restock-notice span{line-height:1.45}.inventory-product-help{margin-top:7px}.inventory-create-product{margin-top:10px}.inventory-minimum-help{margin-top:7px}.inventory-category-help{margin-top:7px}.inventory-category-notice{display:flex;align-items:flex-start;gap:9px;margin-top:10px;padding:11px 13px;border-left:4px solid var(--primary-color);border-radius:7px;color:var(--primary-text-color);background:color-mix(in srgb,var(--primary-color) 11%,var(--card-background-color))}.inventory-category-notice ha-icon{flex:0 0 auto;--mdc-icon-size:21px;color:var(--primary-color)}.inventory-category-notice span{line-height:1.45}.inventory-product-clear{position:absolute;z-index:5;right:43px;top:50%;display:grid;place-items:center;width:34px;height:34px;padding:0;transform:translateY(-50%);border:0;border-radius:50%;color:var(--secondary-text-color);background:transparent;cursor:pointer}.inventory-product-clear[hidden]{display:none}.inventory-product-clear:hover,.inventory-product-clear:focus-visible{color:var(--primary-text-color);background:color-mix(in srgb,var(--primary-text-color) 12%,transparent)}.inventory-product-clear ha-icon{--mdc-icon-size:21px}.inventory-dialog-product-actions{align-items:center;justify-content:space-between;flex-direction:row;gap:14px}.inventory-dialog-product-actions>span{display:flex;min-width:0;flex-direction:column;gap:4px}.category-picker-options.inventory-product-picker-options button{grid-template-columns:44px minmax(0,1fr);gap:12px;min-height:60px}.inventory-product-picker-options button:disabled{opacity:.58;cursor:default}.inventory-product-option-image{position:relative!important;display:grid!important;place-items:center;width:42px;height:42px;overflow:hidden;border-radius:7px;color:var(--secondary-text-color);background:var(--secondary-background-color)}.inventory-product-option-image img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain}
-    .empty-state.compact{min-height:170px}.category-list-empty{padding:18px;color:var(--secondary-text-color);text-align:center}.category-page-actions{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:10px;margin:14px 0 18px}.category-specific-picker{display:grid;grid-template-columns:minmax(220px,440px);align-items:center;margin:18px 0 12px}.category-specific-heading{margin:18px 0 10px}.category-specific-heading>div{min-width:0}.category-specific-heading h3{margin:0 0 4px}.category-specific-heading p{margin:0;color:var(--secondary-text-color);line-height:1.45}.category-row{display:grid;grid-template-columns:minmax(0,1fr) auto auto;align-items:center;min-height:64px;border-bottom:1px solid var(--divider-color)}.category-row.definition-row{grid-template-columns:auto minmax(0,1fr) auto auto}.category-row.definition-row>.category-symbol{margin-left:14px}.category-row.definition-row>.category-open{display:flex;min-width:0;flex-direction:column;align-items:flex-start;gap:4px;padding:10px 14px}.category-row.definition-row>.category-open strong,.category-row.definition-row>.category-open small{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.category-row.definition-row>.row-actions{grid-column:4}.category-row:last-child,.dynamic-category-row:last-child{border-bottom:0}.category-symbol{display:grid;place-items:center;width:42px;height:42px;border-radius:50%;color:var(--category-color,var(--primary-color));background:color-mix(in srgb,var(--category-color,var(--primary-color)) 14%,transparent)}.category-open{display:grid;grid-template-columns:42px minmax(0,1fr);align-items:center;gap:12px;width:100%;min-height:63px;padding:10px 14px;border:0;color:var(--primary-text-color);background:transparent;text-align:left;cursor:pointer}.category-open-copy{display:flex;min-width:0;flex-direction:column;align-items:flex-start;gap:4px}.category-open-copy strong,.category-open-copy small{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.category-open:hover{background:var(--secondary-background-color)}.category-open small,.dynamic-category-row small{color:var(--secondary-text-color);font-size:14px}.color-swatch{width:26px;height:26px;border:2px solid var(--divider-color);border-radius:50%;background:var(--category-color)}.color-swatch.default{display:grid;place-items:center;width:34px;height:34px;color:var(--secondary-text-color);background:transparent}.color-swatch.default ha-icon{--mdc-icon-size:22px}.dynamic-category-row{display:flex;align-items:center;justify-content:space-between;gap:16px;min-height:72px;padding:10px 14px 10px 18px;border-bottom:1px solid var(--divider-color)}.dynamic-category-row>div{display:flex;flex-direction:column;gap:4px;min-width:0}.color-field{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:end;gap:12px}.color-field .ha-button{margin-bottom:3px}.category-product-page-header{display:grid;grid-template-columns:auto minmax(0,1fr);align-items:center;gap:14px;margin-bottom:22px}.category-product-page-header .heading-wrap{display:flex;align-items:center;gap:12px}.category-product-page-header h2{margin:0}.category-product-page-header p{margin:4px 0 0;color:var(--secondary-text-color)}.category-product-page-header .category-symbol{margin-left:0}.category-product-back{width:44px;height:44px}.category-rule-section{margin-bottom:24px}.category-rule-quick{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:9px}.category-rule-quick input{min-height:44px;padding:8px 11px;border:1px solid var(--divider-color);border-radius:8px;color:var(--primary-text-color);background:var(--secondary-background-color)}.category-rule-list{margin-top:12px;border:1px solid var(--divider-color);border-radius:9px;overflow:hidden}.category-rule-row{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;min-height:54px;padding:5px 8px 5px 14px;border-bottom:1px solid var(--divider-color)}.category-rule-row:last-child{border-bottom:0}.category-rule-row code{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--primary-text-color);font-size:15px}.category-rule-state{display:flex;align-items:center;justify-content:center;gap:8px;min-height:72px;color:var(--secondary-text-color)}.category-rule-state ha-circular-progress{width:24px;height:24px}.category-rule-empty{margin:0;padding:18px;color:var(--secondary-text-color);text-align:center}.category-products-section{margin-top:24px}.category-rules-dialog textarea,.category-dialog textarea{box-sizing:border-box;width:100%;padding:10px 12px;border:1px solid var(--divider-color);border-radius:8px;color:var(--primary-text-color);background:var(--secondary-background-color);font:inherit;resize:vertical}.category-product-page-list{padding:0;overflow:hidden}.category-product-page-row{display:grid;grid-template-columns:48px minmax(0,1fr) auto;align-items:center;gap:12px;min-height:76px;padding:8px 14px;border-bottom:1px solid var(--divider-color)}.category-product-page-row:last-child{border-bottom:0}.category-dialog{width:min(620px,100%)}.category-products-dialog{width:min(760px,100%)}.category-products-dialog>p{color:var(--secondary-text-color)}.category-product-search{display:grid;grid-template-columns:28px minmax(0,1fr);align-items:center;margin-top:16px;padding:0 12px;border:1px solid var(--divider-color);border-radius:9px;background:var(--secondary-background-color)}.category-product-search ha-icon{color:var(--secondary-text-color)}.category-product-search input{width:100%;min-height:48px;border:0;outline:0;color:var(--primary-text-color);background:transparent}.category-product-filter{display:flex;align-items:center;gap:8px;margin:10px 2px 0;color:var(--secondary-text-color);font-size:14px;cursor:pointer}.category-product-filter input{width:18px;height:18px;margin:0;accent-color:var(--primary-color)}.category-product-results{max-height:min(31vh,300px);overflow:auto;border:1px solid var(--divider-color);border-radius:9px;overscroll-behavior:contain}.category-product-results{margin-top:8px}.category-product-result{display:grid;grid-template-columns:48px minmax(0,1fr) auto;align-items:center;gap:10px;width:100%;min-height:64px;padding:7px 10px;border:0;border-bottom:1px solid var(--divider-color);color:var(--primary-text-color);background:transparent;text-align:left}.category-product-result{cursor:pointer}.category-product-result:hover{background:var(--secondary-background-color)}.category-product-result.conflict{background:color-mix(in srgb,var(--warning-color,#f0a000) 7%,transparent)}.category-product-result:disabled{opacity:.72;cursor:default}.category-product-result:last-child{border-bottom:0}.category-product-image{position:relative;display:grid;place-items:center;width:44px;height:44px;overflow:hidden;border-radius:7px;color:var(--secondary-text-color);background:var(--secondary-background-color)}.category-product-image img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain}.category-product-copy{display:flex;min-width:0;flex-direction:column;gap:3px}.category-product-copy strong,.category-product-copy small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.category-product-copy small{color:var(--secondary-text-color);font-size:13px}.category-product-status{display:flex;align-items:center;gap:5px;color:var(--primary-color);font-size:13px;white-space:nowrap}.category-product-status.current{color:var(--success-color,#43a047)}.category-product-status.conflict{color:var(--warning-color,#f0a000)}.category-product-status ha-icon{--mdc-icon-size:18px}.category-product-state{display:flex;align-items:center;justify-content:center;gap:9px;min-height:72px;padding:14px;color:var(--secondary-text-color);text-align:center}.category-product-state ha-circular-progress{width:24px;height:24px}.category-product-result-note{margin:0;padding:8px 10px;color:var(--secondary-text-color);font-size:12px}.inventory-toolbar{display:grid;grid-template-columns:minmax(220px,360px);margin-bottom:16px}.inventory-detail-stats{display:grid;grid-template-columns:repeat(4,minmax(120px,1fr));gap:12px;margin-bottom:18px}.inventory-detail-stats ha-card{display:flex;flex-direction:column;gap:3px;padding:16px}.inventory-detail-stats strong{font-size:25px}.inventory-detail-stats span{color:var(--secondary-text-color)}.inventory-detail-stats .warning strong{color:var(--warning-color,#f0a000)}.inventory-detail-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px}.detail-section{padding:18px}.section-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:14px}.section-heading h3{margin:0 0 4px}.section-heading p{margin:0;color:var(--secondary-text-color)}.muted-copy{margin:8px 0 0;color:var(--secondary-text-color);line-height:1.5}.list-category-chips{display:flex;flex-wrap:wrap;gap:8px}.list-category-chips span{display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border-radius:16px;color:var(--primary-text-color);background:color-mix(in srgb,var(--category-color,var(--primary-color)) 18%,transparent)}.list-category-chips ha-icon{--mdc-icon-size:18px;color:var(--category-color,var(--primary-color))}.dashboard-usage-list{display:grid;gap:8px}.dashboard-usage-list a{display:grid;grid-template-columns:28px minmax(0,1fr) 24px;align-items:center;gap:8px;padding:10px;border:1px solid var(--divider-color);border-radius:8px;color:var(--primary-text-color);text-decoration:none}.dashboard-usage-list a:hover{border-color:var(--primary-color);background:var(--secondary-background-color)}.dashboard-usage-list a>span{display:flex;flex-direction:column;gap:3px}.dashboard-usage-list small{color:var(--secondary-text-color)}.usage-state{display:flex;align-items:center;gap:9px;min-height:50px;color:var(--secondary-text-color)}.usage-state ha-circular-progress{width:28px;height:28px}.error-text{color:var(--error-color)}.inventory-row{display:grid;grid-template-columns:auto minmax(0,1fr) auto auto;align-items:center;min-height:82px;border-bottom:1px solid var(--divider-color);border-left:4px solid transparent}.inventory-row.low{border-left-color:var(--warning-color,#f0a000)}.inventory-row.empty{border-left-color:var(--error-color)}.inventory-image{position:relative;display:grid;place-items:center;width:54px;height:54px;margin-left:12px;overflow:hidden;border-radius:8px;color:var(--secondary-text-color);background:var(--secondary-background-color)}button.inventory-image{padding:0;border:0;cursor:pointer}button.inventory-image:hover{outline:2px solid var(--primary-color)}.inventory-image img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain}.inventory-open{display:flex;flex-direction:column;align-items:flex-start;gap:4px;min-height:80px;padding:12px 14px;border:0;color:var(--primary-text-color);background:transparent;text-align:left;cursor:pointer}.inventory-open:hover{background:var(--secondary-background-color)}.inventory-open small,.inventory-dialog-product small{color:var(--secondary-text-color);font-size:14px}.inventory-stock{display:grid;grid-template-columns:42px minmax(38px,auto) 42px;align-items:center;text-align:center}.inventory-stock>strong{font-size:20px}.inventory-dialog-product{display:flex;flex-direction:column;gap:4px;padding:12px 0}.inventory-groups{margin-bottom:22px}.inventory-groups>h3,.inventory-products>h3{margin:0 0 6px}.inventory-groups>p{margin:0 0 10px;color:var(--secondary-text-color)}.inventory-group-row{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;min-height:82px;border-bottom:1px solid var(--divider-color)}.inventory-group-row .detail-icon{margin-left:12px}.group-member-list{margin-top:18px;padding:10px 14px;border:1px solid var(--divider-color);border-radius:10px}.group-member-list legend{padding:0 6px}.group-member-choice{display:grid;grid-template-columns:auto minmax(0,1fr);align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--divider-color)}.group-member-choice:last-child{border-bottom:0}.group-member-choice>span{display:flex;flex-direction:column}.group-member-choice small{color:var(--secondary-text-color)}.inventory-group-dialog{width:min(720px,100%)}.inventory-group-fields{display:grid;grid-template-columns:minmax(180px,1fr) minmax(0,1fr);gap:14px;align-items:end}.inventory-group-fields .selector-field{width:100%}.group-move-warning{display:flex;flex-wrap:wrap;align-items:flex-start;gap:9px;margin:7px 0 12px;padding:10px 12px;border-left:4px solid var(--warning-color,#f0a000);border-radius:6px;background:color-mix(in srgb,var(--warning-color,#f0a000) 14%,var(--card-background-color));font-size:13px;line-height:1.45}.group-move-warning ha-icon{flex:0 0 auto;color:var(--warning-color,#f0a000)}.group-move-warning>span{flex:1;min-width:0}.show-grouped-toggle{display:flex;flex:0 0 100%;align-items:center;gap:8px;margin:4px 0 0 33px;color:var(--primary-text-color)}.show-grouped-toggle input{width:18px;height:18px}.group-member-search{display:grid;grid-template-columns:28px minmax(0,1fr);align-items:center;margin:0 0 9px;padding:0 10px;border:1px solid var(--divider-color);border-radius:8px;background:var(--secondary-background-color)}.group-member-search input{width:100%;min-height:44px;border:0;outline:0;color:var(--primary-text-color);background:transparent}.group-member-scroll{max-height:min(45vh,430px);overflow:auto;overscroll-behavior:contain}.group-member-choice.belongs-to-group{background:color-mix(in srgb,var(--warning-color,#f0a000) 7%,transparent)}.group-member-choice .move-note{display:flex;align-items:center;gap:4px;color:var(--warning-color,#f0a000)}.group-member-choice .move-note ha-icon{--mdc-icon-size:16px}.group-result-note,.group-picker-empty{padding:10px 4px;color:var(--secondary-text-color);font-size:12px}.nested-confirmation{z-index:1100}.confirmation-dialog{width:min(480px,100%);text-align:center}.confirmation-dialog>p{margin-top:10px;color:var(--secondary-text-color);line-height:1.5}.confirmation-dialog .dialog-actions{justify-content:center}.confirmation-icon{display:grid;place-items:center;width:54px;height:54px;margin:0 auto 12px;border-radius:50%;color:var(--warning-color,#f0a000);background:color-mix(in srgb,var(--warning-color,#f0a000) 14%,transparent)}.confirmation-icon ha-icon{--mdc-icon-size:31px}
+    .empty-state.compact{min-height:170px}.category-list-empty{padding:18px;color:var(--secondary-text-color);text-align:center}.category-page-actions{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:10px;margin:14px 0 18px}.category-specific-picker{display:grid;grid-template-columns:minmax(220px,440px);align-items:center;margin:18px 0 12px}.category-specific-heading{margin:18px 0 10px}.category-specific-heading>div{min-width:0}.category-specific-heading h3{margin:0 0 4px}.category-specific-heading p{margin:0;color:var(--secondary-text-color);line-height:1.45}.category-row{display:grid;grid-template-columns:minmax(0,1fr) auto auto;align-items:center;min-height:64px;border-bottom:1px solid var(--divider-color)}.category-row.definition-row{grid-template-columns:auto minmax(0,1fr) auto auto}.category-row.definition-row>.category-symbol{margin-left:14px}.category-row.definition-row>.category-open{display:flex;min-width:0;flex-direction:column;align-items:flex-start;gap:4px;padding:10px 14px}.category-row.definition-row>.category-open strong,.category-row.definition-row>.category-open small{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.category-row.definition-row>.row-actions{grid-column:4}.category-row:last-child,.dynamic-category-row:last-child{border-bottom:0}.category-symbol{display:grid;place-items:center;width:42px;height:42px;border-radius:50%;color:var(--category-color,var(--primary-color));background:color-mix(in srgb,var(--category-color,var(--primary-color)) 14%,transparent)}.category-open{display:grid;grid-template-columns:42px minmax(0,1fr);align-items:center;gap:12px;width:100%;min-height:63px;padding:10px 14px;border:0;color:var(--primary-text-color);background:transparent;text-align:left;cursor:pointer}.category-open-copy{display:flex;min-width:0;flex-direction:column;align-items:flex-start;gap:4px}.category-open-copy strong,.category-open-copy small{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.category-open:hover{background:var(--secondary-background-color)}.category-open small,.dynamic-category-row small{color:var(--secondary-text-color);font-size:14px}.color-swatch{width:26px;height:26px;border:2px solid var(--divider-color);border-radius:50%;background:var(--category-color)}.color-swatch.default{display:grid;place-items:center;width:34px;height:34px;color:var(--secondary-text-color);background:transparent}.color-swatch.default ha-icon{--mdc-icon-size:22px}.dynamic-category-row{display:flex;align-items:center;justify-content:space-between;gap:16px;min-height:72px;padding:10px 14px 10px 18px;border-bottom:1px solid var(--divider-color)}.dynamic-category-row>div{display:flex;flex-direction:column;gap:4px;min-width:0}.color-field{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:end;gap:12px}.color-field .ha-button{margin-bottom:3px}.category-product-page-header{display:grid;grid-template-columns:auto minmax(0,1fr);align-items:center;gap:14px;margin-bottom:22px}.category-product-page-header .heading-wrap{display:flex;align-items:center;gap:12px}.category-product-page-header h2{margin:0}.category-product-page-header p{margin:4px 0 0;color:var(--secondary-text-color)}.category-product-page-header .category-symbol{margin-left:0}.category-product-back{width:44px;height:44px}.category-rule-section{margin-bottom:24px}.category-rule-quick{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:9px}.category-rule-quick input{min-height:44px;padding:8px 11px;border:1px solid var(--divider-color);border-radius:8px;color:var(--primary-text-color);background:var(--secondary-background-color)}.category-rule-list{margin-top:12px;border:1px solid var(--divider-color);border-radius:9px;overflow:hidden}.category-rule-row{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;min-height:54px;padding:5px 8px 5px 14px;border-bottom:1px solid var(--divider-color)}.category-rule-row:last-child{border-bottom:0}.category-rule-row code{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--primary-text-color);font-size:15px}.category-rule-state{display:flex;align-items:center;justify-content:center;gap:8px;min-height:72px;color:var(--secondary-text-color)}.category-rule-state ha-circular-progress{width:24px;height:24px}.category-rule-empty{margin:0;padding:18px;color:var(--secondary-text-color);text-align:center}.category-products-section{margin-top:24px}.category-rules-dialog textarea,.category-dialog textarea{box-sizing:border-box;width:100%;padding:10px 12px;border:1px solid var(--divider-color);border-radius:8px;color:var(--primary-text-color);background:var(--secondary-background-color);font:inherit;resize:vertical}.category-product-page-list{padding:0;overflow:hidden}.category-product-page-row{display:grid;grid-template-columns:48px minmax(0,1fr) auto;align-items:center;gap:12px;min-height:76px;padding:8px 14px;border-bottom:1px solid var(--divider-color)}.category-product-page-row:last-child{border-bottom:0}.category-dialog{width:min(620px,100%)}.category-products-dialog{width:min(760px,100%)}.category-products-dialog>p{color:var(--secondary-text-color)}.category-product-search{display:grid;grid-template-columns:28px minmax(0,1fr);align-items:center;margin-top:16px;padding:0 12px;border:1px solid var(--divider-color);border-radius:9px;background:var(--secondary-background-color)}.category-product-search ha-icon{color:var(--secondary-text-color)}.category-product-search input{width:100%;min-height:48px;border:0;outline:0;color:var(--primary-text-color);background:transparent}.category-product-filter{display:flex;align-items:center;gap:8px;margin:10px 2px 0;color:var(--secondary-text-color);font-size:14px;cursor:pointer}.category-product-filter input{width:18px;height:18px;margin:0;accent-color:var(--primary-color)}.category-product-results{max-height:min(31vh,300px);overflow:auto;border:1px solid var(--divider-color);border-radius:9px;overscroll-behavior:contain}.category-product-results{margin-top:8px}.category-product-result{display:grid;grid-template-columns:48px minmax(0,1fr) auto;align-items:center;gap:10px;width:100%;min-height:64px;padding:7px 10px;border:0;border-bottom:1px solid var(--divider-color);color:var(--primary-text-color);background:transparent;text-align:left}.category-product-result{cursor:pointer}.category-product-result:hover{background:var(--secondary-background-color)}.category-product-result.conflict{background:color-mix(in srgb,var(--warning-color,#f0a000) 7%,transparent)}.category-product-result:disabled{opacity:.72;cursor:default}.category-product-result:last-child{border-bottom:0}.category-product-image{position:relative;display:grid;place-items:center;width:44px;height:44px;overflow:hidden;border-radius:7px;color:var(--secondary-text-color);background:var(--secondary-background-color)}.category-product-image img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain}.category-product-copy{display:flex;min-width:0;flex-direction:column;gap:3px}.category-product-copy strong,.category-product-copy small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.category-product-copy small{color:var(--secondary-text-color);font-size:13px}.category-product-status{display:flex;align-items:center;gap:5px;color:var(--primary-color);font-size:13px;white-space:nowrap}.category-product-status.current{color:var(--success-color,#43a047)}.category-product-status.conflict{color:var(--warning-color,#f0a000)}.category-product-status ha-icon{--mdc-icon-size:18px}.category-product-state{display:flex;align-items:center;justify-content:center;gap:9px;min-height:72px;padding:14px;color:var(--secondary-text-color);text-align:center}.category-product-state ha-circular-progress{width:24px;height:24px}.category-product-result-note{margin:0;padding:8px 10px;color:var(--secondary-text-color);font-size:12px}.inventory-toolbar{display:grid;grid-template-columns:minmax(220px,360px);margin-bottom:16px}.inventory-detail-stats{display:grid;grid-template-columns:repeat(4,minmax(120px,1fr));gap:12px;margin-bottom:18px}.inventory-detail-stats ha-card{display:flex;flex-direction:column;gap:3px;padding:16px}.inventory-detail-stats strong{font-size:25px}.inventory-detail-stats span{color:var(--secondary-text-color)}.inventory-detail-stats .warning strong{color:var(--warning-color,#f0a000)}.inventory-detail-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px}.detail-section{padding:18px}.section-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:14px}.section-heading h3{margin:0 0 4px}.section-heading p{margin:0;color:var(--secondary-text-color)}.muted-copy{margin:8px 0 0;color:var(--secondary-text-color);line-height:1.5}.list-category-chips{display:flex;flex-wrap:wrap;gap:8px}.list-category-chips span{display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border-radius:16px;color:var(--primary-text-color);background:color-mix(in srgb,var(--category-color,var(--primary-color)) 18%,transparent)}.list-category-chips ha-icon{--mdc-icon-size:18px;color:var(--category-color,var(--primary-color))}.dashboard-usage-list{display:grid;gap:8px}.dashboard-usage-list a{display:grid;grid-template-columns:28px minmax(0,1fr) 24px;align-items:center;gap:8px;padding:10px;border:1px solid var(--divider-color);border-radius:8px;color:var(--primary-text-color);text-decoration:none}.dashboard-usage-list a:hover{border-color:var(--primary-color);background:var(--secondary-background-color)}.dashboard-usage-list a>span{display:flex;flex-direction:column;gap:3px}.dashboard-usage-list small{color:var(--secondary-text-color)}.usage-state{display:flex;align-items:center;gap:9px;min-height:50px;color:var(--secondary-text-color)}.usage-state ha-circular-progress{width:28px;height:28px}.error-text{color:var(--error-color)}.inventory-row{display:grid;grid-template-columns:auto minmax(0,1fr) auto auto;align-items:center;min-height:82px;border-bottom:1px solid var(--divider-color);border-left:4px solid transparent}.inventory-row.low{border-left-color:var(--warning-color,#f0a000)}.inventory-row.empty{border-left-color:var(--error-color)}.inventory-image{position:relative;display:grid;place-items:center;width:54px;height:54px;margin-left:12px;overflow:hidden;border-radius:8px;color:var(--secondary-text-color);background:var(--secondary-background-color)}button.inventory-image{padding:0;border:0;cursor:pointer}button.inventory-image:hover{outline:2px solid var(--primary-color)}.inventory-image img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain}.inventory-open{display:flex;flex-direction:column;align-items:flex-start;gap:4px;min-height:80px;padding:12px 14px;border:0;color:var(--primary-text-color);background:transparent;text-align:left;cursor:pointer}.inventory-open:hover{background:var(--secondary-background-color)}.inventory-open small,.inventory-dialog-product small{color:var(--secondary-text-color);font-size:14px}.inventory-stock{display:grid;grid-template-columns:42px minmax(38px,auto) 42px;align-items:center;text-align:center}.inventory-stock>strong{font-size:20px}.inventory-dialog-product{display:flex;flex-direction:column;gap:4px;padding:12px 0}.inventory-groups{margin-bottom:22px}.inventory-groups>h3,.inventory-products>h3{margin:0 0 6px}.inventory-groups>p{margin:0 0 10px;color:var(--secondary-text-color)}.inventory-group-row{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;min-height:82px;border-bottom:1px solid var(--divider-color)}.inventory-group-row .detail-icon{margin-left:12px}.group-member-list{margin-top:18px;padding:10px 14px;border:1px solid var(--divider-color);border-radius:10px}.group-member-list legend{padding:0 6px}.group-member-choice{display:grid;grid-template-columns:auto minmax(0,1fr);align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--divider-color)}.group-member-choice:last-child{border-bottom:0}.selected-group-member{grid-template-columns:minmax(0,1fr) auto}.selected-group-members{max-height:min(35vh,320px);overflow:auto;overscroll-behavior:contain}.group-add-title{margin:20px 0 8px;font-size:16px}.group-member-choice>span{display:flex;flex-direction:column}.group-member-choice small{color:var(--secondary-text-color)}.inventory-group-dialog{width:min(720px,100%)}.inventory-group-fields{display:grid;grid-template-columns:minmax(180px,1fr) minmax(0,1fr);gap:14px;align-items:end}.inventory-group-fields .selector-field{width:100%}.group-move-warning{display:flex;flex-wrap:wrap;align-items:flex-start;gap:9px;margin:7px 0 12px;padding:10px 12px;border-left:4px solid var(--warning-color,#f0a000);border-radius:6px;background:color-mix(in srgb,var(--warning-color,#f0a000) 14%,var(--card-background-color));font-size:13px;line-height:1.45}.group-move-warning ha-icon{flex:0 0 auto;color:var(--warning-color,#f0a000)}.group-move-warning>span{flex:1;min-width:0}.show-grouped-toggle{display:flex;flex:0 0 100%;align-items:center;gap:8px;margin:4px 0 0 33px;color:var(--primary-text-color)}.show-grouped-toggle input{width:18px;height:18px}.group-member-search{display:grid;grid-template-columns:28px minmax(0,1fr);align-items:center;margin:0 0 9px;padding:0 10px;border:1px solid var(--divider-color);border-radius:8px;background:var(--secondary-background-color)}.group-member-search input{width:100%;min-height:44px;border:0;outline:0;color:var(--primary-text-color);background:transparent}.group-member-scroll{max-height:min(45vh,430px);overflow:auto;overscroll-behavior:contain}.group-member-choice.belongs-to-group{background:color-mix(in srgb,var(--warning-color,#f0a000) 7%,transparent)}.group-member-choice .move-note{display:flex;align-items:center;gap:4px;color:var(--warning-color,#f0a000)}.group-member-choice .move-note ha-icon{--mdc-icon-size:16px}.group-result-note,.group-picker-empty{padding:10px 4px;color:var(--secondary-text-color);font-size:12px}.nested-confirmation{z-index:1100}.confirmation-dialog{width:min(480px,100%);text-align:center}.confirmation-dialog>p{margin-top:10px;color:var(--secondary-text-color);line-height:1.5}.confirmation-dialog .dialog-actions{justify-content:center}.confirmation-icon{display:grid;place-items:center;width:54px;height:54px;margin:0 auto 12px;border-radius:50%;color:var(--warning-color,#f0a000);background:color-mix(in srgb,var(--warning-color,#f0a000) 14%,transparent)}.confirmation-icon ha-icon{--mdc-icon-size:31px}
     .scanner-requirements,.scanner-target-card,.simulation-card,.scanner-defaults{margin-top:16px}.scanner-requirements{display:grid;grid-template-columns:44px minmax(0,1fr);align-items:start;gap:14px}.scanner-requirements>ha-icon{--mdc-icon-size:34px;color:var(--primary-color)}.scanner-requirements>div{display:flex;flex-direction:column;align-items:flex-start;gap:10px}.scanner-requirements p{color:var(--secondary-text-color);line-height:1.55}.scanner-requirements .ha-button{text-decoration:none}.scanner-default-grid,.scanner-route-fields{grid-template-columns:repeat(2,minmax(0,1fr));align-items:end}.active-target{display:flex;align-items:center;gap:14px;padding:14px;border-left:4px solid var(--success-color,#43a047);border-radius:8px;background:color-mix(in srgb,var(--success-color,#43a047) 10%,transparent)}.active-target.inactive{border-left-color:var(--secondary-text-color);background:var(--secondary-background-color)}.active-target>ha-icon{--mdc-icon-size:30px;color:var(--success-color,#43a047)}.active-target.inactive>ha-icon{color:var(--secondary-text-color)}.active-target>div{display:flex;flex:1;flex-direction:column;gap:4px}.active-target small{color:var(--secondary-text-color)}.scanner-heading{margin-top:26px}.scanner-heading>div>p{margin-top:4px}.scanner-heading code{font-size:13px}.scanner-row{display:grid;grid-template-columns:auto minmax(0,1fr) auto auto;align-items:center;min-height:82px;border-bottom:1px solid var(--divider-color)}.scanner-row:last-child,.history-row:last-child{border-bottom:0}.scanner-row.disabled{opacity:.62}.scanner-icon{display:grid;place-items:center;width:48px;height:48px;margin-left:14px;border-radius:50%;color:var(--primary-color);background:color-mix(in srgb,var(--primary-color) 13%,transparent)}.scanner-open{display:flex;flex-direction:column;align-items:flex-start;gap:3px;min-height:80px;padding:10px 14px;border:0;color:var(--primary-text-color);background:transparent;text-align:left;cursor:pointer}.scanner-open:hover{background:var(--secondary-background-color)}.scanner-open small,.scanner-open span{color:var(--secondary-text-color)}.scanner-state{margin-right:8px;padding:4px 8px;border-radius:12px;color:var(--secondary-text-color);background:var(--secondary-background-color);font-size:12px}.scanner-state.enabled{color:var(--success-color,#43a047);background:color-mix(in srgb,var(--success-color,#43a047) 12%,transparent)}.simulation-grid{display:grid;grid-template-columns:repeat(3,minmax(150px,1fr));column-gap:16px;row-gap:20px;align-items:end}.simulation-grid>.field{margin-top:0}.scanner-route-fields{margin-top:14px}.simulation-result{display:flex;align-items:center;gap:9px;margin-top:14px;padding:11px 13px;border-left:4px solid var(--error-color);background:color-mix(in srgb,var(--error-color) 10%,transparent)}.simulation-result.success{border-left-color:var(--success-color,#43a047);background:color-mix(in srgb,var(--success-color,#43a047) 10%,transparent)}.simulation-result.warning{border-left-color:var(--warning-color,#f0a000);background:color-mix(in srgb,var(--warning-color,#f0a000) 10%,transparent)}.scan-history-tabs{display:flex;flex-wrap:wrap;gap:6px;margin:14px 0;border-bottom:1px solid var(--divider-color)}.scan-history-tabs button{display:flex;align-items:center;gap:8px;padding:11px 16px;border:0;border-bottom:3px solid transparent;color:var(--secondary-text-color);background:transparent;cursor:pointer}.scan-history-tabs button.active{border-bottom-color:var(--primary-color);color:var(--primary-color)}.scan-history-tabs ha-icon{--mdc-icon-size:21px}.label-tabs button>span{min-width:24px;padding:2px 7px;border-radius:999px;background:var(--secondary-background-color);font-size:12px}.todo-due-fields{grid-template-columns:minmax(150px,1fr) minmax(110px,.65fr)}.todo-recurrence-fields{grid-template-columns:minmax(100px,1fr) minmax(120px,1fr)}.scan-pagination{display:flex;align-items:center;justify-content:flex-end;flex-wrap:wrap;gap:14px;margin:12px 0 24px;color:var(--secondary-text-color);font-size:13px}.scan-pagination label,.scan-pagination>div{display:flex;align-items:center;gap:8px}.scan-pagination select{min-height:34px;padding:4px 28px 4px 9px;border:1px solid var(--divider-color);border-radius:6px;color:var(--primary-text-color);background:var(--card-background-color)}.scan-pagination .icon-button:disabled{opacity:.35;cursor:default}.history-row{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:start;gap:12px;padding:14px;border-bottom:1px solid var(--divider-color)}.history-status{display:grid;place-items:center;width:38px;height:38px;border-radius:50%;color:var(--error-color);background:color-mix(in srgb,var(--error-color) 12%,transparent)}.history-status.success{color:var(--success-color,#43a047);background:color-mix(in srgb,var(--success-color,#43a047) 12%,transparent)}.history-status.warning{color:var(--warning-color,#f0a000);background:color-mix(in srgb,var(--warning-color,#f0a000) 12%,transparent)}.history-status.neutral{color:var(--secondary-text-color);background:var(--secondary-background-color)}.history-main{display:flex;flex-direction:column;gap:3px}.history-main small,.history-main span,.history-main em{color:var(--secondary-text-color);font-size:13px}.history-main em{margin-top:3px}.history-row>code{color:var(--secondary-text-color);font-size:12px}.pending-history-row>.row-actions{display:flex;align-items:center;gap:5px}.pending-scan-notice{display:flex;align-items:flex-start;gap:11px;margin:4px 0 12px;padding:11px 13px;border-left:4px solid var(--warning-color,#f0a000);border-radius:6px;background:color-mix(in srgb,var(--warning-color,#f0a000) 12%,transparent)}.pending-scan-notice>ha-icon{color:var(--warning-color,#f0a000)}.pending-scan-notice>div{display:flex;flex-direction:column;gap:3px}.pending-scan-notice span{color:var(--secondary-text-color);font-size:13px;line-height:1.45}.compact-setting{margin-top:8px}.scanner-dialog{width:min(620px,100%)}
     .category-order-controls{display:grid;grid-template-columns:minmax(240px,360px) minmax(0,1fr);align-items:center;gap:18px;margin-bottom:14px;padding:16px}.category-order-selectors{display:grid;gap:10px}.category-order-controls label{display:flex;flex-direction:column;gap:6px;color:var(--secondary-text-color)}.category-order-controls select{min-height:46px;padding:0 12px;border:1px solid var(--divider-color);border-radius:7px;color:var(--primary-text-color);background:var(--secondary-background-color)}.category-order-controls p{display:flex;align-items:flex-start;gap:9px;margin:0;color:var(--secondary-text-color);line-height:1.45}.category-order-controls p ha-icon{flex:0 0 auto;color:var(--primary-color)}.category-order-state{grid-column:1/-1;display:inline-flex;align-items:center;gap:7px;width:max-content;max-width:100%;padding:6px 10px;border-radius:16px;color:var(--secondary-text-color);background:var(--secondary-background-color);font-size:13px}.category-order-state.custom{color:var(--warning-color,#f0a000);background:color-mix(in srgb,var(--warning-color,#f0a000) 13%,transparent)}.category-order-state ha-icon{--mdc-icon-size:18px}.category-order-row{display:grid;grid-template-columns:42px 58px minmax(0,1fr) 110px 92px;align-items:center;min-height:76px;border-bottom:1px solid var(--divider-color)}.category-order-row:last-child{border-bottom:0}.category-order-row.dragging{opacity:.45}.drag-handle{display:grid;place-items:center;height:100%;color:var(--secondary-text-color);cursor:grab}.drag-handle:active{cursor:grabbing}.category-order-name{display:flex;flex-direction:column;gap:4px;min-width:0}.category-order-name strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.category-order-name small{color:var(--secondary-text-color)}.category-position-field{display:flex;flex-direction:column;gap:3px;color:var(--secondary-text-color);font-size:12px}.category-position-field input{width:86px;min-height:40px;padding:0 8px;border:1px solid var(--divider-color);border-radius:6px;color:var(--primary-text-color);background:var(--secondary-background-color)}.category-order-arrows{display:flex}.category-order-actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:16px}
     .favorite-overview{margin:0 0 22px}.favorite-overview-heading{display:flex;align-items:center;gap:11px;margin-bottom:10px}.favorite-overview-heading>ha-icon{color:#ffc107;--mdc-icon-size:27px}.favorite-overview-heading p{margin-top:3px;color:var(--secondary-text-color)}.favorite-shortcut-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:10px}.favorite-shortcut{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;min-height:70px;border:1px solid var(--divider-color);border-radius:11px;background:var(--card-background-color);overflow:hidden}.favorite-shortcut>button:first-child{display:grid;grid-template-columns:38px minmax(0,1fr);align-items:center;gap:10px;min-height:68px;padding:9px 8px 9px 14px;border:0;color:var(--primary-text-color);background:transparent;text-align:left;cursor:pointer}.favorite-shortcut>button:first-child:hover{background:var(--secondary-background-color)}.favorite-shortcut>button:first-child>ha-icon{color:var(--primary-color)}.favorite-shortcut>button:first-child>span{display:flex;flex-direction:column;gap:3px;min-width:0}.favorite-shortcut strong,.favorite-shortcut small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.favorite-shortcut small{color:var(--secondary-text-color)}.favorite-shortcut.missing{opacity:.7}.overview-section-title{margin:26px 0 12px;font-size:18px;font-weight:600}.overview-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.overview-card{display:flex;flex-direction:column;gap:16px;min-height:142px}.overview-card-head{display:flex;align-items:center;gap:14px}.overview-card-head>ha-icon{--mdc-icon-size:30px;color:var(--primary-color)}.overview-card.warning .overview-card-head>ha-icon{color:var(--warning-color,#f0a000)}.overview-card-head>div{display:flex;flex:1;align-items:baseline;justify-content:space-between;gap:12px}.overview-card-head span{color:var(--secondary-text-color)}.overview-card-head strong{font-size:28px;font-weight:500}.overview-card-details{display:flex;flex-wrap:wrap;gap:8px 20px;padding-top:13px;border-top:1px solid var(--divider-color)}.overview-card-details>span{display:flex;align-items:baseline;gap:7px}.overview-card-details small{color:var(--secondary-text-color);font-size:13px}.overview-card-details strong{font-size:14px}.overview-note{display:flex;align-items:flex-start;gap:10px;margin-top:18px;padding:4px 2px;color:var(--secondary-text-color);font-size:13px;line-height:1.5}.overview-note ha-icon{flex:0 0 auto;--mdc-icon-size:19px;color:var(--primary-color)}
     .favorite-empty{min-height:150px}.list-detail-tabs{margin-bottom:18px}.list-detail-tabs button{display:inline-flex;align-items:center;gap:7px}.list-detail-tabs ha-icon{--mdc-icon-size:19px}.list-scope-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px;margin-bottom:16px}.list-scope-card{min-width:0}.list-scope-card .section-heading{align-items:center}.list-scope-card .section-heading .icon-button{flex:0 0 auto}.list-scope-pills{display:flex;flex-wrap:wrap;gap:6px}.list-scope-pills button{display:inline-flex;align-items:center;gap:5px;max-width:100%;min-height:28px;padding:3px 8px;border:1px solid color-mix(in srgb,var(--scope-color,var(--primary-color)) 45%,var(--divider-color));border-radius:15px;color:var(--primary-text-color);background:color-mix(in srgb,var(--scope-color,var(--primary-color)) 17%,transparent);font-size:12px;cursor:pointer}.list-scope-pills button:hover{border-color:var(--scope-color,var(--primary-color));background:color-mix(in srgb,var(--scope-color,var(--primary-color)) 25%,transparent)}.list-scope-pills ha-icon{flex:0 0 auto;--mdc-icon-size:15px;color:var(--scope-color,var(--primary-color))}.list-scope-pills span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.list-assignment-links{display:flex;flex-wrap:wrap;gap:6px;margin-top:12px;padding-top:10px;border-top:1px solid var(--divider-color)}.list-assignment-links button{display:grid;grid-template-columns:18px minmax(0,1fr);align-items:center;gap:7px;width:100%;min-height:46px;padding:6px 10px;border:1px solid var(--divider-color);border-radius:23px;color:var(--secondary-text-color);background:transparent;font-size:12px;text-align:left;cursor:pointer}.list-assignment-links button:hover{border-color:var(--primary-color);color:var(--primary-color);background:var(--secondary-background-color)}.list-assignment-links ha-icon{--mdc-icon-size:16px}.list-assignment-link-copy{display:flex;min-width:0;flex-direction:column;gap:2px}.list-assignment-link-copy>span,.list-assignment-link-copy>strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.list-assignment-links strong{color:var(--primary-text-color);font-size:12px;font-weight:600}.list-overview-bottom{margin-top:0}.list-availability-matrix{display:grid;grid-template-columns:minmax(94px,1.25fr) repeat(3,minmax(64px,1fr));align-items:center;margin-top:12px;border-top:1px solid var(--divider-color);border-left:1px solid var(--divider-color);border-radius:10px;overflow:hidden}.list-availability-matrix>*{display:flex;align-items:center;justify-content:center;min-height:43px;padding:6px;border-right:1px solid var(--divider-color);border-bottom:1px solid var(--divider-color);text-align:center}.list-availability-matrix>strong[role="rowheader"]{justify-content:flex-start;padding-left:10px}.list-availability-matrix>strong[role="columnheader"]{font-size:12px;color:var(--secondary-text-color)}.list-availability-toggle{border-top:0;border-left:0;background:transparent;color:var(--secondary-text-color);cursor:pointer}.list-availability-toggle:hover{background:var(--secondary-background-color)}.list-availability-toggle ha-icon,.list-availability-own ha-icon{--mdc-icon-size:21px}.list-availability-toggle.enabled ha-icon,.list-availability-own ha-icon{color:var(--success-color,#43a047)}.list-availability-toggle.disabled ha-icon{color:var(--disabled-text-color,var(--secondary-text-color))}.list-availability-own{gap:5px}.list-availability-own strong{font-size:13px}.list-availability-help{margin:10px 0 0}.list-detail-stats{margin-top:0}
-    .entity-history-row[hidden],.entity-history-list[hidden],[data-entity-history-empty][hidden]{display:none}.entity-sample-visibility{display:flex;align-items:center;gap:8px;margin:14px 0}.entity-sample-visibility input{width:18px;height:18px}.entity-sample-hidden{display:inline-flex;align-items:center;gap:5px;color:var(--warning-color,#ffb300);font-size:12px}.entity-sample-hidden ha-icon{--mdc-icon-size:17px}.sample-hidden{border-left:3px solid var(--warning-color,#ffb300);padding-left:9px}.entity-history-intro{margin-bottom:14px;border-left:4px solid var(--primary-color)}.entity-history-intro p{margin-top:5px;color:var(--secondary-text-color);line-height:1.5}.entity-history-add{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:end;gap:12px;margin-bottom:14px}.entity-import-id{overflow-wrap:anywhere}.entity-import-status{margin:14px 0;padding:10px 12px;border-left:4px solid var(--primary-color);background:color-mix(in srgb,var(--primary-color) 10%,transparent);line-height:1.5}.entity-history-import-sources{display:flex;flex-wrap:wrap;gap:10px 22px;margin:14px 0}.entity-history-import-sources label{display:flex;align-items:center;gap:8px}.entity-history-import-sources input{width:18px;height:18px}.entity-history-list{padding:0;overflow:hidden}.dialog.entity-samples-dialog{display:flex;flex-direction:column;width:min(850px,calc(100vw - 40px))}.entity-samples-dialog>*{flex-shrink:0}.entity-samples-dialog .field-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.entity-sample-filters{margin:12px 0}.entity-sample-filters summary{cursor:pointer;color:var(--primary-color)}.entity-sample-filters[open] summary{margin-bottom:12px}@media(max-width:600px){.entity-samples-dialog .field-grid{grid-template-columns:1fr}.entity-samples-dialog .dialog-actions .ha-button{flex:1 1 auto;min-height:44px;height:auto;padding:10px 14px}}.entity-samples-list{flex:1 1 auto;min-height:0;max-height:45vh;overflow:auto;overscroll-behavior:contain;margin:16px 0}.entity-sample-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 4px;border-bottom:1px solid var(--divider-color)}.entity-sample-row>div{display:flex;min-width:0;flex-direction:column;gap:4px}.entity-sample-row strong{overflow-wrap:anywhere}.entity-sample-row small{color:var(--secondary-text-color)}.entity-sample-status{padding:12px;color:var(--success-color,#43a047)}.entity-sample-attributes{margin:14px 0}.entity-sample-attributes summary{cursor:pointer;color:var(--primary-color)}.entity-sample-attributes pre{white-space:pre-wrap;overflow-wrap:anywhere}.entity-sample-attributes textarea{width:100%;box-sizing:border-box;font:inherit}.entity-history-row{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:13px;min-height:86px;padding:10px 16px;border-bottom:1px solid var(--divider-color)}.entity-history-row:last-child{border-bottom:0}.entity-history-icon{display:grid;place-items:center;width:44px;height:44px;border-radius:50%;color:var(--primary-color);background:color-mix(in srgb,var(--primary-color) 13%,transparent)}.entity-history-details{display:flex;min-width:0;flex-direction:column;gap:3px}.entity-history-details code,.entity-history-details small{overflow:hidden;color:var(--secondary-text-color);text-overflow:ellipsis;white-space:nowrap}.entity-history-actions{display:flex;align-items:center;gap:4px}
+    [data-take-pending-scan][hidden]{display:none}.pending-scan-fields{border:0;margin:0;padding:0;min-width:0}.pending-scan-fields:disabled{opacity:.7}.pending-scan-collaboration{padding:10px 12px;border-left:3px solid var(--primary-color);background:color-mix(in srgb,var(--primary-color) 8%,transparent)}
+    .entity-history-row[hidden],.entity-history-list[hidden],[data-entity-history-empty][hidden]{display:none}.entity-sample-visibility{display:flex;align-items:center;gap:8px;margin:14px 0}.entity-sample-visibility input{width:18px;height:18px}.entity-sample-hidden{display:inline-flex;align-items:center;gap:5px;color:var(--warning-color,#ffb300);font-size:12px}.entity-sample-hidden ha-icon{--mdc-icon-size:17px}.sample-hidden{border-left:3px solid var(--warning-color,#ffb300);padding-left:9px}.entity-history-intro{margin-bottom:14px;border-left:4px solid var(--primary-color)}.entity-history-intro p{margin-top:5px;color:var(--secondary-text-color);line-height:1.5}.entity-history-recording-option{display:flex;align-items:flex-start;gap:10px;margin-top:14px;line-height:1.45}.entity-history-recording-option input{width:18px;height:18px;flex:0 0 18px;margin-top:2px}.entity-history-recording-option span{min-width:0}.entity-history-recording-option small{display:block;margin-top:4px;color:var(--secondary-text-color)}.entity-history-add>.entity-history-recording-option{grid-column:1/-1;margin-top:0}.entity-history-add{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:end;gap:12px;margin-bottom:14px}.entity-import-id{overflow-wrap:anywhere}.entity-import-status{margin:14px 0;padding:10px 12px;border-left:4px solid var(--primary-color);background:color-mix(in srgb,var(--primary-color) 10%,transparent);line-height:1.5}.entity-history-import-sources{display:flex;flex-wrap:wrap;gap:10px 22px;margin:14px 0}.entity-history-import-sources label{display:flex;align-items:center;gap:8px}.entity-history-import-sources input{width:18px;height:18px}.entity-history-list{padding:0;overflow:hidden}.dialog.entity-samples-dialog{display:flex;flex-direction:column;width:min(850px,calc(100vw - 40px))}.entity-samples-dialog>*{flex-shrink:0}.entity-samples-dialog .field-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.entity-sample-filters{margin:12px 0}.entity-sample-filters summary{cursor:pointer;color:var(--primary-color)}.entity-sample-filters[open] summary{margin-bottom:12px}@media(max-width:600px){.entity-samples-dialog .field-grid{grid-template-columns:1fr}.entity-samples-dialog .dialog-actions .ha-button{flex:1 1 auto;min-height:44px;height:auto;padding:10px 14px}}.entity-samples-list{flex:1 1 auto;min-height:0;max-height:45vh;overflow:auto;overscroll-behavior:contain;margin:16px 0}.entity-sample-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 4px;border-bottom:1px solid var(--divider-color)}.entity-sample-row>div{display:flex;min-width:0;flex-direction:column;gap:4px}.entity-sample-row strong{overflow-wrap:anywhere}.entity-sample-row small{color:var(--secondary-text-color)}.entity-sample-status{padding:12px;color:var(--success-color,#43a047)}.entity-sample-attributes{margin:14px 0}.entity-sample-attributes summary{cursor:pointer;color:var(--primary-color)}.entity-sample-attributes pre{white-space:pre-wrap;overflow-wrap:anywhere}.entity-sample-attributes textarea{width:100%;box-sizing:border-box;font:inherit}.entity-history-row{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:13px;min-height:86px;padding:10px 16px;border-bottom:1px solid var(--divider-color)}.entity-history-row:last-child{border-bottom:0}.entity-history-icon{display:grid;place-items:center;width:44px;height:44px;border-radius:50%;color:var(--primary-color);background:color-mix(in srgb,var(--primary-color) 13%,transparent)}.entity-history-details{display:flex;min-width:0;flex-direction:column;gap:3px}.entity-history-details code,.entity-history-details small{overflow:hidden;color:var(--secondary-text-color);text-overflow:ellipsis;white-space:nowrap}.entity-history-actions{display:flex;align-items:center;gap:4px}
     .bring-sync-card{margin-bottom:16px;padding:16px 18px}.bring-sync-card.error{border-left:4px solid var(--error-color)}.bring-sync-card.syncing{border-left:4px solid var(--primary-color)}.bring-sync-header,.bring-sync-header>div{display:flex;align-items:center;gap:12px}.bring-sync-header{justify-content:space-between}.bring-sync-header>div>ha-icon{--mdc-icon-size:28px;color:var(--success-color,#43a047)}.bring-sync-card.error .bring-sync-header>div>ha-icon{color:var(--error-color)}.bring-sync-card.syncing .bring-sync-header>div>ha-icon,.bring-sync-card.never .bring-sync-header>div>ha-icon{color:var(--primary-color)}.bring-sync-header span{display:flex;flex-direction:column;gap:3px}.bring-sync-header small,.bring-sync-details small{color:var(--secondary-text-color);font-size:13px}.bring-sync-details{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:13px 24px;margin-top:16px;padding-top:15px;border-top:1px solid var(--divider-color)}.bring-sync-details>span{display:flex;flex-direction:column;gap:4px;min-width:0}.bring-sync-details strong{overflow-wrap:anywhere;font-size:14px}.bring-sync-error{display:flex;align-items:flex-start;gap:8px;margin-top:14px;padding:11px 12px;border-radius:8px;color:var(--error-color);background:color-mix(in srgb,var(--error-color) 10%,transparent);line-height:1.4}.bring-sync-error ha-icon{flex:0 0 auto;--mdc-icon-size:20px}
     @media(max-width:760px){.inventory-detail-stats{grid-template-columns:repeat(2,minmax(100px,1fr))}.inventory-detail-grid,.list-scope-grid{grid-template-columns:1fr}.simulation-grid{grid-template-columns:1fr 1fr}.page{padding:16px}.page-header{align-items:flex-start}h1{font-size:23px}.layout{display:block}nav{flex-direction:row;overflow-x:auto;margin-bottom:20px;padding:6px}nav::after{content:"";flex:0 0 calc(50vw - 48px)}.nav-item{width:auto;flex:0 0 auto;padding:0 12px}.overview-grid{grid-template-columns:1fr}.bring-sync-header{align-items:flex-start;flex-direction:column}.bring-sync-details{grid-template-columns:1fr}.release-stage{font-size:12px}.content-header.with-action{align-items:flex-start}.category-order-controls{grid-template-columns:1fr}}
     .ean-lookup-block{margin-top:16px}.ean-lookup-row{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:end;gap:12px}.ean-lookup-row>.field{margin-top:0}.lookup-action{display:flex;align-items:flex-end;margin-bottom:4px}.lookup-status{display:block;margin-top:7px;font-size:13px;line-height:1.3}.lookup-status.success{color:var(--success-color,#43a047)}.lookup-status.warning{color:var(--warning-color,#f0a000)}.lookup-status.error{color:var(--error-color)}.product-dialog-top{display:grid;grid-template-columns:minmax(0,1fr) 130px;gap:18px;align-items:start}.product-preview{position:relative;display:grid;place-items:center;width:130px;height:150px;margin-top:16px;overflow:hidden;border:1px solid var(--divider-color);border-radius:10px;color:var(--secondary-text-color);background:var(--secondary-background-color)}.product-preview img,.contained-product-image{position:absolute;inset:0;display:block;width:100%;height:100%;object-fit:contain;object-position:center}.product-preview ha-icon{--mdc-icon-size:42px}.name-options{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}.ha-button.compact{min-height:34px;padding:0 12px;font-size:14px}.ha-button.compact.active{color:var(--primary-color);border-color:var(--primary-color);background:color-mix(in srgb,var(--primary-color) 12%,transparent)}.field input[readonly]{color:var(--secondary-text-color)}.field input.invalid{border-color:var(--error-color)}.field-error{color:var(--error-color);font-size:13px}.product-category-assignments{display:grid;gap:10px;margin-top:18px;padding:14px;border:1px solid var(--divider-color);border-radius:10px}.product-category-assignments h4{margin:0;font-size:17px}.product-category-assignments>.field-help{margin:0}.product-category-combo-field{min-width:0;margin-top:10px}.product-category-combo-field input{width:100%}.product-category-overrides{border-top:1px solid var(--divider-color);padding-top:9px}.product-category-overrides summary{cursor:pointer;color:var(--primary-text-color);font-weight:500}.product-type-categories{display:grid;grid-template-columns:minmax(0,1fr);gap:4px;margin-top:4px}.product-list-exceptions{display:grid;gap:9px;margin-top:14px}.product-list-exception{display:grid;grid-template-columns:minmax(0,1fr) 42px;align-items:center;gap:0 8px;padding:10px;border:1px solid var(--divider-color);border-radius:8px}.product-list-exception .product-category-combo-field{grid-column:1/2}.product-list-exception .icon-button{grid-column:2;grid-row:1/3;align-self:center}.settings-card{max-width:760px}.settings-card+.settings-card{margin-top:16px}.settings-inline-actions{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-top:16px}.settings-inline-actions .ha-button{text-decoration:none}.settings-test-status{flex-basis:100%;margin-top:2px}.settings-card>h3{margin-bottom:6px}.setting-row{display:flex;align-items:flex-start;gap:12px;padding:16px 0;border-bottom:1px solid var(--divider-color);cursor:pointer}.setting-row>span{display:flex;flex-direction:column;gap:4px}.setting-row small{color:var(--secondary-text-color);line-height:1.4}.settings-actions{margin-top:18px}.product-filters{display:grid;grid-template-columns:minmax(0,1fr) minmax(190px,280px);gap:12px;align-items:start;margin-bottom:16px}.product-filters .search-field{margin-bottom:0}.picker-trigger-host{position:relative}.picker-trigger-host input{padding-right:44px!important}.picker-list-trigger{position:absolute!important;z-index:4;right:5px;top:50%;display:grid!important;place-items:center;width:34px!important;height:34px!important;min-width:34px!important;min-height:34px!important;padding:0!important;transform:translateY(-50%);border:0!important;border-radius:50%!important;color:var(--primary-color)!important;background:transparent!important;cursor:pointer}.picker-list-trigger:hover,.picker-list-trigger:focus-visible,.picker-list-trigger.active{outline:0;background:color-mix(in srgb,var(--primary-color) 16%,transparent)!important}.picker-list-trigger ha-icon{--mdc-icon-size:21px}.picker-current{box-shadow:inset 3px 0 0 var(--primary-color);background:color-mix(in srgb,var(--primary-color) 12%,var(--card-background-color))!important}.category-combo{position:relative}.category-combo>input{width:100%}.category-picker-options{position:absolute;z-index:20;top:calc(100% + 4px);left:0;right:0;max-height:260px;overflow:auto;border:1px solid var(--divider-color);border-radius:8px;background:var(--card-background-color);box-shadow:0 8px 25px rgba(0,0,0,.35);overscroll-behavior:contain}.category-picker-options button{display:grid;grid-template-columns:28px minmax(0,1fr);align-items:center;gap:8px;width:100%;padding:9px 11px;border:0;border-bottom:1px solid var(--divider-color);color:var(--primary-text-color);background:transparent;text-align:left;cursor:pointer}.category-picker-options button:hover{background:var(--secondary-background-color)}.category-picker-options button>span{display:flex;flex-direction:column;min-width:0}.category-picker-options small{color:var(--secondary-text-color)}.category-picker-options .picker-empty{padding:12px}.label-selector{display:grid;gap:8px;margin:18px 0 0;padding:12px 14px 14px;border:1px solid var(--divider-color);border-radius:10px;color:var(--secondary-text-color)}.label-selector>div{display:block}.selected-labels{display:flex!important;flex-wrap:wrap;gap:7px!important}.selected-label{display:inline-flex;align-items:center;gap:6px;min-height:34px;padding:3px 8px;border:1px solid color-mix(in srgb,var(--label-color,var(--primary-color)) 58%,var(--divider-color));border-radius:18px;color:var(--primary-text-color);background:color-mix(in srgb,var(--label-color,var(--primary-color)) 24%,var(--card-background-color));cursor:pointer}.selected-label ha-icon{--mdc-icon-size:18px;color:var(--label-color,var(--primary-color))}.selected-label .remove-label{--mdc-icon-size:17px;color:var(--secondary-text-color)}.label-combo{position:relative}.label-search{display:grid!important;grid-template-columns:26px minmax(0,1fr);align-items:center;min-height:45px;padding:0 10px;border:1px solid var(--divider-color);border-radius:7px;background:var(--secondary-background-color)}.label-search ha-icon{--mdc-icon-size:21px}.label-search input{width:100%;min-height:42px!important;padding:0!important;border:0!important;outline:0;background:transparent!important;color:var(--primary-text-color)}.label-picker-options{position:absolute;z-index:21;top:calc(100% + 4px);left:0;right:0;max-height:260px;overflow:auto;border:1px solid var(--divider-color);border-radius:8px;background:var(--card-background-color);box-shadow:0 8px 25px rgba(0,0,0,.35);overscroll-behavior:contain}.label-picker-options button{display:grid;grid-template-columns:32px minmax(0,1fr);align-items:center;gap:8px;width:100%;padding:9px 11px;border:0;border-bottom:1px solid var(--divider-color);color:var(--primary-text-color);background:transparent;text-align:left;cursor:pointer}.label-picker-options button>span:last-child{display:flex;min-width:0;flex-direction:column;gap:2px}.label-picker-options button small{display:block;color:var(--secondary-text-color)}.label-picker-options button:hover{background:var(--secondary-background-color)}.label-option-icon{display:grid;place-items:center;width:28px;height:28px;border-radius:50%;color:var(--label-color,var(--primary-color));background:color-mix(in srgb,var(--label-color,var(--primary-color)) 20%,transparent)}.label-option-icon ha-icon{--mdc-icon-size:19px}.label-empty{margin:0;padding:13px;color:var(--secondary-text-color)}.label-chips{display:flex!important;flex-wrap:wrap;gap:5px;margin-top:3px}.label-chip{display:inline-flex!important;align-items:center;gap:4px;width:auto;padding:3px 7px;border-radius:999px;color:var(--primary-text-color)!important;background:color-mix(in srgb,var(--label-color,var(--primary-color)) 18%,transparent);font-size:12px!important}.label-chip ha-icon{--mdc-icon-size:15px;color:var(--label-color,var(--primary-color))}

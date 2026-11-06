@@ -81,7 +81,8 @@ function haListManagerTodoCardTextRequest(hass, message) {
 
 const HA_LM_API = "ha_list_manager";
 const HA_LM_ITEMS_EVENT = "ha_list_manager_items_changed";
-const CARD_VERSION = "1.0.0b5";
+const HA_LM_LISTS_EVENT = "ha_list_manager_lists_changed";
+const CARD_VERSION = "1.0.0b6";
 
 const esc = (value) => String(value ?? "").replace(/[&<>'"]/g, (char) => ({
   "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;",
@@ -637,9 +638,21 @@ class HaListManagerTodoCard extends HTMLElement {
 
   async _subscribe() {
     if (!this._hass || this._unsubscribe || this._subscribePromise) return;
-    this._subscribePromise = this._hass.connection.subscribeMessage((event) => {
-      if (event.data?.list_id === this._listId()) this._load(true);
-    }, { type: `${HA_LM_API}/subscribe`, event_type: HA_LM_ITEMS_EVENT });
+    const subscriptions = [];
+    this._subscribePromise = (async () => {
+      try {
+        subscriptions.push(await this._hass.connection.subscribeMessage((event) => {
+          if (this.isConnected && event.data?.list_id === this._listId()) this._load(true);
+        }, { type: `${HA_LM_API}/subscribe`, event_type: HA_LM_ITEMS_EVENT }));
+        subscriptions.push(await this._hass.connection.subscribeMessage((event) => {
+          if (this.isConnected && (!event.data?.list_id || event.data.list_id === this._listId())) this._load(true);
+        }, { type: `${HA_LM_API}/subscribe`, event_type: HA_LM_LISTS_EVENT }));
+        return () => subscriptions.forEach((unsubscribe) => unsubscribe());
+      } catch (error) {
+        subscriptions.forEach((unsubscribe) => unsubscribe());
+        throw error;
+      }
+    })();
     try {
       const unsubscribe = await this._subscribePromise;
       if (this.isConnected) this._unsubscribe = unsubscribe;
@@ -648,6 +661,7 @@ class HaListManagerTodoCard extends HTMLElement {
       this._subscribePromise = null;
     }
   }
+
   async _load(force = false) {
     const id = this._listId();
     if (!this._hass || !id || this._hass.connection?.connected === false || (this._loading && !force)) return;

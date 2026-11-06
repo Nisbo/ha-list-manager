@@ -86,6 +86,7 @@ function haListManagerInventoryCardTextRequest(hass, message) {
 // module when its frontend is split further.
 const HA_LM_API = "ha_list_manager";
 const HA_LM_INVENTORY_EVENT = "ha_list_manager_inventory_changed";
+const HA_LM_LISTS_EVENT = "ha_list_manager_lists_changed";
 const HA_LM_SCANNER_TARGET_EVENT = "ha_list_manager_scanner_target_changed";
 const HA_LM_SCAN_PROCESSED_EVENT = "ha_list_manager_scan_processed";
 
@@ -113,10 +114,11 @@ class HaListManagerClient {
   }
   setInventoryHidden(entryId, hidden) { return haListManagerInventoryCardTextRequest(this.hass, { type: `${HA_LM_API}/inventory/visibility`, entry_id: entryId, hidden }); }
   deleteInventory(entryId) { return haListManagerInventoryCardTextRequest(this.hass, { type: `${HA_LM_API}/inventory/delete`, entry_id: entryId }); }
-  updateProduct(product) {
+  updateProduct(product, listId) {
     return haListManagerInventoryCardTextRequest(this.hass, {
       type: `${HA_LM_API}/products/update`,
       product_id: product.id,
+      list_id: listId,
       ean: product.ean || null,
       name: product.name,
       original_name: product.original_name || null,
@@ -131,7 +133,9 @@ class HaListManagerClient {
   setScannerTarget(listId, action) { return haListManagerInventoryCardTextRequest(this.hass, { type: `${HA_LM_API}/scanner/target/set`, list_id: listId, action }); }
   clearScannerTarget() { return haListManagerInventoryCardTextRequest(this.hass, { type: `${HA_LM_API}/scanner/target/clear` }); }
   listPendingScans(listId) { return haListManagerInventoryCardTextRequest(this.hass, { type: `${HA_LM_API}/scanner/queue/list_for_list`, list_id: listId }); }
-  holdPendingScan(scanId) { return haListManagerInventoryCardTextRequest(this.hass, { type: `${HA_LM_API}/scanner/queue/hold`, scan_id: scanId }); }
+  viewPendingScan(scanId, sessionId, open = true) { return haListManagerInventoryCardTextRequest(this.hass, { type: `${HA_LM_API}/scanner/queue/view`, scan_id: scanId, session_id: sessionId, open }); }
+  editPendingScan(scanId, sessionId) { return haListManagerInventoryCardTextRequest(this.hass, { type: `${HA_LM_API}/scanner/queue/edit`, scan_id: scanId, session_id: sessionId }); }
+  discardPendingScan(scanId, sessionId) { return haListManagerInventoryCardTextRequest(this.hass, { type: `${HA_LM_API}/scanner/queue/discard`, scan_id: scanId, session_id: sessionId }); }
   resolvePendingScan(scanId, details = {}) { return haListManagerInventoryCardTextRequest(this.hass, { type: `${HA_LM_API}/scanner/queue/resolve`, scan_id: scanId, ...details }); }
 }
 
@@ -147,7 +151,7 @@ function inventoryState(entry) {
   return "stock-normal";
 }
 
-const CARD_VERSION = "1.0.0b5";
+const CARD_VERSION = "1.0.0b6";
 const PICKER_RESULT_LIMIT = 100;
 const MODES = (hass = null) => ({
   add: { label: haListManagerInventoryCardText("ui.stock_in", {}, hass), icon: "mdi:package-variant-plus", color: "var(--success-color,#2e7d32)", help: haListManagerInventoryCardText("inventory.stock_in_activated", {}, hass) },
@@ -189,6 +193,12 @@ class HaListManagerInventoryCard extends HTMLElement {
     this._scannerTarget = null;
     this._pendingScans = [];
     this._pendingScanPicker = false;
+    this._scanSessionId = this._newScanSessionId();
+    this._scanHeartbeat = null;
+    this._finishedScans = new Set();
+    this._closedScanPopups = new Set();
+    this._notifiedScans = new Set();
+    this._openingPendingScan = null;
     this._inventoryGroups = [];
     this._groupSelectionMode = false;
     this._selectedEntryIds = new Set();
@@ -209,6 +219,8 @@ class HaListManagerInventoryCard extends HTMLElement {
     this._chipLongPressTimer = null;
     this._suppressChipClickUntil = 0;
     this._dialog = null;
+    this._itemAction = null;
+    this._itemActionMenuOpen = false;
     this._confirmation = null;
     this._memberPicker = null;
     this._groupPicker = null;
@@ -489,8 +501,16 @@ class HaListManagerInventoryCard extends HTMLElement {
     // stale when the user returns, because they did not receive backend events
     // while detached. Always refresh the active scanner target on reconnect.
     this._load(true);
+    const pendingDialog = this._pendingScanDialog();
+    if (pendingDialog && this._hass) {
+      // HA may detach/reinsert a card during a responsive layout change while
+      // retaining its popup. The old close request must not cancel its new view.
+      this._scanSessionId = this._newScanSessionId();
+      pendingDialog.scanEditing = false;
+      this._startPendingScanView(pendingDialog);
+    }
   }
-  disconnectedCallback() { this._watchConnection(null); this._loadRequestId += 1; this._loading = false; this._loadingListId = null; clearTimeout(this._undoTimer); clearTimeout(this._undoCountdownTimer); this._lastInventoryBooking = null; this._setExpandedView(false); this._unsubscribes.forEach((unsubscribe) => unsubscribe()); this._unsubscribes = []; this._clearModeTimer(); this._stopCameraScan(); }
+  disconnectedCallback() { this._stopPendingScanView(); this._watchConnection(null); this._loadRequestId += 1; this._loading = false; this._loadingListId = null; clearTimeout(this._undoTimer); clearTimeout(this._undoCountdownTimer); this._lastInventoryBooking = null; this._setExpandedView(false); this._unsubscribes.forEach((unsubscribe) => unsubscribe()); this._unsubscribes = []; this._clearModeTimer(); this._stopCameraScan(); }
   getCardSize() { return this._config.content_display === "large_only" ? 1 : Math.max(3, Math.ceil(this._entries.length * 0.75) + 2); }
 
   _listId() {
@@ -837,7 +857,12 @@ class HaListManagerInventoryCard extends HTMLElement {
     this._watchedConnection?.removeEventListener?.("ready", this._onConnectionReady);
     this._watchedConnection = connection;
     this._onConnectionReady ||= () => {
-      if (this.isConnected) this._load(true);
+      if (this.isConnected) {
+        this._scanSessionId = this._newScanSessionId();
+        const dialog = this._pendingScanDialog();
+        if (dialog) { dialog.scanEditing = false; this._startPendingScanView(dialog); }
+        this._load(true);
+      }
     };
     connection?.addEventListener?.("ready", this._onConnectionReady);
   }
@@ -851,9 +876,12 @@ class HaListManagerInventoryCard extends HTMLElement {
         if (this.isConnected && event.data?.list_id === this._listId()) this._load(true);
       }, { type: `${HA_LM_API}/subscribe`, event_type: HA_LM_INVENTORY_EVENT }));
       subscriptions.push(await this._hass.connection.subscribeMessage((event) => {
+        if (this.isConnected && (!event.data?.list_id || event.data.list_id === this._listId())) this._load(true, true);
+      }, { type: `${HA_LM_API}/subscribe`, event_type: HA_LM_LISTS_EVENT }));
+      subscriptions.push(await this._hass.connection.subscribeMessage((event) => {
         if (!this.isConnected) return;
         this._scannerTarget = event.data?.target === null ? null : event.data;
-        this._render();
+        if (this._pendingScanDialog()) this._refreshScanUi(); else this._render();
       }, { type: `${HA_LM_API}/subscribe`, event_type: HA_LM_SCANNER_TARGET_EVENT }));
       subscriptions.push(await this._hass.connection.subscribeMessage((event) => {
         if (this.isConnected) this._handleProcessedScan(event.data || {});
@@ -868,7 +896,7 @@ class HaListManagerInventoryCard extends HTMLElement {
     }
   }
 
-  async _load(force = false) {
+  async _load(force = false, metadata = false) {
     const listId = this._listId();
     if (!this._hass || !listId || this._hass.connection?.connected === false || (this._loading && !force && this._loadingListId === listId) || (!force && this._loadedListId === listId)) return;
     this._loadBrowserChips(listId);
@@ -876,7 +904,7 @@ class HaListManagerInventoryCard extends HTMLElement {
     this._loadingListId = listId;
     const alreadyLoading = this._loading;
     this._loading = true; this._error = "";
-    if (!alreadyLoading) this._render();
+    if (!metadata && !alreadyLoading && !this._dialog) this._render();
     try {
       const client = new HaListManagerClient(this._hass);
       const [inventory, options, groups, scannerTarget, inventoryLists, pendingScans, chips, importantChips, restockPreview] = await Promise.all([
@@ -888,15 +916,35 @@ class HaListManagerInventoryCard extends HTMLElement {
         client.previewRestock(listId),
       ]);
       if (requestId !== this._loadRequestId || listId !== this._listId()) return;
+      const previousLabelIds = new Set(this._labels.map((label) => label.id));
       this._entries = inventory.entries || [];
       this._products = options.products || [];
       this._categories = options.categories || [];
       this._labels = options.labels || [];
+      const draft = this._dialog?.draft;
+      if (metadata && draft && Array.isArray(draft.label_ids)) {
+        const productId = draft.product_id || this._dialog.entry?.product_id;
+        const product = this._products.find((entry) => entry.id === productId);
+        draft.label_ids = [...new Set([
+          ...draft.label_ids,
+          ...(product?.labels || []).filter((label) => !previousLabelIds.has(label.id)).map((label) => label.id),
+        ])];
+      }
       this._inventoryGroups = groups.groups || [];
       this._scannerTarget = scannerTarget.target || null;
       this._inventoryLists = inventoryLists.lists || [];
       this._restockPreview = restockPreview.items || [];
-      this._pendingScans = pendingScans.scans || [];
+      this._pendingScans = (pendingScans.scans || []).filter((scan) => !this._finishedScans.has(scan.id));
+      const pendingDialog = this._pendingScanDialog();
+      if (pendingDialog && !this._pendingScans.some((scan) => scan.id === pendingDialog.pendingScan.id)) {
+        const scanId = pendingDialog.pendingScan.id;
+        this._rememberFinishedScan(scanId);
+        this._stopPendingScanView(false);
+        this._dialog = null;
+        if (this._confirmation?.scanId === scanId) this._confirmation = null;
+        this._actionStatus = haListManagerInventoryCardText("scanner.no_longer_pending", {}, this._hass);
+        this._clearDialogStatus();
+      }
       this._chips = chips.chips || [];
       this._importantChipKeys = new Set((importantChips.assignments || []).map((entry) => `${entry.target_type}:${entry.target_id}`));
       try { await this._loadChipCategories(requestId, listId); }
@@ -911,9 +959,57 @@ class HaListManagerInventoryCard extends HTMLElement {
       if (requestId === this._loadRequestId) {
         this._loading = false;
         this._loadingListId = null;
-        this._render();
+        if (metadata) this._refreshMetadataUi();
+        else this._refreshScanUi();
       }
     }
+  }
+
+  _refreshMetadataUi() {
+    // Definition updates must refresh open pickers without losing an in-progress edit.
+    this._syncDialogDraft();
+    const transientSelectors = ["[data-quantity]", "[data-label-input]", "[data-d-category]", "[data-category-input]"];
+    const transientInputs = transientSelectors.map((selector) => [selector, [...this.shadowRoot.querySelectorAll(selector)].map((input) => {
+      const menu = input.closest?.(".label-combo,.category-combo,.category-picker")?.querySelector(".label-picker-options,.category-picker-options");
+      return { value: input.value, menuHidden: menu?.hidden };
+    })]);
+    const active = this.shadowRoot.activeElement;
+    const attribute = active?.getAttributeNames?.().find((name) => name.startsWith("data-"));
+    const value = attribute ? active.getAttribute(attribute) : null;
+    const inputValue = active?.value;
+    const selection = active?.tagName === "INPUT" && ["text", "search", "url", "tel"].includes(active.type)
+      ? [active.selectionStart, active.selectionEnd] : null;
+    const scrollSelector = "ha-card,.dialog,.category-picker-options,.label-picker-options";
+    const innerScroll = [...this.shadowRoot.querySelectorAll(scrollSelector)].map((node) => [node.scrollTop, node.scrollLeft]);
+    const outerScroll = [];
+    for (let node = this; node; node = node.parentElement || node.getRootNode?.().host) {
+      if (node.scrollTop || node.scrollLeft) outerScroll.push([node, node.scrollTop, node.scrollLeft]);
+    }
+    this._render();
+    for (const [selector, values] of transientInputs) {
+      [...this.shadowRoot.querySelectorAll(selector)].forEach((input, index) => {
+        const previous = values[index];
+        if (!previous) return;
+        input.value = previous.value;
+        const menu = input.closest?.(".label-combo,.category-combo,.category-picker")?.querySelector(".label-picker-options,.category-picker-options");
+        if (menu && previous.menuHidden !== undefined) {
+          if (!previous.menuHidden) input.dispatchEvent?.(new Event("input"));
+          menu.hidden = previous.menuHidden;
+        }
+      });
+    }
+    if (attribute) {
+      const next = [...this.shadowRoot.querySelectorAll(`[${attribute}]`)].find((node) => node.getAttribute(attribute) === value);
+      if (next) {
+        if (inputValue !== undefined) next.value = inputValue;
+        next.focus?.({ preventScroll: true });
+        if (selection) next.setSelectionRange?.(...selection);
+      }
+    }
+    [...this.shadowRoot.querySelectorAll(scrollSelector)].forEach((node, index) => {
+      if (innerScroll[index]) [node.scrollTop, node.scrollLeft] = innerScroll[index];
+    });
+    outerScroll.forEach(([node, top, left]) => { node.scrollTop = top; node.scrollLeft = left; });
   }
 
   async _run(action, fallback) {
@@ -1012,55 +1108,225 @@ class HaListManagerInventoryCard extends HTMLElement {
     await this._activateScannerTarget();
   }
 
-  async _handleProcessedScan(scan) {
-    if (scan.list_id !== this._listId() || !scan.queued || !["queued", "offered", "needs_input"].includes(scan.status)) return;
-    if (document.visibilityState !== "visible" || !this.isConnected || this.getClientRects().length === 0) return;
-    if (scan.status === "offered") {
+  _newScanSessionId() {
+    return globalThis.crypto?.randomUUID?.() || `scan-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+  }
+
+  _pendingScanDialog() {
+    return this._dialog?.kind === "image" ? this._dialog.parent?.pendingScan ? this._dialog.parent : null : this._dialog?.pendingScan ? this._dialog : null;
+  }
+
+  _canEditPendingScan(dialog = this._pendingScanDialog()) {
+    return Boolean(dialog?.scanEditing && dialog.pendingScan?.collaboration?.editor_session === this._scanSessionId);
+  }
+
+  _scanDialogIdle() {
+    return !this._busy && !this._dialog && !this._memberPicker && !this._groupPicker && !this._confirmation && !this._pendingScanPicker;
+  }
+
+  _mergePendingScan(previous, next) {
+    const merged = { ...previous, ...next };
+    if (previous?.collaboration && (!next?.collaboration || previous.collaboration.epoch === next.collaboration.epoch && Number(previous.collaboration.revision || 0) > Number(next.collaboration.revision || 0))) merged.collaboration = previous.collaboration;
+    return merged;
+  }
+
+  _rememberFinishedScan(id) {
+    this._finishedScans.add(id);
+    if (this._finishedScans.size > 500) this._finishedScans.delete(this._finishedScans.values().next().value);
+  }
+
+  _showScanBooking(scan) {
+    if (this._notifiedScans.has(scan.id)) return;
+    this._notifiedScans.add(scan.id);
+    if (this._notifiedScans.size > 500) this._notifiedScans.delete(this._notifiedScans.values().next().value);
+    // A scanner event carries no local undo token. Never place an earlier
+    // manual booking's Undo button under this new scan result.
+    const booking = this._lastInventoryBooking;
+    if (booking) {
+      clearTimeout(this._undoTimer);
+      clearTimeout(this._undoCountdownTimer);
       try {
-        const held = await new HaListManagerClient(this._hass).holdPendingScan(scan.id);
-        scan = { ...scan, ...(held.scan || {}), queued: true };
-      } catch (_error) {
-        // Another visible card won the atomic claim.
-        return;
-      }
+        const key = this._inventoryUndoStorageKey();
+        if (JSON.parse(sessionStorage.getItem(key) || "null")?.token === booking.token) sessionStorage.removeItem(key);
+      } catch (_error) { /* Blocked storage must not prevent scan feedback. */ }
+      this._lastInventoryBooking = null;
+      this._undoChoice = false;
+      this.shadowRoot.querySelector("[data-undo-booking]")?.remove();
+      this.shadowRoot.querySelector("[data-inventory-undo-choice]")?.remove();
     }
-    const pendingIndex = this._pendingScans.findIndex((item) => item.id === scan.id);
-    if (pendingIndex === -1) this._pendingScans.unshift(scan);
-    else this._pendingScans[pendingIndex] = scan;
-    if (this._dialog || this._memberPicker || this._groupPicker || this._confirmation) {
-      this._error = haListManagerInventoryCardText("scanner.another_open_ean", {p0:(scan.ean)}, this._hass);
-      this._render();
+    if ((Number.isFinite(scan.stock_before) || scan.stock_before === null) && Number.isFinite(scan.stock_after)) {
+      this._setInventoryActionStatus({ product: { name: scan.product_name || scan.ean } }, scan.stock_before ?? 0, scan.stock_after);
+    } else if (scan.message) this._actionStatus = scan.message;
+  }
+
+  _refreshScanUi() {
+    const button = this.shadowRoot.querySelector("[data-open-pending-scans]");
+    if (button) {
+      button.hidden = !this._pendingScans.length;
+      const count = button.querySelector("span");
+      if (count) count.textContent = haListManagerInventoryCardText("scanner.open_scan_count", { p0: this._pendingScans.length }, this._hass);
+    }
+    const dialog = this._pendingScanDialog();
+    if (dialog) {
+      const section = this.shadowRoot.querySelector("[data-scan-collaboration]");
+      if (section) { section.innerHTML = this._pendingScanControls(); this._bindScanActions(); }
+      this._applyPendingScanControls();
+    } else if (!this._dialog && !this._memberPicker && !this._groupPicker && !this._confirmation) this._render();
+  }
+
+  async _handleProcessedScan(scan) {
+    if (scan.list_id !== this._listId()) return;
+    const terminal = ["resolved", "dismissed", "success"].includes(scan.status);
+    if (terminal) {
+      this._rememberFinishedScan(scan.id);
+      this._pendingScans = this._pendingScans.filter((item) => item.id !== scan.id);
+      if (this._confirmation?.scanId === scan.id) this._confirmation = null;
+      const dialog = this._pendingScanDialog();
+      if (dialog?.pendingScan.id === scan.id) {
+        this._stopPendingScanView(false);
+        this._dialog = null;
+        if (this._confirmation?.scanId === scan.id) this._confirmation = null;
+        this._clearDialogStatus();
+        if (scan.status === "dismissed") this._actionStatus = haListManagerInventoryCardText("scanner.discarded", {}, this._hass);
+        else this._actionStatus = haListManagerInventoryCardText("scanner.resolved_elsewhere", {}, this._hass);
+      }
+      if (["success", "resolved"].includes(scan.status) && !(scan.status === "success" && scan.source === "queue")) this._showScanBooking(scan);
+      await this._load(true);
+      this._refreshScanUi();
       return;
     }
-    await this._load(true);
-    this._openPendingScan(scan);
+    if (!scan.queued || !["queued", "offered", "needs_input"].includes(scan.status) || this._finishedScans.has(scan.id)) return;
+    const index = this._pendingScans.findIndex((item) => item.id === scan.id);
+    if (index < 0) this._pendingScans.unshift(scan); else this._pendingScans[index] = this._mergePendingScan(this._pendingScans[index], scan);
+    const dialog = this._pendingScanDialog();
+    if (dialog?.pendingScan.id === scan.id) {
+      dialog.pendingScan = this._mergePendingScan(dialog.pendingScan, scan);
+      if (dialog.pendingScan.collaboration?.editor_session !== this._scanSessionId) dialog.scanEditing = false;
+      this._refreshScanUi();
+      return;
+    }
+    this._refreshScanUi();
+    // Presence/lease changes only synchronize an existing view. In particular,
+    // closing a view must not let its server echo reopen the same popup.
+    if (scan.collaboration_update || this._closedScanPopups.has(scan.id)) return;
+    if (document.visibilityState !== "visible" || !this.isConnected || this.getClientRects().length === 0 || !this._scanDialogIdle() || this._openingPendingScan) return;
+    this._openingPendingScan = scan.id;
+    try {
+      await this._load(true);
+      if (!this._finishedScans.has(scan.id) && this._pendingScans.some((item) => item.id === scan.id) && this._scanDialogIdle() && this.isConnected && document.visibilityState === "visible" && this.getClientRects().length) this._openPendingScan(this._pendingScans.find((item) => item.id === scan.id));
+    } finally {
+      if (this._openingPendingScan === scan.id) this._openingPendingScan = null;
+    }
   }
 
   _openPendingScan(scan) {
-    if (!scan) return;
+    if (!scan || this._busy || this._finishedScans.has(scan.id) || this._dialog || this._confirmation || this._memberPicker || this._groupPicker) return;
     this._pendingScanPicker = false;
+    this._closedScanPopups.delete(scan.id);
     const entry = this._entries.find((item) => item.id === scan.inventory_entry_id || item.product_id === scan.product_id);
     if (entry) {
       this._openEditDialog(entry);
       this._dialog.pendingScan = scan;
       if (scan.action === "add") this._dialog.draft.stock = entry.stock + scan.quantity;
       else if (scan.action === "remove") this._dialog.draft.stock = Math.max(0, entry.stock - scan.quantity);
-      this._rememberDialogState();
-      this._setDialogStatus(haListManagerInventoryCardText("help.scan_pending_save", {}, this._hass), "warning");
-      this._render();
-      return;
+    } else {
+      const product = this._products.find((item) => item.id === scan.product_id);
+      this._openAddDialog(product || null, product?.ean || scan.ean, scan.action === "add" ? scan.quantity : 0);
+      this._dialog.pendingScan = scan;
     }
-    const product = this._products.find((item) => item.id === scan.product_id);
-    const stock = scan.action === "add" ? scan.quantity : 0;
-    this._openAddDialog(product || null, product?.ean || scan.ean, stock);
-    this._dialog.pendingScan = scan;
-    this._setDialogStatus(
-      scan.status === "needs_input"
-        ? haListManagerInventoryCardText("scanner.correction_pending_help", {}, this._hass)
-        : haListManagerInventoryCardText("ui.scan_pending_product_details", {}, this._hass),
-      "warning",
-    );
+    this._dialog.scanEditing = false;
+    this._rememberDialogState();
+    this._clearDialogStatus();
+    this._startPendingScanView(this._dialog);
     this._render();
+  }
+
+  _startPendingScanView(dialog) {
+    clearTimeout(this._scanHeartbeat);
+    const session = this._scanSessionId;
+    const heartbeat = async () => {
+      if (this._pendingScanDialog() !== dialog || !this.isConnected) return;
+      try {
+        const result = await new HaListManagerClient(this._hass).viewPendingScan(dialog.pendingScan.id, session);
+        if (session !== this._scanSessionId || this._pendingScanDialog() !== dialog) {
+          if (session === this._scanSessionId && this._pendingScanDialog()?.pendingScan.id !== dialog.pendingScan.id) new HaListManagerClient(this._hass).viewPendingScan(dialog.pendingScan.id, session, false).catch(() => {});
+          return;
+        }
+        dialog.pendingScan = this._mergePendingScan(dialog.pendingScan, result.scan);
+        dialog.scanError = "";
+        if (dialog.pendingScan.collaboration?.editor_session !== session) dialog.scanEditing = false;
+        this._refreshScanUi();
+      } catch (error) {
+        if (this._pendingScanDialog() !== dialog || session !== this._scanSessionId) return;
+        dialog.scanEditing = false;
+        dialog.scanError = error?.message || haListManagerInventoryCardText("scanner.session_error", {}, this._hass);
+        this._refreshScanUi();
+      }
+      if (this._pendingScanDialog() === dialog && session === this._scanSessionId) this._scanHeartbeat = setTimeout(heartbeat, 10000);
+    };
+    heartbeat();
+  }
+
+  _stopPendingScanView(notify = true) {
+    clearTimeout(this._scanHeartbeat);
+    this._scanHeartbeat = null;
+    const dialog = this._pendingScanDialog();
+    if (notify && dialog?.pendingScan) new HaListManagerClient(this._hass).viewPendingScan(dialog.pendingScan.id, this._scanSessionId, false).catch(() => {});
+    if (dialog) dialog.scanEditing = false;
+  }
+
+  async _editPendingScan() {
+    const dialog = this._pendingScanDialog();
+    if (this._busy || !dialog || this._canEditPendingScan(dialog)) return;
+    const result = await this._run(() => new HaListManagerClient(this._hass).editPendingScan(dialog.pendingScan.id, this._scanSessionId), haListManagerInventoryCardText("scanner.edit_failed", {}, this._hass));
+    if (this._pendingScanDialog() !== dialog) return;
+    if (result?.scan) {
+      dialog.pendingScan = this._mergePendingScan(dialog.pendingScan, result.scan);
+      dialog.scanEditing = dialog.pendingScan.collaboration?.editor_session === this._scanSessionId;
+      this._clearDialogStatus();
+      dialog.scanError = "";
+    } else dialog.scanError = this._error || haListManagerInventoryCardText("scanner.edit_failed", {}, this._hass);
+    this._refreshScanUi();
+  }
+
+  _pendingScanControls() {
+    const dialog = this._pendingScanDialog();
+    if (!dialog) return "";
+    const collaboration = dialog.pendingScan.collaboration || {};
+    const editing = this._canEditPendingScan(dialog);
+    const other = collaboration.editor_session && collaboration.editor_session !== this._scanSessionId;
+    const status = haListManagerInventoryCardText(editing ? "scanner.edit_here" : other ? "scanner.edit_elsewhere" : "scanner.edit_prompt", {}, this._hass);
+    return `${dialog.scanError ? `<p class="dialog-status warning" role="alert">${escapeHtml(dialog.scanError)}</p>` : ""}<p class="scan-session-status" role="status"><ha-icon icon="mdi:${editing ? "pencil" : other ? "lock-outline" : "information-outline"}"></ha-icon>${escapeHtml(status)}</p>${collaboration.viewers > 1 ? `<p class="field-help">${haListManagerInventoryCardText("scanner.shared_open", {}, this._hass)}</p>` : ""}<div class="dialog-actions scan-session-actions">${!editing ? `<button type="button" class="primary" data-edit-pending-scan ${this._busy || other ? "disabled" : ""}><ha-icon icon="mdi:pencil"></ha-icon>${haListManagerInventoryCardText("ui.edit", {}, this._hass)}</button>` : ""}<button type="button" class="danger" data-discard-pending-scan="${escapeHtml(dialog.pendingScan.id)}" ${this._busy ? "disabled" : ""}><ha-icon icon="mdi:delete-outline"></ha-icon>${haListManagerInventoryCardText("scanner.discard", {}, this._hass)}</button></div>`;
+  }
+
+  _applyPendingScanControls() {
+    if (!this._pendingScanDialog()) return;
+    const editing = this._canEditPendingScan();
+    this.shadowRoot.querySelectorAll("[data-dialog-panel] input,[data-dialog-panel] select,[data-dialog-panel] textarea,[data-dialog-panel] ha-combo-box,[data-dialog-panel] button").forEach((control) => {
+      if (control.matches?.("[data-close-dialog],[data-edit-pending-scan],[data-discard-pending-scan],[data-dialog-image]")) return;
+      if (control.dataset.scanDisabled === undefined) control.dataset.scanDisabled = control.disabled ? "1" : "0";
+      const unrelated = control.matches?.("[data-edit-product],[data-delete-entry],[data-pick-group],[data-new-group-for-entry],[data-edit-entry-group],[data-remove-entry-group]");
+      control.disabled = !editing || this._busy || control.dataset.scanDisabled === "1" || Boolean(unrelated);
+    });
+  }
+
+  _requestDiscardPendingScan(scan) {
+    if (!scan || this._busy) return;
+    this._requestConfirmation(haListManagerInventoryCardText("scanner.discard_title", {}, this._hass), haListManagerInventoryCardText("scanner.discard_help", {}, this._hass), haListManagerInventoryCardText("scanner.discard", {}, this._hass), async () => {
+      const result = await this._run(() => new HaListManagerClient(this._hass).discardPendingScan(scan.id, this._scanSessionId), haListManagerInventoryCardText("scanner.discard_failed", {}, this._hass));
+      if (result) {
+        await this._handleProcessedScan({ ...scan, status: "dismissed", queued: false });
+      } else if (this._pendingScanDialog()?.pendingScan.id === scan.id) { this._setDialogStatus(this._error, "error"); this._render(); }
+    });
+    this._confirmation.scanId = scan.id;
+  }
+
+  _bindScanActions() {
+    this.shadowRoot.querySelector("[data-edit-pending-scan]")?.addEventListener("click", () => this._editPendingScan());
+    this.shadowRoot.querySelectorAll("[data-discard-pending-scan]").forEach((button) => button.addEventListener("click", () => {
+      const id = button.dataset.discardPendingScan;
+      this._requestDiscardPendingScan(this._pendingScans.find((item) => item.id === id) || this._pendingScanDialog()?.pendingScan);
+    }));
   }
 
   _touchModeTimer() {
@@ -1233,6 +1499,7 @@ class HaListManagerInventoryCard extends HTMLElement {
   }
 
   async _performInputAction() {
+    this._registrationOffer = null;
     const input = this.shadowRoot.querySelector("[data-product-input]");
     const value = input?.value.trim() || "";
     if (!value) { this._error = haListManagerInventoryCardText("errors.enter_item_or_ean", {}, this._hass); this._render(); return; }
@@ -1251,7 +1518,8 @@ class HaListManagerInventoryCard extends HTMLElement {
           this._openAddDialog(null, value, this._mode === "add" ? this._quantity() : 0);
           this._setDialogStatus(haListManagerInventoryCardText("ui.ean_no_product_data", {}, this._hass), "warning", "ean");
           this._render();
-        } else this._render();
+        } else if (this._mode === "correct" && lookup) this._offerMissingRegistration(null, value);
+        else this._render();
         return;
       }
       product = lookup.product;
@@ -1259,7 +1527,11 @@ class HaListManagerInventoryCard extends HTMLElement {
       const lookedUpEntry = lookup.local ? this._entries.find((item) => item.product_id === product.id) : null;
       if (this._mode === "add" && lookedUpEntry) { await this._adjustFromInput(lookedUpEntry, this._quantity()); return; }
       if (this._mode === "remove" || this._mode === "correct") {
-        if (!lookedUpEntry) { this._error = haListManagerInventoryCardText("inventory.item_missing", {}, this._hass); this._render(); return; }
+        if (!lookedUpEntry) {
+          if (this._mode === "correct") this._offerMissingRegistration(product, value);
+          else { this._error = haListManagerInventoryCardText("inventory.item_missing", {}, this._hass); this._render(); }
+          return;
+        }
         if (this._mode === "remove") await this._adjustFromInput(lookedUpEntry, -this._quantity());
         else this._openEditDialog(lookedUpEntry);
         return;
@@ -1273,11 +1545,25 @@ class HaListManagerInventoryCard extends HTMLElement {
       await this._adjustFromInput(entry, -quantity); return;
     }
     if (this._mode === "correct") {
-      if (!entry) { this._error = haListManagerInventoryCardText("inventory.item_not_registered", {}, this._hass); this._render(); return; }
+      if (!entry) { this._offerMissingRegistration(product, value); return; }
       this._openEditDialog(entry); return;
     }
     if (this._mode === "register" && entry) { this._openEditDialog(entry); return; }
     this._openAddDialog(product, value, quantity);
+  }
+
+  _offerMissingRegistration(product, value) {
+    this._error = haListManagerInventoryCardText("inventory.item_not_registered", {}, this._hass);
+    this._registrationOffer = { product, value, message: this._error };
+    this._render();
+  }
+
+  _registerMissingProduct() {
+    const offer = this._registrationOffer;
+    if (!offer || this._mode !== "correct" || this._inputValue.trim() !== offer.value || this._error !== offer.message) return;
+    this._registrationOffer = null;
+    this._error = "";
+    this._openAddDialog(offer.product, offer.value, 0);
   }
 
   async _useChip(chip) {
@@ -1418,14 +1704,14 @@ class HaListManagerInventoryCard extends HTMLElement {
       assignments.find((item) => item.scope === "list" && item.list_id === this._listId()),
       assignments.find((item) => item.scope === "list_type" && item.list_type === "inventory"),
       assignments.find((item) => item.scope === "global"),
-    ].find((item) => item && byId.has(item.category_id));
-    if (preferred) return byId.get(preferred.category_id);
+    ].find((item) => item && (byId.has(item.category_id) || this._categories.some((category) => category.name.toLocaleLowerCase() === String(item.category?.name || "").toLocaleLowerCase())));
+    if (preferred) return byId.get(preferred.category_id) || this._categories.find((category) => category.name.toLocaleLowerCase() === String(preferred.category?.name || "").toLocaleLowerCase());
     return null;
   }
 
   _effectiveEntryCategory(entry) {
     const dynamicName = String(entry.category_name || "").trim();
-    if (entry.category_id && entry.category) return entry.category;
+    if (entry.category_id && entry.category) return this._currentPermanentCategory(entry.category);
     if (dynamicName) return { id: `dynamic:${dynamicName.toLocaleLowerCase()}`, name: dynamicName, icon: "mdi:shape-outline", color: null, position: 999999, dynamic: true };
     return this._productDefaultCategory(entry.product);
   }
@@ -1434,6 +1720,10 @@ class HaListManagerInventoryCard extends HTMLElement {
     if (this._dialog?.kind === "add") return this._dialog.product || this._products.find((product) => product.id === this._dialog.draft.product_id) || null;
     if (this._dialog?.kind === "edit") return this._dialog.entry?.product || null;
     return null;
+  }
+
+  _currentPermanentCategory(category) {
+    return this._categories.find((item) => item.name.toLocaleLowerCase() === String(category?.name || "").toLocaleLowerCase()) || category;
   }
 
   _openEditDialog(entry) { this._clearDialogStatus(); this._dialog = { kind: "edit", entry, draft: { stock: entry.stock, minimum_stock: entry.minimum_stock ?? "", category_id: entry.category_id || "", category_name: entry.category_name || entry.category?.name || "" } }; this._rememberDialogState(); this._render(); }
@@ -1461,7 +1751,7 @@ class HaListManagerInventoryCard extends HTMLElement {
       brand,
       package_quantity: packageQuantity,
       image_url: product?.image_url || "",
-      label_ids: (product?.labels || []).map((label) => label.id),
+      label_ids: (product?.labels || []).filter((label) => this._labels.some((available) => available.id === label.id)).map((label) => label.id),
       ...overrides,
     };
   }
@@ -1682,11 +1972,156 @@ class HaListManagerInventoryCard extends HTMLElement {
     if (indicator) indicator.hidden = !this._isDialogDirty(true);
   }
 
+  _itemActionContext() {
+    const dialog = this._dialog;
+    if (!dialog || dialog.pendingScan || !["edit", "product-edit"].includes(dialog.kind) || !dialog.entry?.id) return null;
+    const entry = dialog.entry;
+    if (entry.list_id && entry.list_id !== this._listId()) return null;
+    let category = this._effectiveEntryCategory(entry);
+    if (dialog.kind === "edit") {
+      const draft = dialog.draft;
+      category = draft.category_id
+        ? this._categories.find((item) => item.id === draft.category_id) || (entry.category_id === draft.category_id ? entry.category : null)
+        : String(draft.category_name || "").trim()
+          ? this._categories.find((item) => item.name.toLocaleLowerCase() === draft.category_name.trim().toLocaleLowerCase()) || null
+          : this._productDefaultCategory(entry.product);
+    }
+    if (category) category = this._currentPermanentCategory(category);
+    return {
+      entry, category: category && !category.dynamic && this._categories.some((item) => item.id === category.id) ? category : null,
+      name: entry.product.name,
+      listName: this._inventoryLists.find((item) => item.id === this._listId())?.name || this._config.title || haListManagerInventoryCardText("ui.inventory", {}, this._hass),
+    };
+  }
+
+  _renderItemActionMenu() {
+    const context = this._itemActionContext();
+    if (!context) return "";
+    const text = (key) => haListManagerInventoryCardText(`quick_actions.${key}`, {}, this._hass);
+    const rule = this._hass.user?.is_admin === true
+      ? `<button type="button" role="menuitem" data-item-action="rule" ${context.category ? "" : "disabled"}><ha-icon icon="mdi:format-list-checks"></ha-icon>${text("rule")}</button>${context.category ? "" : `<small>${text("rule_unavailable")}</small>`}` : "";
+    return `<div class="item-action-tools"><button class="icon-button" type="button" data-toggle-item-actions aria-label="${text("menu")}" title="${text("menu")}" aria-haspopup="menu" aria-expanded="${this._itemActionMenuOpen ? "true" : "false"}"><ha-icon icon="mdi:dots-vertical"></ha-icon></button>${this._itemActionMenuOpen ? `<div class="item-action-menu" role="menu"><button type="button" role="menuitem" data-item-action="send"><ha-icon icon="mdi:playlist-plus"></ha-icon>${text("send")}</button><button type="button" role="menuitem" data-item-action="chip"><ha-icon icon="mdi:tag-plus-outline"></ha-icon>${text("chip")}</button>${rule}</div>` : ""}</div>`;
+  }
+
+  _itemActionView() {
+    const active = this.shadowRoot.activeElement;
+    const attribute = active?.getAttributeNames?.().find((name) => name.startsWith("data-"));
+    const outerScroll = [];
+    for (let node = this; node; node = node.parentElement || node.getRootNode?.().host) {
+      if (node.scrollTop || node.scrollLeft) outerScroll.push([node, node.scrollTop, node.scrollLeft]);
+    }
+    return { scroll: this.shadowRoot.querySelector("[data-dialog-panel]")?.scrollTop || 0,
+      quantity: this.shadowRoot.querySelector("[data-quantity]")?.value,
+      outerScroll,
+      focus: attribute ? { attribute, value: active.getAttribute(attribute), selection: active.tagName === "INPUT" && ["text", "search", "url", "tel"].includes(active.type) ? [active.selectionStart, active.selectionEnd] : null } : null };
+  }
+
+  _renderItemActionTransition(view = this._itemActionView(), selector = "") {
+    this._render();
+    const quantity = this.shadowRoot.querySelector("[data-quantity]");
+    if (quantity && view.quantity !== undefined) quantity.value = view.quantity;
+    const target = selector ? this.shadowRoot.querySelector(selector) : view.focus
+      ? [...this.shadowRoot.querySelectorAll(`[${view.focus.attribute}]`)].find((node) => node.getAttribute(view.focus.attribute) === view.focus.value) : null;
+    target?.focus?.({ preventScroll: true });
+    if (!selector && view.focus?.selection) target?.setSelectionRange?.(...view.focus.selection);
+    const panel = this.shadowRoot.querySelector("[data-dialog-panel]");
+    if (panel) panel.scrollTop = view.scroll;
+    for (const [node, top, left] of view.outerScroll || []) { node.scrollTop = top; node.scrollLeft = left; }
+  }
+
+  _hideItemActionMenu() {
+    this._itemActionMenuOpen = false;
+    this.shadowRoot.querySelector(".item-action-menu")?.remove();
+    this.shadowRoot.querySelector("[data-toggle-item-actions]")?.setAttribute("aria-expanded", "false");
+  }
+
+  async _openItemAction(kind) {
+    if (this._busy || this._itemAction) return;
+    this._syncDialogDraft();
+    const context = this._itemActionContext();
+    if (!context || !["send", "chip", "rule"].includes(kind) || (kind === "rule" && (!context.category || this._hass.user?.is_admin !== true))) return;
+    const parentView = this._itemActionView();
+    this._itemActionMenuOpen = false;
+    const action = this._itemAction = { kind, parent: this._dialog, listId: this._listId(), context, parentView, targets: [], targetId: "", quantity: "1", loading: kind === "send", busy: false, error: "", dirty: this._isDialogDirty() };
+    this._renderItemActionTransition({ ...parentView, scroll: 0 }, "[data-confirm-item-action]");
+    if (kind !== "send") return;
+    try {
+      const result = await haListManagerInventoryCardTextRequest(this._hass, { type: `${HA_LM_API}/lists/list` });
+      if (this._itemAction !== action || this._dialog !== action.parent) return;
+      action.targets = (result.lists || []).filter((item) => item.enabled !== false && item.list_type === "shopping" && item.provider !== "bring" && item.id !== action.listId);
+    } catch (error) {
+      if (this._itemAction !== action) return;
+      action.error = error?.message || String(error);
+    } finally {
+      if (this._itemAction === action && this._dialog === action.parent) {
+        action.loading = false;
+        this._renderItemActionTransition({ ...parentView, scroll: 0 }, "[data-item-action-target]");
+      }
+    }
+  }
+
+  _closeItemAction(message = "") {
+    const action = this._itemAction;
+    if (!action || action.busy) return;
+    this._itemAction = null;
+    this._itemActionMenuOpen = false;
+    if (this._dialog !== action.parent) return;
+    if (message) this._setDialogStatus(message, "success");
+    this._renderItemActionTransition(action.parentView, "[data-toggle-item-actions]");
+  }
+
+  async _confirmItemAction() {
+    const action = this._itemAction;
+    if (!action || action.busy || action.loading || this._dialog !== action.parent || this._listId() !== action.listId) return;
+    const text = (key, args = {}) => haListManagerInventoryCardText(`quick_actions.${key}`, args, this._hass);
+    const context = this._itemActionContext();
+    if (!context || (action.kind === "rule" && (!context.category || this._hass.user?.is_admin !== true))) return;
+    action.error = "";
+    const quantity = Number(action.quantity);
+    if (action.kind === "send" && !action.targets.some((target) => target.id === action.targetId)) action.error = text("choose_target");
+    else if (action.kind === "send" && (!Number.isInteger(quantity) || quantity < 1 || quantity > 1000000)) action.error = text("quantity_range");
+    if (action.error) { this._renderItemActionTransition(); return; }
+    const payload = action.kind === "send"
+      ? { source_list_id: action.listId, source_entry_id: action.context.entry.id, target_list_id: action.targetId, quantity }
+      : action.kind === "chip" ? { list_id: action.listId, name: action.context.name, product_id: action.context.entry.product_id || action.context.entry.product.id }
+        : { list_id: action.listId, name: action.context.name, category_id: action.context.category.id };
+    action.busy = true;
+    this._renderItemActionTransition();
+    try {
+      const result = await haListManagerInventoryCardTextRequest(this._hass, { type: `${HA_LM_API}/item_actions/${action.kind}`, ...payload });
+      if (this._itemAction !== action || this._dialog !== action.parent) return;
+      const targetName = result.list?.name || action.targets.find((target) => target.id === action.targetId)?.name || "";
+      const message = action.kind === "send" ? text(result.merged ? "merged" : "sent", {p0:quantity, p1:targetName})
+        : text(action.kind === "chip" ? (result.created ? "created_chip" : "existing_chip") : (result.created ? "created_rule" : "existing_rule"));
+      action.busy = false;
+      this._closeItemAction(message);
+    } catch (error) {
+      if (this._itemAction !== action) return;
+      action.error = error?.message || String(error);
+      action.busy = false;
+      this._renderItemActionTransition();
+    }
+  }
+
+  _renderItemActionDialog() {
+    const action = this._itemAction;
+    if (!action || action.parent !== this._dialog) return "";
+    const text = (key, args = {}) => haListManagerInventoryCardText(`quick_actions.${key}`, args, this._hass);
+    const title = text(`title_${action.kind}`);
+    const disabled = action.busy || action.loading;
+    const context = action.context;
+    const content = action.kind === "send"
+      ? `<strong class="dialog-product">${escapeHtml(context.name)}</strong><p class="field-help">${text("source_unchanged")}</p>${action.loading ? `<p role="status">${haListManagerInventoryCardText("ui.please_wait", {}, this._hass)}</p>` : action.targets.length ? `<label><span>${text("target")}</span><select data-item-action-target ${disabled ? "disabled" : ""}><option value="">${text("choose_target")}</option>${action.targets.map((target) => `<option value="${escapeHtml(target.id)}" ${target.id === action.targetId ? "selected" : ""}>${escapeHtml(target.name)}</option>`).join("")}</select></label><label><span>${haListManagerInventoryCardText("ui.count", {}, this._hass)}</span><input type="number" min="1" max="1000000" step="1" value="${escapeHtml(action.quantity)}" data-item-action-quantity ${disabled ? "disabled" : ""}></label>` : `<p class="field-help">${text("no_targets")}</p>`}`
+      : `<p>${text(action.kind === "chip" ? "confirm_chip" : "confirm_rule", action.kind === "chip" ? {p0:escapeHtml(context.name), p1:escapeHtml(context.listName)} : {p0:escapeHtml(context.name), p1:escapeHtml(context.category.name), p2:escapeHtml(context.listName)})}</p>${action.kind === "rule" && context.category.scope !== "list" ? `<p class="field-help">${text("local_category_help")}</p>` : ""}`;
+    return `<div class="backdrop nested-backdrop" data-item-action-backdrop><section class="dialog item-action-dialog" role="dialog" aria-modal="true" aria-label="${title}" data-dialog-panel><div class="dialog-header"><h3>${title}</h3><button class="icon-button" type="button" data-close-item-action title="${haListManagerInventoryCardText("ui.close", {}, this._hass)}" ${action.busy ? "disabled" : ""}><ha-icon icon="mdi:close"></ha-icon></button></div>${content}${action.dirty ? `<p class="field-help">${text("saved_source_note")}</p>` : ""}${action.error ? `<div class="dialog-status error" role="alert"><ha-icon icon="mdi:alert-circle-outline"></ha-icon>${escapeHtml(action.error)}</div>` : ""}<div class="dialog-actions"><button class="primary" type="button" data-confirm-item-action ${disabled || (action.kind === "send" && !action.targets.length) ? "disabled" : ""}>${action.busy ? haListManagerInventoryCardText("ui.please_wait", {}, this._hass) : action.kind === "send" ? haListManagerInventoryCardText("ui.add", {}, this._hass) : text("create")}</button><button type="button" data-close-item-action ${action.busy ? "disabled" : ""}>${haListManagerInventoryCardText("ui.cancel", {}, this._hass)}</button></div></section></div>`;
+  }
+
   _dialogHeader(title) {
-    return `<div class="dialog-header"><div class="dialog-heading"><h3>${escapeHtml(title)}</h3><span class="unsaved-indicator" data-unsaved-indicator ${this._isDialogDirty() ? "" : "hidden"}><ha-icon icon="mdi:content-save-alert-outline"></ha-icon>${haListManagerInventoryCardText("ui.not_saved_yet", {}, this._hass)}</span></div><button class="icon-button" data-close-dialog title="${haListManagerInventoryCardText("ui.close", {}, this._hass)}"><ha-icon icon="mdi:close"></ha-icon></button></div>`;
+    return `<div class="dialog-header"><div class="dialog-heading"><h3>${escapeHtml(title)}</h3><span class="unsaved-indicator" data-unsaved-indicator ${this._isDialogDirty() ? "" : "hidden"}><ha-icon icon="mdi:content-save-alert-outline"></ha-icon>${haListManagerInventoryCardText("ui.not_saved_yet", {}, this._hass)}</span></div><div class="item-dialog-tools">${this._renderItemActionMenu()}<button class="icon-button" data-close-dialog title="${haListManagerInventoryCardText("ui.close", {}, this._hass)}"><ha-icon icon="mdi:close"></ha-icon></button></div></div>`;
   }
 
   _closeDialog() {
+    if (this._itemAction) { this._closeItemAction(); return; }
     if (this._busy || !this._dialog) return;
     if (this._dialog.kind === "image") {
       this._dialog = this._dialog.parent || null;
@@ -1706,7 +2141,15 @@ class HaListManagerInventoryCard extends HTMLElement {
   }
 
   _discardDialog() {
+    const scanId = this._pendingScanDialog()?.pendingScan.id;
+    if (scanId) {
+      this._closedScanPopups.add(scanId);
+      if (this._closedScanPopups.size > 500) this._closedScanPopups.delete(this._closedScanPopups.values().next().value);
+    }
+    this._stopPendingScanView();
     this._dialog = null;
+    this._itemAction = null;
+    this._itemActionMenuOpen = false;
     this._memberPicker = null;
     this._groupPicker = null;
     this._clearDialogStatus();
@@ -1858,9 +2301,53 @@ class HaListManagerInventoryCard extends HTMLElement {
     }
   }
 
+  _stageProductRefresh(draft, product) {
+    const incoming = { original_name: product.original_name || product.name, brand: product.brand, package_quantity: product.package_quantity, image_url: product.image_url };
+    draft.off_changes = [];
+    draft.off_ean = String(draft.ean || "").trim();
+    for (const [field, value] of Object.entries(incoming)) {
+      const after = String(value || "").trim();
+      const before = String(draft[field] || "");
+      // Missing external data must never erase a local value.
+      if (!after) continue;
+      if (!before.trim()) draft[field] = after;
+      else if (before !== after) draft.off_changes.push({ field, before, after, selected: false });
+    }
+  }
+
+  _renderProductRefresh(draft) {
+    if (!draft?.off_changes?.length || draft.off_ean !== String(draft.ean || "").trim()) return "";
+    const fields = { original_name: "products.original_name", brand: "ui.brand", package_quantity: "ui.amount", image_url: "ui.optional_image_url" };
+    return `<section class="off-refresh" aria-label="${haListManagerInventoryCardText("products.refresh_changes", {}, this._hass)}"><strong>${haListManagerInventoryCardText("products.refresh_changes", {}, this._hass)}</strong><p>${haListManagerInventoryCardText("products.refresh_review", {}, this._hass)}</p>${draft.off_changes.map((change) => `<label><input type="checkbox" data-off-change="${change.field}" ${change.selected ? "checked" : ""}><span><strong>${haListManagerInventoryCardText(fields[change.field], {}, this._hass)}</strong><small>${escapeHtml(change.before)} → ${escapeHtml(change.after)}</small></span></label>`).join("")}</section>`;
+  }
+
+  _applyProductRefresh(field, selected, draft) {
+    if (!draft || draft.off_ean !== String(draft.ean || "").trim()) return;
+    const change = draft.off_changes?.find((item) => item.field === field);
+    if (!change) return;
+    // Preserve manual edits made after the lookup when the option is toggled off.
+    if (draft[field] !== (change.selected ? change.after : change.before)) change.before = draft[field];
+    draft[field] = selected ? change.after : change.before;
+    change.selected = selected;
+    // Keep the dialog nodes mounted so choosing replacements retains focus and scroll.
+    const input = this.shadowRoot.querySelector(`[data-field="${field}"]`);
+    if (input) input.value = draft[field];
+    const checkbox = this.shadowRoot.querySelector(`[data-off-change="${field}"]`);
+    if (checkbox) {
+      checkbox.checked = selected;
+      const values = checkbox.closest("label")?.querySelector("small");
+      if (values) values.textContent = `${change.before} → ${change.after}`;
+    }
+    if (field === "image_url") {
+      const image = this.shadowRoot.querySelector(".product-dialog .dialog-image");
+      if (image) image.src = draft.image_url;
+    }
+  }
+
   async _lookupDialogEan() {
     this._syncDialogDraft();
-    const ean = this._dialog?.draft.ean?.trim();
+    const dialog = this._dialog;
+    const ean = dialog?.draft.ean?.trim();
     if (!/^\d{4,32}$/.test(ean || "")) { this._setDialogStatus(haListManagerInventoryCardText("errors.ean_digits_required", {}, this._hass), "error", "ean"); this._render(); return; }
     const keepCustomName = this._dialog.kind === "product-edit";
     const client = new HaListManagerClient(this._hass);
@@ -1869,8 +2356,12 @@ class HaListManagerInventoryCard extends HTMLElement {
     let result;
     try {
       result = await (keepCustomName ? client.lookupProduct(ean, this._dialog.entry.product.id) : client.lookupInventoryProduct(ean));
+      if (this._dialog !== dialog) { this._busy = false; return; }
+      this._syncDialogDraft();
+      if (dialog.draft.ean.trim() !== ean) { this._busy = false; return; }
       this._error = "";
     } catch (error) {
+      if (this._dialog !== dialog) { this._busy = false; return; }
       if (error?.code === "product_not_found") this._setDialogStatus(haListManagerInventoryCardText("products.ean_data_not_found", {}, this._hass), "warning", "ean");
       else this._setDialogStatus(error?.message || haListManagerInventoryCardText("errors.openfoodfacts_load_failed", {}, this._hass), "error", "ean");
       this._busy = false;
@@ -1886,16 +2377,14 @@ class HaListManagerInventoryCard extends HTMLElement {
     const parsedName = this._parseProductName(product.name || this._dialog.draft.name, product.brand, product.package_quantity);
     Object.assign(this._dialog.draft, {
       product_id: result.local ? product.id : "",
-      name: keepCustomName ? currentName : parsedName.name,
-      base_name: keepCustomName ? currentBaseName : parsedName.base_name,
-      append_brand: keepCustomName ? this._dialog.draft.append_brand : parsedName.append_brand,
-      append_quantity: keepCustomName ? this._dialog.draft.append_quantity : parsedName.append_quantity,
-      original_name: product.original_name || product.name || this._dialog.draft.original_name,
+      name: result.local ? parsedName.name : (currentName || parsedName.name),
+      base_name: !result.local && currentName ? currentBaseName : parsedName.base_name,
+      append_brand: !result.local && currentName ? this._dialog.draft.append_brand : parsedName.append_brand,
+      append_quantity: !result.local && currentName ? this._dialog.draft.append_quantity : parsedName.append_quantity,
       ean: product.ean || ean,
-      brand: product.brand || "",
-      package_quantity: product.package_quantity || "",
-      image_url: product.image_url || "",
     });
+    if (result.local) Object.assign(this._dialog.draft, { original_name: product.original_name || product.name || this._dialog.draft.original_name, brand: product.brand || "", package_quantity: product.package_quantity || "", image_url: product.image_url || "", off_changes: [] });
+    else this._stageProductRefresh(this._dialog.draft, product);
     this._setDialogStatus(keepCustomName ? haListManagerInventoryCardText("ui.product_data_loaded_unsaved", {}, this._hass) : (result.local ? haListManagerInventoryCardText("products.local_match_found", {}, this._hass) : haListManagerInventoryCardText("ui.product_data_loaded_unsaved", {}, this._hass)), "success", "ean");
     this._render();
   }
@@ -2017,7 +2506,7 @@ class HaListManagerInventoryCard extends HTMLElement {
   async _saveDialog() {
     this._syncDialogDraft();
     const draft = this._dialog?.draft;
-    if (!draft) return;
+    if (!draft || this._dialog.pendingScan && !this._canEditPendingScan()) return;
     const client = new HaListManagerClient(this._hass);
     if (this._dialog.kind === "group-edit") {
       const name = String(draft.name || "").trim();
@@ -2040,7 +2529,7 @@ class HaListManagerInventoryCard extends HTMLElement {
     if (this._dialog.kind === "product-edit") {
       if (!String(draft.name).trim()) { this._setDialogStatus(haListManagerInventoryCardText("errors.enter_product_name", {}, this._hass), "error"); this._render(); return; }
       const knownLabels = [...this._labels, ...(this._dialog.entry.product.labels || [])].filter((label, index, all) => all.findIndex((item) => item.id === label.id) === index);
-      const result = await this._run(() => client.updateProduct({ ...this._dialog.entry.product, ...draft, labels: knownLabels.filter((label) => (draft.label_ids || []).includes(label.id)), name: draft.name.trim() }), haListManagerInventoryCardText("errors.product_save_failed", {}, this._hass));
+      const result = await this._run(() => client.updateProduct({ ...this._dialog.entry.product, ...draft, labels: knownLabels.filter((label) => (draft.label_ids || []).includes(label.id)), name: draft.name.trim() }, this._listId()), haListManagerInventoryCardText("errors.product_save_failed", {}, this._hass));
       if (result?.product) {
         this._products = this._products.map((product) => product.id === result.product.id ? result.product : product);
         this._entries = this._entries.map((entry) => entry.product_id === result.product.id ? { ...entry, product: result.product } : entry);
@@ -2057,7 +2546,7 @@ class HaListManagerInventoryCard extends HTMLElement {
       const previousStock = Number(entry.stock || 0);
       const pendingScan = this._dialog.pendingScan;
       const result = await this._run(() => pendingScan
-        ? client.resolvePendingScan(pendingScan.id, { corrected_stock: stock, restock_zero: Boolean(this.shadowRoot.querySelector("[data-restock-zero]")?.checked), category_id: draft.category_id || null, category: draft.category_id ? null : (draft.category_name?.trim() || null) })
+        ? client.resolvePendingScan(pendingScan.id, { session_id: this._scanSessionId, corrected_stock: stock, minimum_stock: minimum, restock_zero: Boolean(this.shadowRoot.querySelector("[data-restock-zero]")?.checked), category_id: draft.category_id || null, category: draft.category_id ? null : (draft.category_name?.trim() || null) })
         : client.updateInventory(entry.id, stock, minimum, draft.category_id || null, draft.category_id ? null : (draft.category_name?.trim() || null), entry.hidden), haListManagerInventoryCardText("errors.inventory_item_save_failed", {}, this._hass));
       if (result?.entry) {
         this._replaceEntry(result.entry);
@@ -2075,9 +2564,10 @@ class HaListManagerInventoryCard extends HTMLElement {
       if (!String(draft.name).trim()) { this._setDialogStatus(haListManagerInventoryCardText("errors.enter_product_name", {}, this._hass), "error"); this._render(); return; }
       const value = draft.ean?.trim() || draft.name.trim();
       const pendingScan = this._dialog.pendingScan;
-      const details = { corrected_stock: pendingScan?.action === "correct" ? stock : null, minimum_stock: minimum, category_id: draft.category_id || null, category: draft.category_id ? null : (draft.category_name?.trim() || null), name: draft.name.trim(), original_name: draft.original_name?.trim() || null, brand: draft.brand?.trim() || null, package_quantity: draft.package_quantity?.trim() || null, product_category: null, image_url: draft.image_url?.trim() || null, label_ids: draft.label_ids || [] };
+      const defaultScanStock = pendingScan?.action === "add" ? Number(pendingScan.quantity || 1) : 0;
+      const details = { corrected_stock: pendingScan && (pendingScan.action === "correct" || stock !== defaultScanStock) ? stock : null, minimum_stock: minimum, category_id: draft.category_id || null, category: draft.category_id ? null : (draft.category_name?.trim() || null), name: draft.name.trim(), original_name: draft.original_name?.trim() || null, brand: draft.brand?.trim() || null, package_quantity: draft.package_quantity?.trim() || null, product_category: null, image_url: draft.image_url?.trim() || null, label_ids: draft.label_ids || [] };
       const result = await this._run(() => pendingScan
-        ? client.resolvePendingScan(pendingScan.id, details)
+        ? client.resolvePendingScan(pendingScan.id, { ...details, session_id: this._scanSessionId })
         : client.addInventoryProduct(this._listId(), value, stock, draft.category_id || null, draft.category_id ? null : (draft.category_name?.trim() || null), {
           minimum_stock: minimum, product_id: draft.product_id || null, ean: draft.ean?.trim() || null, name: draft.name.trim(), original_name: draft.original_name?.trim() || null, brand: draft.brand?.trim() || null, package_quantity: draft.package_quantity?.trim() || null, image_url: draft.image_url?.trim() || null, label_ids: draft.label_ids || [],
         }), haListManagerInventoryCardText("errors.item_add_failed", {}, this._hass));
@@ -2178,7 +2668,7 @@ class HaListManagerInventoryCard extends HTMLElement {
 
   _groupCategory(group, members) {
     const dynamicName = String(group.category_name || "").trim();
-    if (group.category_id && group.category) return group.category;
+    if (group.category_id && group.category) return this._currentPermanentCategory(group.category);
     if (dynamicName) return { id: `dynamic:${dynamicName.toLocaleLowerCase()}`, name: dynamicName, icon: "mdi:shape-outline", color: null, position: 999999, dynamic: true };
     const categories = members.map((entry) => this._effectiveEntryCategory(entry));
     const first = categories[0] || null;
@@ -2204,11 +2694,15 @@ class HaListManagerInventoryCard extends HTMLElement {
 
   _displayUnits() {
     const groupedIds = this._entryGroupMap();
-    if (this._groupSelectionMode) return this._entries.map((entry) => ({ kind: "entry", entry }));
-    return [
+    const units = this._groupSelectionMode ? this._entries.map((entry) => ({ kind: "entry", entry })) : [
       ...this._inventoryGroups.map((group) => ({ kind: "group", group: this._groupView(group) })),
       ...this._entries.filter((entry) => !groupedIds.has(entry.id)).map((entry) => ({ kind: "entry", entry })),
     ];
+    return units.sort((left, right) => {
+      const leftName = left.kind === "group" ? left.group.name : left.entry.product?.name || "";
+      const rightName = right.kind === "group" ? right.group.name : right.entry.product?.name || "";
+      return leftName.localeCompare(rightName, haListManagerInventoryCardTextLocale(this._hass), { sensitivity: "base", numeric: true });
+    });
   }
 
   _unitState(unit) {
@@ -2244,6 +2738,17 @@ class HaListManagerInventoryCard extends HTMLElement {
     return keys;
   }
 
+  _unitLabels(unit) {
+    const entries = unit.kind === "group" ? unit.group.members : [unit.entry];
+    return [...new Map(entries.flatMap((entry) => entry.product?.labels || [])
+      .filter((label) => label.id).map((label) => [label.id, label])).values()];
+  }
+
+  _renderLabelBadges(labels) {
+    if (!labels.length) return "";
+    return `<span class="labels">${labels.map((label) => `<span class="label-chip" style="${label.color ? `--label-color:${escapeHtml(label.color)}` : ""}"><ha-icon icon="${escapeHtml(label.icon || "mdi:label-outline")}"></ha-icon>${escapeHtml(label.name)}</span>`).join("")}</span>`;
+  }
+
   _passesFilter(unit) {
     const entry = this._unitState(unit);
     const query = this._config.allow_filter ? this._inputValue.trim().toLocaleLowerCase() : "";
@@ -2270,10 +2775,8 @@ class HaListManagerInventoryCard extends HTMLElement {
     if (this._groupingMode() === "labels") {
       const groups = new Map();
       for (const unit of units) {
-        const entries = unit.kind === "group" ? unit.group.members : [unit.entry];
-        const labels = new Map(entries.flatMap((entry) => entry.product?.labels || [])
-          .filter((label) => label.id).map((label) => [label.id, label]));
-        const definitions = labels.size ? [...labels.values()].map((label) => ({
+        const labels = this._unitLabels(unit);
+        const definitions = labels.length ? labels.map((label) => ({
           ...label, id: `__label__:${label.id}`, icon: label.icon || "mdi:label-outline",
         })) : [{ id: "__unlabeled__", name: haListManagerInventoryCardText("ui.without_label", {}, this._hass), icon: "mdi:label-off-outline" }];
         for (const category of definitions) {
@@ -2328,18 +2831,19 @@ class HaListManagerInventoryCard extends HTMLElement {
       : "";
     const currentGroup = this._groupSelectionMode ? this._groupForEntry(entry.id) : null;
     const details = [product.original_name && product.original_name !== product.name ? product.original_name : null, product.brand, product.package_quantity, product.ean ? `EAN ${product.ean}` : null, currentGroup ? haListManagerInventoryCardText("ui.group_named", {p0:(currentGroup.name)}, this._hass) : null].filter(Boolean);
-    const labels = (product.labels || []).map((label) => `<span class="label-chip" style="${label.color ? `--label-color:${escapeHtml(label.color)}` : ""}"><ha-icon icon="${escapeHtml(label.icon || "mdi:label-outline")}"></ha-icon>${escapeHtml(label.name)}</span>`).join("");
+    const labels = this._renderLabelBadges(this._unitLabels({ kind: "entry", entry }));
     const position = this._config.quantity_position === "controls" && this._config.show_plus_minus === false ? "end" : this._config.quantity_position;
     const title = position === "beginning" ? `${entry.stock}× ${product.name}` : position === "end" ? `${product.name} (${entry.stock})` : product.name;
     const controlsStock = position === "controls" ? `<strong class="controls-stock">${entry.stock}</strong>` : "";
     const restockFlag = this._config.show_restock_flag !== false && this._restockPreview.some((item) => item.source_type === "entry" && item.source_id === entry.id && item.latched) ? `<button class="restock-flag" type="button" data-open-restock-preview title="${haListManagerInventoryCardText("inventory.restock_sent_locked", {}, this._hass)}"><ha-icon icon="mdi:flag"></ha-icon></button>` : "";
     const selectable = this._groupSelectionMode ? `<button type="button" class="group-select ${this._selectedEntryIds.has(entry.id) ? "selected" : ""}" data-select-entry="${entry.id}" title="${haListManagerInventoryCardText("ui.select_for_group", {}, this._hass)}"><ha-icon icon="mdi:${this._selectedEntryIds.has(entry.id) ? "checkbox-marked" : "checkbox-blank-outline"}"></ha-icon></button>` : `<button class="icon-button visibility" type="button" data-hidden="${entry.id}:${entry.hidden ? "0" : "1"}" title="${entry.hidden ? haListManagerInventoryCardText("ui.show_item", {}, this._hass) : haListManagerInventoryCardText("ui.hide_item", {}, this._hass)}"><ha-icon icon="mdi:${entry.hidden ? "eye-outline" : "eye-off-outline"}"></ha-icon></button>`;
     const stockActions = this._groupSelectionMode || this._config.show_plus_minus === false ? "" : `<div class="stock-actions">${restockFlag}<button class="icon-button" type="button" data-adjust="${entry.id}:1" title="${haListManagerInventoryCardText("ui.increase_stock", {}, this._hass)}"><ha-icon icon="mdi:plus"></ha-icon></button>${controlsStock}<button class="icon-button" type="button" data-adjust="${entry.id}:-1" title="${haListManagerInventoryCardText("ui.decrease_stock", {}, this._hass)}"><ha-icon icon="mdi:minus"></ha-icon></button></div>`;
-    return `<article class="entry ${this._config.show_images ? "with-image" : "without-image"} ${inventoryState(entry)} ${entry.hidden ? "is-hidden" : ""}">${selectable}${image}<button class="entry-main" type="button" ${this._groupSelectionMode ? `data-select-entry="${entry.id}"` : `data-edit="${entry.id}"`}><span class="entry-title">${escapeHtml(title)}${product.ean ? ` <ha-icon icon="mdi:barcode"></ha-icon>` : ""}</span>${this._showDetails && details.length ? `<span class="entry-details">${escapeHtml(details.join(" · "))}</span>` : ""}${this._showDetails && labels ? `<span class="labels">${labels}</span>` : ""}</button>${stockActions}</article>`;
+    return `<article class="entry ${this._config.show_images ? "with-image" : "without-image"} ${inventoryState(entry)} ${entry.hidden ? "is-hidden" : ""}">${selectable}${image}<button class="entry-main" type="button" ${this._groupSelectionMode ? `data-select-entry="${entry.id}"` : `data-edit="${entry.id}"`}><span class="entry-title">${escapeHtml(title)}${product.ean ? ` <ha-icon icon="mdi:barcode"></ha-icon>` : ""}</span>${this._showDetails && details.length ? `<span class="entry-details">${escapeHtml(details.join(" · "))}</span>` : ""}${labels}</button>${stockActions}</article>`;
   }
 
   _renderInventoryGroup(group) {
     const state = inventoryState(group);
+    const labels = this._renderLabelBadges(this._unitLabels({ kind: "group", group }));
     const memberNames = group.members.map((entry) => `${entry.product.name} (${entry.stock})`).join(" · ");
     const position = this._config.quantity_position === "controls" && this._config.show_plus_minus === false ? "end" : this._config.quantity_position;
     const title = position === "beginning" ? `${group.stock}× ${group.name}` : position === "end" ? `${group.name} (${group.stock})` : group.name;
@@ -2349,7 +2853,7 @@ class HaListManagerInventoryCard extends HTMLElement {
       ? `<span class="group-visibility-spacer"></span><span class="group-icon"><ha-icon icon="mdi:group"></ha-icon></span>`
       : `<span class="group-icon"><ha-icon icon="mdi:group"></ha-icon></span>`;
     const stockActions = this._config.show_plus_minus === false ? "" : `<div class="stock-actions">${restockFlag}<button class="icon-button" type="button" data-edit-group="${escapeHtml(group.id)}" title="${haListManagerInventoryCardText("ui.select_variant", {}, this._hass)}"><ha-icon icon="mdi:plus"></ha-icon></button>${controlsStock}<button class="icon-button" type="button" data-edit-group="${escapeHtml(group.id)}" title="${haListManagerInventoryCardText("ui.select_variant", {}, this._hass)}"><ha-icon icon="mdi:minus"></ha-icon></button></div>`;
-    return `<article class="entry inventory-group ${this._config.show_images ? "with-image" : "without-image"} ${state}">${groupLead}<button class="entry-main" type="button" data-edit-group="${escapeHtml(group.id)}"><span class="entry-title">${escapeHtml(title)} <ha-icon icon="mdi:layers-triple-outline"></ha-icon></span>${this._showDetails ? `<span class="entry-details">${escapeHtml(memberNames)}</span>` : ""}</button>${stockActions}</article>`;
+    return `<article class="entry inventory-group ${this._config.show_images ? "with-image" : "without-image"} ${state}">${groupLead}<button class="entry-main" type="button" data-edit-group="${escapeHtml(group.id)}"><span class="entry-title">${escapeHtml(title)} <ha-icon icon="mdi:layers-triple-outline"></ha-icon></span>${this._showDetails ? `<span class="entry-details">${escapeHtml(memberNames)}</span>` : ""}${labels}</button>${stockActions}</article>`;
   }
 
   _renderUnit(unit) {
@@ -2448,6 +2952,8 @@ class HaListManagerInventoryCard extends HTMLElement {
 
   _renderDialog() {
     if (!this._dialog) return "";
+    if (this._itemAction && this._itemAction.parent !== this._dialog) { this._itemAction = null; this._itemActionMenuOpen = false; }
+    if (this._itemAction?.parent === this._dialog) return this._renderItemActionDialog();
     if (this._dialog.kind === "image") {
       return `<div class="backdrop image-backdrop" data-backdrop><section class="dialog image-dialog">${this._dialogHeader(this._dialog.name || haListManagerInventoryCardText("ui.product_image", {}, this._hass))}<img src="${escapeHtml(this._dialog.url)}" alt="${escapeHtml(this._dialog.name || haListManagerInventoryCardText("ui.product_image", {}, this._hass))}"></section></div>`;
     }
@@ -2466,7 +2972,7 @@ class HaListManagerInventoryCard extends HTMLElement {
         ? `<section class="entry-group-section"><div class="entry-group-summary"><span>${haListManagerInventoryCardText("inventory.group", {}, this._hass)}</span><strong><ha-icon icon="mdi:group"></ha-icon>${escapeHtml(group.name)}</strong></div><div class="entry-group-actions"><button type="button" data-edit-entry-group="${escapeHtml(group.id)}">${haListManagerInventoryCardText("ui.edit", {}, this._hass)}</button><button type="button" data-pick-group="${escapeHtml(entry.id)}">${haListManagerInventoryCardText("ui.switch", {}, this._hass)}</button><button type="button" class="danger" data-remove-entry-group="${escapeHtml(entry.id)}">${haListManagerInventoryCardText("ui.remove", {}, this._hass)}</button></div></section>`
         : `<section class="entry-group-section"><div class="entry-group-summary"><span>${haListManagerInventoryCardText("inventory.group", {}, this._hass)}</span><small>${haListManagerInventoryCardText("inventory.no_group", {}, this._hass)}</small></div><div class="entry-group-actions"><button type="button" data-pick-group="${escapeHtml(entry.id)}"><ha-icon icon="mdi:group-plus"></ha-icon>${haListManagerInventoryCardText("inventory.select_group", {}, this._hass)}</button><button type="button" data-new-group-for-entry="${escapeHtml(entry.id)}"><ha-icon icon="mdi:plus"></ha-icon>${haListManagerInventoryCardText("inventory.new_group", {}, this._hass)}</button></div></section>`;
       const zeroRestock = this._dialog.pendingScan?.action === "remove" && Number(entry.stock) === 0 ? `<label class="switch-field"><span><strong>${haListManagerInventoryCardText("inventory.restock_despite_zero", {}, this._hass)}</strong><small>${haListManagerInventoryCardText("help.zero_stock_restock_scan", {}, this._hass)}</small></span><input type="checkbox" data-restock-zero></label>` : "";
-      return `<div class="backdrop" data-backdrop><section class="dialog" data-dialog-panel>${this._dialogHeader(haListManagerInventoryCardText("inventory.correct_stock", {}, this._hass))}<strong class="dialog-product">${escapeHtml(entry.product.name)}</strong><div class="field-grid"><label><span>${haListManagerInventoryCardText("ui.stock", {}, this._hass)}</span><input type="number" min="0" step="1" value="${escapeHtml(draft.stock)}" data-field="stock"></label><label><span>${haListManagerInventoryCardText("ui.minimum_stock_optional", {}, this._hass)}</span><input type="number" min="0" step="1" value="${escapeHtml(draft.minimum_stock)}" data-field="minimum_stock"></label></div><div class="dialog-field"><span>${haListManagerInventoryCardText("ui.category", {}, this._hass)}</span>${this._categoryPickerMarkup()}</div>${groupSection}${zeroRestock}${generalStatus}<div class="dialog-actions dialog-actions-wrap"><button class="primary" data-save-dialog>${haListManagerInventoryCardText("ui.save", {}, this._hass)}</button><button data-close-dialog>${haListManagerInventoryCardText("ui.cancel", {}, this._hass)}</button><button data-edit-product="${entry.id}"><ha-icon icon="mdi:pencil"></ha-icon>${haListManagerInventoryCardText("ui.edit_item", {}, this._hass)}</button><button class="danger" data-delete-entry="${entry.id}"><ha-icon icon="mdi:delete-outline"></ha-icon>${haListManagerInventoryCardText("inventory.delete_item", {}, this._hass)}</button></div></section></div>`;
+      return `<div class="backdrop" data-backdrop><section class="dialog" data-dialog-panel>${this._dialogHeader(haListManagerInventoryCardText("inventory.correct_stock", {}, this._hass))}${this._dialog.pendingScan ? `<div data-scan-collaboration>${this._pendingScanControls()}</div>` : ""}<strong class="dialog-product">${escapeHtml(entry.product.name)}</strong><div class="field-grid"><label><span>${haListManagerInventoryCardText("ui.stock", {}, this._hass)}</span><input type="number" min="0" step="1" value="${escapeHtml(draft.stock)}" data-field="stock"></label><label><span>${haListManagerInventoryCardText("ui.minimum_stock_optional", {}, this._hass)}</span><input type="number" min="0" step="1" value="${escapeHtml(draft.minimum_stock)}" data-field="minimum_stock"></label></div><div class="dialog-field"><span>${haListManagerInventoryCardText("ui.category", {}, this._hass)}</span>${this._categoryPickerMarkup()}</div>${groupSection}${zeroRestock}${generalStatus}<div class="dialog-actions dialog-actions-wrap"><button class="primary" data-save-dialog>${haListManagerInventoryCardText("ui.save", {}, this._hass)}</button><button data-close-dialog>${haListManagerInventoryCardText("ui.cancel", {}, this._hass)}</button><button data-edit-product="${entry.id}"><ha-icon icon="mdi:pencil"></ha-icon>${haListManagerInventoryCardText("ui.edit_item", {}, this._hass)}</button><button class="danger" data-delete-entry="${entry.id}"><ha-icon icon="mdi:delete-outline"></ha-icon>${haListManagerInventoryCardText("inventory.delete_item", {}, this._hass)}</button></div></section></div>`;
     }
     if (["product-edit", "add"].includes(this._dialog.kind)) return this._renderProductDialog(eanStatus, generalStatus);
     return "";
@@ -2491,7 +2997,7 @@ class HaListManagerInventoryCard extends HTMLElement {
       ? `<label><span>${haListManagerInventoryCardText("ui.optional_image_url", {}, this._hass)}</span><input value="${escapeHtml(draft.image_url)}" data-field="image_url"></label>`
       : `<input type="hidden" value="${escapeHtml(draft.image_url)}" data-field="image_url">`;
     const lockedHelp = locked ? `<p class="field-help">${haListManagerInventoryCardText("help.central_product_editing", {}, this._hass)}</p>` : "";
-    return `<div class="backdrop" data-backdrop><section class="dialog product-dialog" data-dialog-panel>${this._dialogHeader(title)}${image}<label><span>${haListManagerInventoryCardText("products.custom_name", {}, this._hass)}</span><input value="${escapeHtml(draft.name)}" data-field="name" ${readonly}></label><div class="name-options"><button type="button" class="${draft.append_brand ? "active" : ""}" data-name-component="brand" ${locked || !draft.brand ? "disabled" : ""}><ha-icon icon="mdi:tag-outline"></ha-icon>${haListManagerInventoryCardText("ui.brand", {}, this._hass)}</button><button type="button" class="${draft.append_quantity ? "active" : ""}" data-name-component="quantity" ${locked || !draft.package_quantity ? "disabled" : ""}><ha-icon icon="mdi:scale-balance"></ha-icon>${haListManagerInventoryCardText("ui.amount", {}, this._hass)}</button></div><div class="ean-row"><label><span>${haListManagerInventoryCardText("ui.ean_optional", {}, this._hass)}</span><input value="${escapeHtml(draft.ean)}" data-field="ean" ${readonly}></label><button type="button" data-lookup-ean ${locked ? "disabled" : ""}><ha-icon icon="${lookupIcon}"></ha-icon>${lookupLabel}</button>${eanStatus}</div><label><span>${haListManagerInventoryCardText("products.original_name", {}, this._hass)}</span><input value="${escapeHtml(draft.original_name)}" data-field="original_name" ${readonly}></label><div class="field-grid"><label><span>${haListManagerInventoryCardText("ui.brand_optional", {}, this._hass)}</span><input value="${escapeHtml(draft.brand)}" data-field="brand" ${readonly}></label><label><span>${haListManagerInventoryCardText("ui.package_quantity_optional", {}, this._hass)}</span><input value="${escapeHtml(draft.package_quantity)}" data-field="package_quantity" ${readonly}></label></div>${inventoryFields}${categoryField}${this._renderLabelSelector(draft.label_ids || [])}${lockedHelp}${imageField}${generalStatus}<div class="dialog-actions"><button class="primary" data-save-dialog>${haListManagerInventoryCardText("ui.save", {}, this._hass)}</button><button data-close-dialog>${haListManagerInventoryCardText("ui.cancel", {}, this._hass)}</button></div></section></div>`;
+    return `<div class="backdrop" data-backdrop><section class="dialog product-dialog ${this._dialog.pendingScan ? "pending-scan-product-dialog" : ""}" data-dialog-panel>${this._dialogHeader(title)}${this._dialog.pendingScan ? `<div class="pending-scan-intro"><div data-scan-collaboration>${this._pendingScanControls()}</div>${image}</div>` : image}<label><span>${haListManagerInventoryCardText("products.custom_name", {}, this._hass)}</span><input value="${escapeHtml(draft.name)}" data-field="name" ${readonly}></label><div class="name-options"><button type="button" class="${draft.append_brand ? "active" : ""}" data-name-component="brand" ${locked || !draft.brand ? "disabled" : ""}><ha-icon icon="mdi:tag-outline"></ha-icon>${haListManagerInventoryCardText("ui.brand", {}, this._hass)}</button><button type="button" class="${draft.append_quantity ? "active" : ""}" data-name-component="quantity" ${locked || !draft.package_quantity ? "disabled" : ""}><ha-icon icon="mdi:scale-balance"></ha-icon>${haListManagerInventoryCardText("ui.amount", {}, this._hass)}</button></div><div class="ean-row"><label><span>${haListManagerInventoryCardText("ui.ean_optional", {}, this._hass)}</span><input value="${escapeHtml(draft.ean)}" data-field="ean" ${readonly}></label><button type="button" data-lookup-ean ${locked ? "disabled" : ""}><ha-icon icon="${lookupIcon}"></ha-icon>${lookupLabel}</button>${eanStatus}</div><label><span>${haListManagerInventoryCardText("products.original_name", {}, this._hass)}</span><input value="${escapeHtml(draft.original_name)}" data-field="original_name" ${readonly}></label><div class="field-grid"><label><span>${haListManagerInventoryCardText("ui.brand_optional", {}, this._hass)}</span><input value="${escapeHtml(draft.brand)}" data-field="brand" ${readonly}></label><label><span>${haListManagerInventoryCardText("ui.package_quantity_optional", {}, this._hass)}</span><input value="${escapeHtml(draft.package_quantity)}" data-field="package_quantity" ${readonly}></label></div>${this._renderProductRefresh(draft)}${inventoryFields}${categoryField}${this._renderLabelSelector(draft.label_ids || [])}${lockedHelp}${imageField}${generalStatus}<div class="dialog-actions"><button class="primary" data-save-dialog>${haListManagerInventoryCardText("ui.save", {}, this._hass)}</button><button data-close-dialog>${haListManagerInventoryCardText("ui.cancel", {}, this._hass)}</button></div></section></div>`;
   }
 
   _suggestionMarkup(product) {
@@ -2504,6 +3010,10 @@ class HaListManagerInventoryCard extends HTMLElement {
   }
 
   _updateSuggestions(value) {
+    if (this._registrationOffer && value.trim() !== this._registrationOffer.value) {
+      this._registrationOffer = null;
+      this.shadowRoot.querySelector("[data-register-missing]")?.remove();
+    }
     const container = this.shadowRoot.querySelector("[data-suggestions]");
     const clear = this.shadowRoot.querySelector("[data-clear-input]");
     if (clear) clear.hidden = !value;
@@ -2565,12 +3075,13 @@ class HaListManagerInventoryCard extends HTMLElement {
     const labelsGrouped = this._groupingMode() === "labels";
     const groupingLabel = haListManagerInventoryCardText(labelsGrouped ? "ui.group_by_categories" : "ui.group_by_labels", {}, this._hass);
     const groupingToggle = this._groupingEnabled() ? `<button type="button" class="tool-button ${labelsGrouped ? "active" : ""}" data-toggle-grouping aria-pressed="${labelsGrouped}" aria-label="${escapeHtml(groupingLabel)}" title="${escapeHtml(groupingLabel)}"><ha-icon icon="mdi:${labelsGrouped ? "label-multiple-outline" : "shape-outline"}"></ha-icon></button>` : "";
-    const pendingButton = this._pendingScans.length ? `<button class="tool-button text-button pending-scans-button" data-open-pending-scans><ha-icon icon="mdi:barcode-scan"></ha-icon><span>${haListManagerInventoryCardText("scanner.open_scan_count", {p0:(this._pendingScans.length)}, this._hass)}</span></button>` : "";
+    const pendingButton = `<button class="tool-button text-button pending-scans-button" data-open-pending-scans ${this._pendingScans.length ? "" : "hidden"}><ha-icon icon="mdi:barcode-scan"></ha-icon><span>${haListManagerInventoryCardText("scanner.open_scan_count", {p0:(this._pendingScans.length)}, this._hass)}</span></button>`;
     const stockFilter = this._config.show_stock_filter_button === false ? "" : `<label class="filter ${this._filter !== "all" ? "active" : ""}" title="${haListManagerInventoryCardText("inventory.stock_filter_value", {p0:(escapeHtml(filterLabel))}, this._hass)}"><ha-icon icon="mdi:filter-variant"></ha-icon><select data-filter aria-label="${haListManagerInventoryCardText("inventory.stock_filter_value", {p0:(escapeHtml(filterLabel))}, this._hass)}"><option value="all">${haListManagerInventoryCardText("ui.all", {}, this._hass)}</option><option value="zero">${haListManagerInventoryCardText("ui.zero_stock", {}, this._hass)}</option><option value="zero_one">${haListManagerInventoryCardText("inventory.stock_zero_to_one", {}, this._hass)}</option><option value="minimum">${haListManagerInventoryCardText("ui.at_or_below_minimum_stock", {}, this._hass)}</option><option value="below">${haListManagerInventoryCardText("ui.below_minimum_stock", {}, this._hass)}</option></select></label>`;
     const hiddenToggle = this._config.show_hidden_button === false ? "" : `<button class="tool-button ${this._showHidden ? "active" : ""}" data-toggle-hidden title="${haListManagerInventoryCardText("ui.hidden_items", {}, this._hass)}"><ha-icon icon="mdi:eye-off-outline"></ha-icon></button>`;
     const detailsToggle = this._config.show_details_button === false ? "" : `<button class="tool-button ${this._showDetails ? "active" : ""}" data-toggle-details title="${haListManagerInventoryCardText("ui.show_product_details", {}, this._hass)}"><ha-icon icon="mdi:text-box-outline"></ha-icon></button>`;
     const labelFilter = this._config.show_label_filter_button === false ? "" : `<div class="label-filter"><button type="button" class="tool-button text-button toolbar-filter-button ${this._selectedLabelIds !== null ? "active" : ""}" data-toggle-label-menu aria-label="${escapeHtml(labelFilterLabel)}" title="${escapeHtml(labelFilterLabel)}"><ha-icon icon="mdi:label-multiple-outline"></ha-icon><span>${escapeHtml(labelFilterLabel)}</span><ha-icon class="filter-menu-chevron" icon="mdi:menu-down"></ha-icon></button>${this._labelMenuOpen ? `<div class="label-menu"><div class="category-menu-actions"><button type="button" data-label-all>${haListManagerInventoryCardText("ui.select_all", {}, this._hass)}</button><button type="button" data-label-none>${haListManagerInventoryCardText("ui.select_none", {}, this._hass)}</button></div><div class="category-choice-list">${labelChoices}</div></div>` : ""}</div>`;
     const categoryFilter = this._config.show_category_filter_button === false ? "" : `<div class="category-filter"><button type="button" class="tool-button text-button toolbar-filter-button ${this._selectedCategoryIds !== null ? "active" : ""}" data-toggle-category-menu aria-label="${escapeHtml(categoryLabel)}" title="${escapeHtml(categoryLabel)}"><ha-icon icon="mdi:shape-outline"></ha-icon><span>${escapeHtml(categoryLabel)}</span><ha-icon class="filter-menu-chevron" icon="mdi:menu-down"></ha-icon></button>${this._categoryMenuOpen ? `<div class="category-menu"><div class="category-menu-actions"><button type="button" data-category-all>${haListManagerInventoryCardText("ui.select_all", {}, this._hass)}</button><button type="button" data-category-none>${haListManagerInventoryCardText("ui.select_none", {}, this._hass)}</button></div><div class="category-choice-list">${choices}</div>${this._groupingEnabled() ? "" : `<label class="category-choice category-group-choice"><input type="checkbox" data-flat-categories ${!this._groupCategories ? "checked" : ""}><ha-icon icon="mdi:format-list-bulleted"></ha-icon><span>${haListManagerInventoryCardText("ui.no_category_grouping", {}, this._hass)}</span></label>`}</div>` : ""}</div>`;
+    if (!stockFilter && !hiddenToggle && !detailsToggle && !categoryToggle && !groupingToggle && !labelFilter && !categoryFilter && !this._pendingScans.length) return "";
     const tools = `${stockFilter}${hiddenToggle}${detailsToggle}${categoryToggle}${groupingToggle}${pendingButton}`;
     const filters = `${labelFilter}${categoryFilter}`;
     return tools || filters ? `<div class="toolbar">${tools ? `<div class="tools">${tools}</div>` : ""}${filters ? `<div class="toolbar-filters">${filters}</div>` : ""}</div>` : "";
@@ -2746,7 +3257,7 @@ class HaListManagerInventoryCard extends HTMLElement {
 
   _renderPendingScanPicker() {
     if (!this._pendingScanPicker) return "";
-    const rows = this._pendingScans.map((scan) => `<button type="button" class="pending-scan-row" data-open-pending-scan="${escapeHtml(scan.id)}"><ha-icon icon="mdi:barcode-scan"></ha-icon><span><strong>${escapeHtml(scan.product_name || `EAN ${scan.ean}`)}</strong><small>${haListManagerInventoryCardText("ui.name_quantity", {p0:(escapeHtml(MODES(this._hass)[scan.action]?.label || scan.action || haListManagerInventoryCardText("ui.scan", {}, this._hass))), p1:(escapeHtml(scan.quantity || 1))}, this._hass)}</small></span><ha-icon icon="mdi:chevron-right"></ha-icon></button>`).join("");
+    const rows = this._pendingScans.map((scan) => `<div class="pending-scan-item"><button type="button" class="pending-scan-row" data-open-pending-scan="${escapeHtml(scan.id)}"><ha-icon icon="mdi:barcode-scan"></ha-icon><span><strong>${escapeHtml(scan.product_name || `EAN ${scan.ean}`)}</strong><small>${haListManagerInventoryCardText("ui.name_quantity", {p0:(escapeHtml(MODES(this._hass)[scan.action]?.label || scan.action || haListManagerInventoryCardText("ui.scan", {}, this._hass))), p1:(escapeHtml(scan.quantity || 1))}, this._hass)}</small></span><ha-icon icon="mdi:chevron-right"></ha-icon></button><button type="button" class="scan-discard-button" data-discard-pending-scan="${escapeHtml(scan.id)}" title="${haListManagerInventoryCardText("scanner.discard", {}, this._hass)}"><ha-icon icon="mdi:delete-outline"></ha-icon><span>${haListManagerInventoryCardText("scanner.discard", {}, this._hass)}</span></button></div>`).join("");
     return `<div class="backdrop" data-pending-scan-backdrop><section class="dialog pending-scan-dialog" data-dialog-panel><div class="dialog-header"><h3>${haListManagerInventoryCardText("ui.pending_scans", {}, this._hass)}</h3><button class="icon-button" data-close-pending-scans title="${haListManagerInventoryCardText("ui.close", {}, this._hass)}"><ha-icon icon="mdi:close"></ha-icon></button></div><p class="field-help">${haListManagerInventoryCardText("inventory.select_scan_help", {}, this._hass)}</p><div class="pending-scan-list">${rows}</div><div class="dialog-actions"><button data-close-pending-scans>${haListManagerInventoryCardText("ui.close", {}, this._hass)}</button></div></section></div>`;
   }
 
@@ -2897,7 +3408,8 @@ class HaListManagerInventoryCard extends HTMLElement {
     const cameraButton = this._config.show_camera_scan_button === false ? "" : `<button class="scan-button" type="button" title="${haListManagerInventoryCardText("ui.scan_ean_camera", {}, this._hass)}" data-camera-scan><ha-icon icon="mdi:qrcode-scan"></ha-icon></button>`;
     const inputBlock = `<div class="input-row">${quantityInput}<div class="product-input"><input class="${showChipButton ? "has-chip-trigger" : ""}" type="text" value="${escapeHtml(this._inputValue)}" placeholder="${haListManagerInventoryCardText("ui.item_or_ean", {}, this._hass)}" autocomplete="off" data-product-input>${inputActions}<div class="suggestions" data-suggestions hidden></div></div>${submitButton}${cameraButton}</div>${actionStatus}`;
     const toolbar = this._renderToolbar();
-    const beforeEntries = `${this._config.input_row_position === "bottom" ? "" : inputBlock}${this._config.option_row_position === "bottom" ? "" : toolbar}${selectionBar}${this._error ? `<div class="error"><ha-icon icon="mdi:alert-circle-outline"></ha-icon>${escapeHtml(this._error)}</div>` : ""}`;
+    const registrationButton = this._registrationOffer && this._mode === "correct" && this._registrationOffer.value === this._inputValue.trim() && this._error === this._registrationOffer.message ? `<button type="button" class="tool-button" data-register-missing>${haListManagerInventoryCardText("ui.register", {}, this._hass)}</button>` : "";
+    const beforeEntries = `${this._config.input_row_position === "bottom" ? "" : inputBlock}${this._config.option_row_position === "bottom" ? "" : toolbar}${selectionBar}${this._error ? `<div class="error"><ha-icon icon="mdi:alert-circle-outline"></ha-icon><span>${escapeHtml(this._error)}</span>${registrationButton}</div>` : ""}`;
     const afterEntries = `${this._config.option_row_position === "bottom" ? toolbar : ""}${this._config.input_row_position === "bottom" ? inputBlock : ""}`;
     const listContent = `${modePanel}${beforeEntries}<div class="entries">${content}</div>${afterEntries}`;
     const cardBody = collapsed ? "" : `<div class="inventory-card-layout"><div class="inventory-list-column">${listContent}</div>${this._renderChips()}</div>`;
@@ -3010,6 +3522,34 @@ class HaListManagerInventoryCard extends HTMLElement {
   }
 
   _bindEvents() {
+    this.shadowRoot.querySelector("[data-toggle-item-actions]")?.addEventListener("click", (event) => {
+      event.stopPropagation();
+      this._syncDialogDraft();
+      this._itemActionMenuOpen = !this._itemActionMenuOpen;
+      this._renderItemActionTransition(this._itemActionView(), this._itemActionMenuOpen ? "[data-item-action]" : "[data-toggle-item-actions]");
+    });
+    this.shadowRoot.querySelectorAll("[data-item-action]").forEach((button) => button.addEventListener("click", (event) => {
+      event.stopPropagation();
+      this._openItemAction(button.dataset.itemAction);
+    }));
+    this.shadowRoot.querySelector(".item-action-menu")?.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") {
+        event.preventDefault(); event.stopPropagation(); this._hideItemActionMenu();
+        this.shadowRoot.querySelector("[data-toggle-item-actions]")?.focus({ preventScroll: true });
+      } else if (["ArrowDown", "ArrowUp"].includes(event.key)) {
+        event.preventDefault(); event.stopPropagation();
+        const buttons = [...this.shadowRoot.querySelectorAll("[data-item-action]")].filter((button) => !button.disabled);
+        const index = buttons.indexOf(this.shadowRoot.activeElement);
+        buttons[(index + (event.key === "ArrowDown" ? 1 : buttons.length - 1)) % buttons.length]?.focus({ preventScroll: true });
+      }
+    });
+    this.shadowRoot.querySelectorAll("[data-close-item-action]").forEach((button) => button.addEventListener("click", () => this._closeItemAction()));
+    this.shadowRoot.querySelector("[data-item-action-backdrop]")?.addEventListener("click", (event) => { if (event.target === event.currentTarget) this._closeItemAction(); });
+    this.shadowRoot.querySelector("[data-item-action-backdrop]")?.addEventListener("keydown", (event) => { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); this._closeItemAction(); } });
+    this.shadowRoot.querySelector("[data-item-action-target]")?.addEventListener("change", (event) => { if (this._itemAction) this._itemAction.targetId = event.target.value; });
+    this.shadowRoot.querySelector("[data-item-action-quantity]")?.addEventListener("input", (event) => { if (this._itemAction) this._itemAction.quantity = event.target.value; });
+    this.shadowRoot.querySelectorAll("[data-item-action-target],[data-item-action-quantity]").forEach((field) => field.addEventListener("keydown", (event) => { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); this._closeItemAction(); } }));
+    this.shadowRoot.querySelector("[data-confirm-item-action]")?.addEventListener("click", () => this._confirmItemAction());
     this.shadowRoot.querySelector("ha-card")?.addEventListener("scroll", (event) => { if (this._expandedView) this._expandedScrollTop = event.currentTarget.scrollTop; }, { passive: true });
     this.shadowRoot.querySelectorAll("[data-toggle-expanded-view]").forEach((element) => element.addEventListener("click", (event) => this._toggleExpandedView(event)));
     this.shadowRoot.querySelector("[data-toggle-list]")?.addEventListener("click", () => { if (!this._expandedView) this._toggleList(); });
@@ -3029,6 +3569,7 @@ class HaListManagerInventoryCard extends HTMLElement {
     this.shadowRoot.querySelectorAll("[data-close-control-codes]").forEach((button) => button.addEventListener("click", () => this._closeControlCodes()));
     this.shadowRoot.querySelector("[data-control-codes-backdrop]")?.addEventListener("click", (event) => { if (event.target === event.currentTarget) this._closeControlCodes(); });
     this.shadowRoot.querySelector("ha-card")?.addEventListener("click", (event) => {
+      if (this._itemActionMenuOpen && !event.target.closest(".item-action-tools")) this._hideItemActionMenu();
       let changed = false;
       if (this._headerMenuOpen && !event.target.closest(".compact-header-actions")) { this._headerMenuOpen = false; changed = true; }
       if (this._categoryMenuOpen && !event.target.closest(".category-filter")) { this._categoryMenuOpen = false; changed = true; }
@@ -3038,6 +3579,7 @@ class HaListManagerInventoryCard extends HTMLElement {
     this.shadowRoot.querySelectorAll("[data-mode]").forEach((button) => button.addEventListener("click", () => this._selectMode(button.dataset.mode)));
     this.shadowRoot.querySelector("[data-toggle-scanner-target]")?.addEventListener("click", () => this._toggleScannerTarget());
     this.shadowRoot.querySelector("[data-action]")?.addEventListener("click", () => this._performInputAction());
+    this.shadowRoot.querySelector("[data-register-missing]")?.addEventListener("click", () => this._registerMissingProduct());
     this.shadowRoot.querySelector("[data-camera-scan]")?.addEventListener("click", () => this._startCameraScan());
     const input = this.shadowRoot.querySelector("[data-product-input]");
     input?.addEventListener("input", (event) => { this._inputValue = event.target.value; this._selectedProduct = null; this._updateSuggestions(event.target.value); if (this._config.allow_filter) this._refreshInventoryContent(); if (this._config.filter_chips !== false) this._refreshChipContent(); });
@@ -3097,6 +3639,7 @@ class HaListManagerInventoryCard extends HTMLElement {
     }));
     this._bindInventoryRowEvents();
     this.shadowRoot.querySelector("[data-lookup-ean]")?.addEventListener("click", () => this._lookupDialogEan());
+    this.shadowRoot.querySelectorAll("[data-off-change]").forEach((input) => input.addEventListener("change", () => { this._syncDialogDraft(); this._applyProductRefresh(input.dataset.offChange, input.checked, this._dialog?.draft); }));
     this.shadowRoot.querySelectorAll("[data-name-component]").forEach((button) => button.addEventListener("click", () => this._toggleNameComponent(button.dataset.nameComponent)));
     this.shadowRoot.querySelectorAll(".dialog input,.dialog textarea,.dialog select").forEach((field) => {
       field.addEventListener("keydown", (event) => event.stopPropagation());
@@ -3165,9 +3708,14 @@ class HaListManagerInventoryCard extends HTMLElement {
     this._configureLabelSelector();
     this._installPickerListTriggers();
     this._bindDialogScrollGuard();
+    this._bindScanActions();
+    this._applyPendingScanControls();
   }
 
   _styles() { return `
+    .item-dialog-tools{display:flex;align-items:center;gap:2px;flex:0 0 auto}.item-action-tools{position:relative}.item-action-menu{position:absolute;right:0;top:calc(100% + 5px);z-index:25;min-width:min(300px,calc(100vw - 64px));max-width:calc(100vw - 64px);padding:5px;border:1px solid var(--divider-color);border-radius:9px;background:var(--card-background-color);box-shadow:0 8px 24px rgba(0,0,0,.35)}.item-action-menu button{display:flex;align-items:center;gap:8px;width:100%;min-height:44px;padding:9px 11px;border:0;border-radius:5px;color:var(--primary-text-color);background:transparent;text-align:left;cursor:pointer}.item-action-menu button:hover,.item-action-menu button:focus-visible{background:var(--secondary-background-color)}.item-action-menu button:disabled{opacity:.5;cursor:default}.item-action-menu small{display:block;padding:0 11px 8px;color:var(--secondary-text-color);font-size:12px;line-height:1.4}.item-action-dialog{width:min(480px,100%)}.item-action-dialog .dialog-header>h3{margin:0}.item-action-dialog>p{line-height:1.5;overflow-wrap:anywhere}
+    .off-refresh{margin:14px 0;padding:12px;border:1px solid var(--divider-color);border-left:3px solid var(--primary-color);border-radius:8px}.off-refresh>p{margin:6px 0 10px;color:var(--secondary-text-color);font-size:14px;line-height:1.4}.off-refresh label{display:flex!important;flex-direction:row!important;align-items:flex-start;gap:10px;margin:10px 0!important}.off-refresh input[type=checkbox]{flex:0 0 auto;width:20px!important;min-height:20px!important;height:20px;margin:2px 0 0;padding:0;accent-color:var(--primary-color)}.off-refresh label>span{display:flex;flex-direction:column;min-width:0;gap:4px}.off-refresh small{overflow-wrap:anywhere;white-space:normal;color:var(--secondary-text-color)}
+    .pending-scan-intro{display:grid;grid-template-columns:minmax(0,1fr) 105px;gap:12px;align-items:start;margin-top:8px}.pending-scan-intro>.dialog-image-button,.pending-scan-intro>.dialog-image{position:relative;inset:auto;display:block}.pending-scan-product-dialog>label:first-of-type{padding-right:0}.scan-session-status{display:flex;align-items:center;gap:8px;margin:12px 0 5px;color:var(--primary-color);font-size:14px}.scan-session-status ha-icon{flex:0 0 auto;--mdc-icon-size:20px}.scan-session-actions{margin:10px 0 14px}.pending-scan-item{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:7px}.scan-discard-button{display:flex;align-items:center;justify-content:center;gap:5px;padding:8px 10px;border:1px solid var(--error-color);border-radius:8px;color:var(--error-color);background:transparent;cursor:pointer}.scan-discard-button ha-icon{--mdc-icon-size:19px}@media(max-width:520px){.scan-discard-button span{display:none}.scan-session-actions{flex-wrap:wrap}.scan-session-actions button{flex:1 1 auto}}
     *{box-sizing:border-box}[hidden]{display:none!important}:host{display:block;container-type:inline-size}:host([data-expanded-view]){position:fixed!important;top:var(--expanded-top,56px)!important;right:var(--expanded-right,0)!important;bottom:var(--expanded-bottom,0)!important;left:var(--expanded-left,0)!important;z-index:9998;min-width:0!important;max-width:none!important;padding:16px;overflow:hidden;background:var(--primary-background-color,#111)}:host([data-expanded-view]) ha-card{height:100%;min-height:0!important;overflow:auto;box-shadow:0 16px 48px rgba(0,0,0,.45)}ha-card{position:relative;overflow:visible;padding:12px 14px 18px;color:var(--primary-text-color)}button,input,select{font:inherit}button:disabled{opacity:.42;cursor:not-allowed}.inventory-header{display:flex;align-items:center;gap:8px;height:50px;min-height:50px;margin:0 0 8px}.inventory-title{display:grid;grid-template-columns:auto minmax(0,1fr);align-items:center;column-gap:8px;flex:1;min-width:0}.inventory-title-icon{display:grid;place-items:center;width:35px;height:35px;padding:5px;border-radius:50%;color:var(--primary-color)}.inventory-title-icon ha-icon{--mdc-icon-size:25px}.inventory-expand-toggle{border:0;background:transparent;cursor:pointer}.inventory-static-icon{pointer-events:none}.inventory-expand-toggle:hover,.inventory-expand-toggle:focus-visible{outline:0;background:color-mix(in srgb,var(--primary-text-color) 12%,transparent)}.inventory-title-copy{display:grid;grid-template-rows:auto auto;row-gap:1px;min-width:0;width:100%;padding:0;border:0;color:var(--primary-text-color);background:transparent;text-align:left}.inventory-title-copy[data-toggle-list],.inventory-title-copy[data-toggle-expanded-view]{cursor:pointer}.inventory-title-copy[data-toggle-list]:hover,.inventory-title-copy[data-toggle-expanded-view]:hover{background:color-mix(in srgb,var(--primary-text-color) 5%,transparent)}.inventory-title h2{min-width:0;overflow:hidden;margin:0;font-size:24px;font-weight:400;text-overflow:ellipsis;white-space:nowrap}.inventory-title-copy>span{min-width:0;overflow:hidden;color:var(--secondary-text-color);font-size:13px;text-overflow:ellipsis;white-space:nowrap}.list-collapsed{height:76px;padding:12px 14px}.list-collapsed .inventory-header{margin:0}.inventory-header-actions{display:flex;flex:0 0 auto;flex-wrap:wrap;justify-content:flex-end;gap:6px}.inventory-mode-toggle,.inventory-header-action{display:inline-flex;flex:0 0 auto;align-items:center;justify-content:center;gap:6px;min-height:38px;padding:0 11px;border:1px solid var(--divider-color);border-radius:19px;color:var(--primary-color);background:transparent;cursor:pointer}.inventory-mode-toggle ha-icon,.inventory-header-action ha-icon{--mdc-icon-size:19px}.inventory-mode-toggle span,.inventory-header-action span{font-size:13px}.view-panel{border:0!important;background:var(--ha-card-background,var(--card-background-color))!important;box-shadow:none!important}.mode-panel{padding:10px 12px;border-left:4px solid var(--active-mode-color);border-radius:8px;background:var(--secondary-background-color)}.modes{display:flex;flex-wrap:wrap;gap:7px}.mode-button,.tool-button{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:38px;padding:0 12px;border:1px solid var(--divider-color);border-radius:7px;color:var(--primary-text-color);background:var(--card-background-color);cursor:pointer}.mode-button.active{color:#fff;border-color:var(--mode-color);background:var(--mode-color)}.tool-button.active{color:var(--primary-color);border-color:var(--primary-color)}.pending-scans-button{color:var(--warning-color,#f0a000);border-color:var(--warning-color,#f0a000)}.mode-panel p{margin:10px 0 0;color:var(--secondary-text-color);font-size:14px}.inventory-action-status{display:flex;align-items:center;gap:7px;margin:8px 0 14px;padding:8px 10px;border-left:3px solid var(--active-mode-color);border-radius:5px;background:color-mix(in srgb,var(--active-mode-color) 10%,transparent);font-size:13px}.inventory-action-status ha-icon{--mdc-icon-size:19px;color:var(--active-mode-color)}.input-row{display:flex;align-items:stretch;gap:8px;margin:8px 0 14px}.input-row>.quantity{flex:0 0 92px}.input-row input{width:100%;height:44px;padding:0 11px;border:1px solid var(--divider-color);border-radius:7px;color:var(--primary-text-color);background:var(--secondary-background-color)}.product-input{position:relative;flex:1 1 160px;min-width:0}.product-input>input{padding-right:42px}.clear-input{position:absolute;z-index:3;right:5px;top:5px;display:grid;place-items:center;width:34px;height:34px;padding:0;border:0;border-radius:50%;color:var(--secondary-text-color);background:transparent;cursor:pointer}.clear-input:hover{color:var(--primary-text-color);background:color-mix(in srgb,var(--primary-text-color) 10%,transparent)}.clear-input ha-icon{--mdc-icon-size:20px}.suggestions{position:absolute;z-index:8;top:calc(100% + 4px);left:0;right:0;max-height:310px;overflow:auto;border:1px solid var(--divider-color);border-radius:8px;background:var(--card-background-color);box-shadow:0 8px 25px rgba(0,0,0,.35)}.suggestions button{display:grid;grid-template-columns:auto minmax(0,1fr);align-items:center;gap:9px;width:100%;padding:9px 11px;border:0;border-bottom:1px solid var(--divider-color);color:var(--primary-text-color);background:transparent;text-align:left;cursor:pointer}.suggestions button:hover{background:var(--secondary-background-color)}.suggestions img,.suggestion-placeholder{display:grid;place-items:center;width:38px;height:38px;border-radius:5px;object-fit:contain;background:var(--secondary-background-color)}.suggestions button>span:last-child{display:flex;min-width:0;flex-direction:column;align-items:flex-start;gap:3px}.suggestions small{color:var(--secondary-text-color)}.suggestion-source{display:flex;align-items:center;gap:4px}.suggestion-source ha-icon{--mdc-icon-size:14px}.action-button{flex:0 0 auto;padding:0 18px;border:0;border-radius:8px;color:#fff;background:var(--active-mode-color);cursor:pointer}.scan-button{flex:0 0 42px}.scan-button,.icon-button{display:grid;place-items:center;width:42px;height:42px;padding:0;border:0;border-radius:50%;color:var(--primary-text-color);background:transparent;cursor:pointer}.scan-button:hover,.icon-button:hover{background:var(--secondary-background-color)}h2{margin:4px 0 14px;font-size:27px;font-weight:400}.toolbar{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:start;margin:7px 0 10px;padding:6px;border-radius:8px;background:var(--secondary-background-color)}.tools{display:flex;flex-wrap:wrap;gap:6px}.filter{display:flex;align-items:center;gap:6px;min-height:38px;padding:0 10px;border:1px solid var(--divider-color);border-radius:9px;color:var(--secondary-text-color);background:var(--card-background-color)}.toolbar .tool-button{min-height:38px;padding:0 10px;border-radius:9px;color:var(--secondary-text-color);background:var(--card-background-color)}.toolbar .tool-button:not(:disabled):hover,.toolbar .tool-button:not(:disabled):focus-visible,.filter:focus-within{color:var(--primary-color);border-color:var(--primary-color);outline:0;background:color-mix(in srgb,var(--primary-color) 10%,var(--card-background-color))}.toolbar .tool-button ha-icon,.filter ha-icon{--mdc-icon-size:19px}.filter select{border:0;color:var(--primary-text-color);background:transparent}.text-button{padding:0 13px}.toolbar-filters{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:7px}.category-filter,.label-filter{position:relative}.category-menu,.label-menu{position:absolute;z-index:20;right:0;top:calc(100% + 6px);width:min(350px,calc(100vw - 36px));max-height:420px;overflow:auto;padding:10px;border:1px solid var(--divider-color);border-radius:9px;background:var(--card-background-color);box-shadow:0 9px 28px rgba(0,0,0,.4)}.category-menu-actions{display:flex;gap:7px;padding-bottom:8px;border-bottom:1px solid var(--divider-color)}.category-menu-actions button{padding:6px 10px;border:1px solid var(--divider-color);border-radius:6px;color:var(--primary-text-color);background:var(--secondary-background-color);cursor:pointer}.category-choice-list{padding:5px 0}.category-choice{display:grid!important;grid-template-columns:auto 24px 1fr;align-items:center;gap:8px;margin:0!important;padding:7px 4px;color:var(--primary-text-color)!important;cursor:pointer}.category-choice input{width:18px;height:18px}.category-choice ha-icon{--mdc-icon-size:20px}.label-filter-choice ha-icon{color:var(--label-color,var(--primary-color))}.category-group-choice{padding-top:10px;border-top:1px solid var(--divider-color)}.category{margin-top:9px}.category-header{display:flex;align-items:center;gap:8px;width:100%;min-height:37px;padding:5px 12px;border:0;border-radius:5px;color:var(--category-text-color,#fff);background:var(--category-color,var(--primary-color));text-align:left;cursor:pointer}.category-header strong{font-size:var(--ha-list-manager-category-font-size)}.category-header>ha-icon{--mdc-icon-size:var(--ha-list-manager-category-icon-size)}.category-header span{margin-left:2px;font-size:var(--ha-list-manager-category-secondary-font-size)}.category-header span b{color:var(--category-warning-color,#ffe082)}.category-chevron{margin-left:auto}.entry{display:grid;align-items:center;padding:0 8px 0 4px;border-left:4px solid transparent}.category-header+.entry,.entry+.entry{padding-top:var(--ha-list-manager-item-divider-after-spacing)}.entry:not(:last-child){padding-bottom:var(--ha-list-manager-item-divider-before-spacing)}.item-dividers .entry{position:relative}.item-dividers .entry:not(:last-child){padding-bottom:calc(var(--ha-list-manager-item-divider-before-spacing) + 1px)}.item-dividers .entry:not(:last-child)::after{content:"";position:absolute;z-index:1;left:8px;right:8px;bottom:0;height:1px;background:var(--divider-color);pointer-events:none}.entry.with-image{grid-template-columns:46px 56px minmax(0,1fr) auto}.entry.without-image{grid-template-columns:46px minmax(0,1fr) auto}.entry.stock-low{border-left-color:var(--warning-color,#f0a000)}.entry.stock-empty{border-left-color:var(--error-color)}.entry.stock-empty .entry-title{color:var(--error-color)}.entry.is-hidden{opacity:.58}.product-image{display:grid;place-items:center;align-self:center;position:relative;width:48px;height:48px;margin-right:4px;padding:0;overflow:hidden;border:0;border-radius:6px;background:var(--secondary-background-color);cursor:pointer}.product-image img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain}.product-image-placeholder{color:var(--disabled-text-color,var(--secondary-text-color))}.entry-main{display:flex;flex-direction:column;align-items:flex-start;align-self:center;gap:4px;min-width:0;padding:0 8px;border:0;color:var(--primary-text-color);background:transparent;text-align:left;cursor:pointer}.entry-title{font-size:var(--ha-list-manager-item-font-size);line-height:1}.entry-title ha-icon{--mdc-icon-size:18px;color:var(--secondary-text-color)}.entry-details{color:var(--secondary-text-color);font-size:var(--ha-list-manager-secondary-font-size);line-height:1}.stock-actions{display:flex;align-items:center;justify-content:flex-end;gap:2px;min-width:92px}.controls-stock{min-width:36px;text-align:center;font-size:var(--ha-list-manager-item-font-size)}.labels{display:flex;flex-wrap:wrap;gap:4px;margin-top:2px}.label-chip{display:inline-flex;align-items:center;gap:3px;padding:2px 6px;line-height:1;border:1px solid color-mix(in srgb,var(--label-color,var(--primary-color)) 55%,var(--divider-color));border-radius:14px;color:var(--primary-text-color);background:color-mix(in srgb,var(--label-color,var(--primary-color)) 20%,transparent);font-size:var(--ha-list-manager-tertiary-font-size)}.inventory-action-status [data-undo-booking]{white-space:nowrap;flex-shrink:0}.label-chip ha-icon{--mdc-icon-size:13px;color:var(--label-color,var(--primary-color))}.error{display:flex;align-items:center;gap:8px;margin:8px 0;padding:10px 12px;border-left:4px solid var(--error-color);background:color-mix(in srgb,var(--error-color) 10%,transparent)}.empty{min-height:140px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;color:var(--secondary-text-color)}.backdrop{position:fixed;z-index:1000;inset:0;display:grid;place-items:center;padding:18px;background:rgba(0,0,0,.58);overscroll-behavior:contain;touch-action:none}.dialog{position:relative;width:min(680px,100%);max-height:calc(100vh - 36px);overflow:auto;padding:22px;border-radius:12px;background:var(--card-background-color);box-shadow:0 12px 40px rgba(0,0,0,.4);overscroll-behavior:contain;-webkit-overflow-scrolling:touch;touch-action:pan-y}.dialog-header{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}.dialog-heading{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px}.unsaved-indicator{display:inline-flex;align-items:center;gap:5px;padding:4px 8px;border-radius:14px;color:var(--warning-color,#f0a000);background:color-mix(in srgb,var(--warning-color,#f0a000) 14%,transparent);font-size:12px;font-weight:500}.unsaved-indicator ha-icon{--mdc-icon-size:17px}.dialog h3{margin:0;font-size:23px}.dialog-product{display:block;margin:10px 0;font-size:18px}.dialog label,.dialog-field{display:flex;flex-direction:column;gap:6px;margin-top:13px;color:var(--secondary-text-color)}.dialog input,.dialog select{min-height:45px;padding:9px 11px;border:1px solid var(--divider-color);border-radius:7px;color:var(--primary-text-color);background:var(--secondary-background-color)}.dialog ha-combo-box{display:block;width:100%}.field-help{margin:7px 0;color:var(--secondary-text-color);font-size:13px}.field-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.ean-row{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:end;gap:10px}.ean-row .dialog-status{grid-column:1/-1}.ean-row button,.dialog-actions button,.name-options button{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:42px;padding:0 16px;border:1px solid var(--divider-color);border-radius:21px;color:var(--primary-text-color);background:var(--card-background-color);cursor:pointer}.name-options{display:flex;gap:8px;margin-top:10px}.name-options button.active{color:#fff;border-color:var(--primary-color);background:var(--primary-color)}.dialog-image-button{position:absolute;right:22px;top:68px;width:105px;height:105px;padding:0;border:0;border-radius:8px;background:transparent;cursor:pointer}.dialog-image{position:absolute;right:22px;top:68px;width:105px;height:105px;object-fit:contain;border-radius:8px;background:var(--secondary-background-color)}.dialog-image-button .dialog-image{inset:0}.dialog-image-placeholder{display:grid;place-items:center;color:var(--secondary-text-color)}.dialog-image-placeholder ha-icon{--mdc-icon-size:42px}.product-dialog>label:first-of-type{padding-right:120px}.dialog-status{display:flex;align-items:center;gap:7px;margin:3px 0 0;color:var(--primary-color);font-size:14px}.dialog-status ha-icon{--mdc-icon-size:19px}.dialog-status.success{color:var(--success-color,#2e7d32)}.dialog-status.warning{color:var(--warning-color,#f0a000)}.dialog-status.error{color:var(--error-color,#db4437)}.pending-scan-list{display:grid;gap:7px;margin-top:14px}.pending-scan-row{display:grid;grid-template-columns:32px minmax(0,1fr) 28px;align-items:center;gap:8px;width:100%;padding:11px;border:1px solid var(--divider-color);border-radius:8px;color:var(--primary-text-color);background:var(--secondary-background-color);text-align:left;cursor:pointer}.pending-scan-row span{display:flex;flex-direction:column;gap:3px}.pending-scan-row small{color:var(--secondary-text-color)}.dialog-actions{display:flex;flex-wrap:wrap;justify-content:flex-start;gap:9px;margin-top:22px}.dialog-actions .primary{color:#fff;border-color:var(--primary-color);background:var(--primary-color)}.dialog-actions .danger{color:var(--error-color);border-color:var(--error-color)}.label-selector{display:grid;gap:8px;margin-top:14px;padding:10px;border:1px solid var(--divider-color);border-radius:8px;color:var(--secondary-text-color)}.selected-labels{display:flex;flex-wrap:wrap;gap:7px}.selected-label{display:inline-flex;align-items:center;gap:6px;min-height:34px;padding:3px 8px;border:1px solid color-mix(in srgb,var(--label-color,var(--primary-color)) 58%,var(--divider-color));border-radius:18px;color:var(--primary-text-color);background:color-mix(in srgb,var(--label-color,var(--primary-color)) 24%,var(--card-background-color));cursor:pointer}.selected-label ha-icon{--mdc-icon-size:18px;color:var(--label-color,var(--primary-color))}.selected-label .remove-label{--mdc-icon-size:17px;color:var(--secondary-text-color)}.label-combo{position:relative}.label-search{display:grid;grid-template-columns:26px 1fr;align-items:center;min-height:45px;padding:0 10px;border:1px solid var(--divider-color);border-radius:7px;background:var(--secondary-background-color)}.label-search ha-icon{--mdc-icon-size:21px}.label-search input{min-height:42px!important;padding:0!important;border:0!important;outline:0;background:transparent!important}.label-picker-options{position:absolute;z-index:18;top:calc(100% + 4px);left:0;right:0;max-height:260px;overflow:auto;border:1px solid var(--divider-color);border-radius:8px;background:var(--card-background-color);box-shadow:0 8px 25px rgba(0,0,0,.35)}.label-picker-options button{display:grid;grid-template-columns:32px 1fr;align-items:center;gap:8px;width:100%;padding:9px 11px;border:0;border-bottom:1px solid var(--divider-color);color:var(--primary-text-color);background:transparent;text-align:left;cursor:pointer}.label-picker-options button>span:last-child{display:flex;min-width:0;flex-direction:column;gap:2px}.label-picker-options button small{display:block;color:var(--secondary-text-color)}.label-picker-options button:hover{background:var(--secondary-background-color)}.label-option-icon{display:grid;place-items:center;width:28px;height:28px;border-radius:50%;color:var(--label-color,var(--primary-color));background:color-mix(in srgb,var(--label-color,var(--primary-color)) 20%,transparent)}.label-option-icon ha-icon{--mdc-icon-size:19px}.label-empty{margin:0;padding:13px;color:var(--secondary-text-color)}.image-dialog{width:min(900px,100%)}.image-dialog>img{display:block;max-width:100%;max-height:calc(100vh - 130px);margin:14px auto 0;object-fit:contain}
     .picker-trigger-host{position:relative}.picker-trigger-host input{padding-right:44px!important}.picker-list-trigger{position:absolute!important;z-index:4;right:5px;top:50%;display:grid!important;place-items:center;width:34px!important;height:34px!important;min-width:34px!important;min-height:34px!important;padding:0!important;transform:translateY(-50%);border:0!important;border-radius:50%!important;color:var(--primary-color)!important;background:transparent!important;cursor:pointer}.picker-list-trigger:hover,.picker-list-trigger:focus-visible,.picker-list-trigger.active{outline:0;background:color-mix(in srgb,var(--primary-color) 16%,transparent)!important}.picker-list-trigger ha-icon{--mdc-icon-size:21px}.picker-current{box-shadow:inset 3px 0 0 var(--primary-color);background:color-mix(in srgb,var(--primary-color) 12%,var(--card-background-color))!important}.category-combo{position:relative}.category-combo>input{width:100%}.category-picker-options{position:absolute;z-index:15;top:calc(100% + 4px);left:0;right:0;max-height:260px;overflow:auto;border:1px solid var(--divider-color);border-radius:8px;background:var(--card-background-color);box-shadow:0 8px 25px rgba(0,0,0,.35)}.category-picker-options button{display:grid;grid-template-columns:28px 1fr;align-items:center;gap:8px;width:100%;padding:9px 11px;border:0;border-bottom:1px solid var(--divider-color);color:var(--primary-text-color);background:transparent;text-align:left;cursor:pointer}.category-picker-options button:hover{background:var(--secondary-background-color)}.category-picker-options span{display:flex;flex-direction:column}.category-picker-options small{color:var(--secondary-text-color)}.category-picker-options .picker-empty{padding:12px}.category-picker-options .category-option-icon{display:grid;place-items:center;width:27px;height:27px;border-radius:50%;color:var(--category-color,var(--primary-color));background:color-mix(in srgb,var(--category-color,var(--primary-color)) 20%,transparent)}.category-picker-options .category-option-icon ha-icon{--mdc-icon-size:19px}.group-selection-bar{display:flex;flex-wrap:wrap;align-items:center;gap:9px;margin:-4px 0 12px;padding:9px 12px;border-left:4px solid var(--primary-color);border-radius:7px;background:var(--secondary-background-color)}.group-selection-bar span{margin-right:auto}.group-select{display:grid;place-items:center;width:42px;height:42px;padding:0;border:0;color:var(--secondary-text-color);background:transparent;cursor:pointer}.group-select.selected{color:var(--primary-color)}.group-visibility-spacer,.group-icon{display:grid;place-items:center;width:42px}.group-icon{color:var(--primary-color)}.inventory-group{border-left-color:var(--primary-color)}.group-members{margin-top:16px;padding:10px;border:1px solid var(--divider-color);border-radius:8px}.group-members legend{padding:0 6px}.group-member-choice{display:grid!important;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:10px;margin:0!important;padding:8px;border-bottom:1px solid var(--divider-color);color:var(--primary-text-color)!important}.group-member-choice small{color:var(--secondary-text-color)}.group-member-open{display:flex;flex-direction:column;align-items:flex-start;gap:3px;min-width:0;padding:5px;border:0;border-radius:6px;color:var(--primary-text-color);background:transparent;text-align:left;cursor:pointer}.group-member-open:hover{background:var(--secondary-background-color)}.group-member-stock{display:flex;flex-direction:row!important}.group-dialog{width:min(760px,100%)}.add-members-button,.entry-group-actions button{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:34px;padding:0 11px;border:1px solid var(--divider-color);border-radius:18px;color:var(--primary-text-color);background:var(--card-background-color);cursor:pointer}.add-members-button{margin-top:10px}.entry-group-section{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:14px;padding:9px 11px;border:1px solid var(--divider-color);border-radius:9px}.entry-group-summary{display:flex;flex-direction:column;gap:3px;min-width:0}.entry-group-summary>span,.entry-group-summary>small{color:var(--secondary-text-color);font-size:13px}.entry-group-summary>strong{display:flex;align-items:center;gap:6px}.entry-group-summary>strong ha-icon{--mdc-icon-size:19px;color:var(--primary-color)}.entry-group-actions{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:6px}.entry-group-actions .danger{color:var(--error-color);border-color:var(--error-color)}.nested-backdrop{z-index:1100}.confirmation-backdrop{z-index:1200}.picker-dialog{width:min(620px,100%)}.group-move-warning{display:flex;flex-wrap:wrap;align-items:flex-start;gap:9px;margin-top:12px;padding:10px 12px;border-left:4px solid var(--warning-color,#f0a000);border-radius:6px;color:var(--primary-text-color);background:color-mix(in srgb,var(--warning-color,#f0a000) 14%,var(--card-background-color));font-size:13px;line-height:1.45}.group-move-warning ha-icon{flex:0 0 auto;color:var(--warning-color,#f0a000)}.group-move-warning>span{flex:1;min-width:0}.show-grouped-toggle{display:flex!important;flex:0 0 100%;flex-direction:row!important;align-items:center;gap:8px!important;margin:4px 0 0 33px!important;color:var(--primary-text-color)!important}.show-grouped-toggle input{width:18px;height:18px;min-height:0!important;padding:0!important}.picker-search{display:grid;grid-template-columns:28px minmax(0,1fr);align-items:center;margin-top:12px;padding:0 10px;border:1px solid var(--divider-color);border-radius:8px;background:var(--secondary-background-color)}.picker-search input{width:100%;border:0!important;outline:0;background:transparent!important}.picker-list{max-height:min(48vh,430px);margin-top:10px;overflow:auto;border:1px solid var(--divider-color);border-radius:8px;overscroll-behavior:contain}.picker-choice{display:grid!important;grid-template-columns:auto minmax(0,1fr);align-items:center;gap:10px;margin:0!important;padding:10px 12px;border-bottom:1px solid var(--divider-color);color:var(--primary-text-color)!important}.picker-choice.belongs-to-group{background:color-mix(in srgb,var(--warning-color,#f0a000) 7%,transparent)}.picker-choice>span,.group-picker-choice>span{display:flex;flex-direction:column;gap:3px}.picker-choice small,.group-picker-choice small{color:var(--secondary-text-color)}.picker-choice .move-note{display:flex;align-items:center;gap:4px;color:var(--warning-color,#f0a000)}.picker-choice .move-note ha-icon{--mdc-icon-size:16px}.picker-limit{margin:0;padding:9px 12px;color:var(--secondary-text-color);background:var(--secondary-background-color);font-size:12px}.group-picker-choice{display:grid;grid-template-columns:28px minmax(0,1fr) 28px;align-items:center;gap:9px;width:100%;padding:11px 12px;border:0;border-bottom:1px solid var(--divider-color);color:var(--primary-text-color);background:transparent;text-align:left;cursor:pointer}.group-picker-choice:hover{background:var(--secondary-background-color)}.picker-empty{margin:0;padding:18px;color:var(--secondary-text-color)}.confirmation-dialog{width:min(460px,100%);text-align:center}.confirmation-dialog>p{margin-top:10px;color:var(--secondary-text-color);line-height:1.5}.confirmation-dialog .dialog-actions{justify-content:center}.confirmation-icon{display:grid;place-items:center;width:54px;height:54px;margin:0 auto 12px;border-radius:50%}.confirmation-icon ha-icon{--mdc-icon-size:31px}.confirmation-icon.danger{color:var(--error-color);background:color-mix(in srgb,var(--error-color) 14%,transparent)}.confirmation-icon.warning{color:var(--warning-color);background:color-mix(in srgb,var(--warning-color) 14%,transparent)}.dialog-actions .danger.filled{color:#fff;border-color:var(--error-color);background:var(--error-color)}
     .control-codes-dialog{width:min(720px,100%)}.control-codes-dialog .dialog-header{align-items:flex-start}.control-codes-dialog .dialog-header>div{flex:1;min-width:0}.control-codes-dialog .dialog-header h3{margin:0}.control-code-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:16px}.control-code{display:flex;align-items:center;gap:12px;min-width:0;padding:12px;border:1px solid var(--divider-color);border-radius:10px;background:var(--secondary-background-color)}.control-code-qr{display:grid;place-items:center;flex:0 0 160px;width:160px;height:160px;padding:2px;color:#111;background:#fff}.control-code-qr img,.control-code-qr canvas{display:block;width:156px!important;height:156px!important}.control-code>div:last-child{display:flex;min-width:0;flex-direction:column;gap:6px}.control-code strong{display:flex;align-items:center;gap:6px}.control-code strong ha-icon{--mdc-icon-size:20px}.control-code code{font-size:11px;overflow-wrap:anywhere}.control-code-fallback{padding:10px;font-size:11px;overflow-wrap:anywhere}
