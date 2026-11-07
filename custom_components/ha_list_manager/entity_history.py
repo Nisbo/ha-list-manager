@@ -104,7 +104,9 @@ class EntityHistoryManager:
             )
 
     async def async_set_tracking(
-        self, entity_id: str, enabled: bool, *, ignore_unavailable: bool | None = None
+        self, entity_id: str, enabled: bool | None = None, *,
+        ignore_unavailable: bool | None = None,
+        use_ha_precision: bool | None = None,
     ) -> None:
         """Persist tracking state and capture the current state when enabled."""
         was_enabled = entity_id in self._tracked
@@ -126,7 +128,8 @@ class EntityHistoryManager:
                     previous.entity_id, entity_id, registry_entry_id
                 )
         await self._database.async_set_entity_tracking(
-            entity_id, enabled, registry_entry_id, ignore_unavailable=ignore_unavailable
+            entity_id, enabled, registry_entry_id,
+            ignore_unavailable=ignore_unavailable, use_ha_precision=use_ha_precision,
         )
         await self.async_refresh()
         if enabled and not was_enabled and self._hass.state is CoreState.running:

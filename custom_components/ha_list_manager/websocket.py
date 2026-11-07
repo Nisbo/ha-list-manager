@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from functools import wraps
 from typing import Any
@@ -88,6 +89,24 @@ def localized_command(schema):
 
 def _runtime(hass: HomeAssistant) -> HaListManagerRuntime:
     return hass.data[DOMAIN]
+
+
+def _entity_history_display_options(hass, entity_id, use_ha_precision) -> dict[str, Any]:
+    """Read current HA presentation metadata without altering stored samples."""
+    registry_entry = er.async_get(hass).async_get(entity_id)
+    entry_options = getattr(registry_entry, "options", None)
+    options = entry_options.get("sensor") if isinstance(entry_options, Mapping) else None
+    precision = None
+    if isinstance(options, Mapping):
+        precision = options.get("display_precision")
+        if precision is None:
+            precision = options.get("suggested_display_precision")
+        if type(precision) is not int or precision < 0:
+            precision = None
+    return {
+        "use_ha_precision": use_ha_precision,
+        "display_precision": precision,
+    }
 
 
 def _send_error(connection, msg_id, code, message):
@@ -386,7 +405,10 @@ async def websocket_list_tracked_entities(
     """Return every configured independent history source."""
     records = await _runtime(hass).database.async_list_tracked_entities()
     connection.send_result(
-        msg["id"], {"entities": [record.as_dict() for record in records]}
+        msg["id"], {"entities": [
+            {**record.as_dict(), **_entity_history_display_options(hass, record.entity_id, record.use_ha_precision)}
+            for record in records
+        ]}
     )
 
 
@@ -395,8 +417,9 @@ async def websocket_list_tracked_entities(
     {
         probatio.Required("type"): f"{DOMAIN}/entity_history/set",
         probatio.Required("entity_id"): str,
-        probatio.Required("enabled"): bool,
+        probatio.Optional("enabled"): bool,
         probatio.Optional("ignore_unavailable"): bool,
+        probatio.Optional("use_ha_precision"): bool,
     }
 )
 async def websocket_set_entity_tracking(
@@ -417,11 +440,17 @@ async def websocket_set_entity_tracking(
             msg["id"], websocket_api.ERR_UNKNOWN_ERROR, localized_text("errors.history_unavailable")
         )
         return
-    options = {"ignore_unavailable": msg["ignore_unavailable"]} if "ignore_unavailable" in msg else {}
-    await runtime.entity_history.async_set_tracking(entity_id, msg["enabled"], **options)
+    options = {key: msg[key] for key in ("ignore_unavailable", "use_ha_precision") if key in msg}
+    try:
+        await runtime.entity_history.async_set_tracking(entity_id, msg.get("enabled"), **options)
+    except ValueError as error:
+        _send_input_error(connection, msg, error)
+        return
     records = await runtime.database.async_list_tracked_entities()
     record = next(item for item in records if item.entity_id == entity_id)
-    connection.send_result(msg["id"], {"entity": record.as_dict()})
+    connection.send_result(msg["id"], {"entity": {
+        **record.as_dict(), **_entity_history_display_options(hass, entity_id, record.use_ha_precision),
+    }})
 
 
 @websocket_api.require_admin
@@ -509,7 +538,8 @@ async def websocket_get_entity_history(
             localized_text("errors.numeric_range_invalid"),
         )
         return
-    records, truncated, query_limited = await _runtime(hass).database.async_query_entity_history(
+    database = _runtime(hass).database
+    records, truncated, query_limited = await database.async_query_entity_history(
         entity_id,
         msg.get("start_time"),
         msg.get("end_time"),
@@ -521,6 +551,7 @@ async def websocket_get_entity_history(
         msg.get("before_id"),
         msg.get("include_hidden", False),
     )
+    options = await database.async_get_entity_history_options(entity_id)
     connection.send_result(
         msg["id"],
         {
@@ -528,6 +559,7 @@ async def websocket_get_entity_history(
             "states": [record.as_dict() for record in records],
             "truncated": truncated,
             "query_limited": query_limited,
+            **_entity_history_display_options(hass, entity_id, options.get("use_ha_precision") is True),
         },
     )
 
@@ -3651,6 +3683,7 @@ async def websocket_create_inventory_entry(
         probatio.Optional("category_id"): probatio.Any(str, None),
         probatio.Optional("category"): probatio.Any(str, None),
         probatio.Optional("hidden"): bool,
+        probatio.Optional("label_ids"): [str],
     }
 )
 async def websocket_update_inventory_entry(
@@ -3658,7 +3691,7 @@ async def websocket_update_inventory_entry(
     connection: websocket_api.ActiveConnection,
     msg: dict[str, Any],
 ) -> None:
-    """Correct stock and configure the minimum stock."""
+    """Correct stock, configure restocking and optionally edit product labels."""
     try:
         record = await _runtime(hass).database.async_update_inventory_entry(
             msg["entry_id"],
@@ -3669,9 +3702,15 @@ async def websocket_update_inventory_entry(
             category_id=_clean_text(msg.get("category_id"), maximum=64, required=False),
             category=_clean_text(msg.get("category"), maximum=100, required=False),
             hidden=msg.get("hidden", False),
+            label_ids=_clean_label_ids(msg["label_ids"]) if "label_ids" in msg else None,
         )
     except ValueError as error:
         _send_input_error(connection, msg, error)
+        return
+    except LabelNotFoundError:
+        _send_error(connection,
+            msg["id"], websocket_api.ERR_NOT_FOUND, localized_text("errors.category_or_label_missing")
+        )
         return
     except (InventoryEntryNotFoundError, CategoryNotFoundError):
         _send_error(connection,
@@ -3679,6 +3718,8 @@ async def websocket_update_inventory_entry(
         )
         return
     _fire_inventory_changed(hass, list_id=record.list_id, entry_id=record.id)
+    if "label_ids" in msg:
+        _fire_lists_changed(hass)
     connection.send_result(msg["id"], {"entry": record.as_dict()})
 
 

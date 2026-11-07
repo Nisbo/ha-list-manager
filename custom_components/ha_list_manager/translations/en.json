@@ -584,7 +584,7 @@
       "notification_target_types": "Notify entities send to a device or a connected service. Persistent messages appear in the Home Assistant notification area.",
       "append_brand_if_missing": "Only if the brand is not already in the original product name.",
       "default_list_icon": "If no custom icon is set, the appropriate icon for the list type is used automatically.",
-      "inventory_category_override": "Product default: “{p0}”. Selecting or entering a category here overrides it only in this inventory. Clearing restores the product default. New dynamic categories can be saved permanently later in category management. Use “Edit item” to change the product default.",
+      "inventory_category_override": "Product default: “{p0}”. Selecting or entering a category here overrides it only in this inventory. Clearing restores the product default. New dynamic categories can be saved permanently later in category management. Use “Edit product” to change the product default.",
       "scanner_dynamic_default": "Scanners with dynamic assignment then use the default target from settings.",
       "inventory_group_variants": "Variants share a group name and a common minimum stock level.",
       "large_due_category_icon": "Enlarges the category icon when due information appears below it.",
@@ -622,7 +622,7 @@
       "restock_rules_only": "Automatic restocking only applies to items and groups with their own restock rule.",
       "card_layout_auto": "Automatic adjusts the layout to the dashboard and available card width. Panel and mobile views can enforce a fixed layout.",
       "template_layout_auto": "Automatic shows templates on the right in wide panel and large views, and below narrow cards.",
-      "history_decimal_places": "Limits decimal places in the card header, legend and chronological list.",
+      "history_decimal_places": "Leave empty to use HA display precision when enabled for the entity; otherwise use 2 decimal places. An entered value takes priority. Applies to the header, legend and chronological list.",
       "history_scroll_limit": "With more entries, the chronological list gets its own scroll area.",
       "chip_due_today": "Clicking the chip makes the new entry due on the current calendar day. A time is optional.",
       "next_weekday": "Example: “Monday” always means the next upcoming Monday, not today.",
@@ -750,7 +750,7 @@
       "chip_name": "The name is required and stays unchanged. If you select a product first, its current name is filled in automatically. You can then change it to use as the chip label.",
       "due_date_offset": "Clicking advances the due date by the selected interval in hours, days or months. An optional time then sets the time of day.",
       "inventory_category_local": "The selected category applies only to this inventory entry.",
-      "central_product_editing": "Product data is managed centrally. After adding a product, you can change all its details using “Edit item”.",
+      "central_product_editing": "Product data is managed centrally. After adding a product, you can change all its details using “Edit product”.",
       "task_recurrence": "Recurrence determines the interval after completion at which the next due date is created. Leave blank for no recurrence.",
       "general_item_chip_availability": "These general item chips are only available in shopping and inventory lists. To-do lists use separate templates.",
       "automatic_restock_quantity_only": "This applies to automatic restocking, for example 6 items. It is not used as the quantity here.",
@@ -850,7 +850,9 @@
       "telegram_formats": "Telegram: plain text, HTML or Markdown is explicitly set for this destination, overriding the bot’s default format.",
       "telegram_delivery": "Choose the intended chat of your configured Telegram bot. Plain text, HTML and Markdown are available for every Telegram destination.",
       "label_grouping": "Adds a toolbar button to switch between categories and labels. An entry with multiple labels appears in each label group; all copies use the same entry. The initial view applies until a choice is saved for this card in this browser.",
-      "auto_expand_search": "Temporarily opens categories and label groups with matching entries while the list is filtered by the input field. Clearing the search restores the previous open/closed state."
+      "auto_expand_search": "Temporarily opens categories and label groups with matching entries while the list is filtered by the input field. Clearing the search restores the previous open/closed state.",
+      "shopping_edit_shortcuts": "Shows icon buttons for category, labels and item actions below the edit-dialog title.",
+      "todo_edit_shortcuts": "Shows quick buttons for category, labels and saving the task as a template below the edit-dialog title."
     },
     "history": {
       "add_sample": "Add reading",
@@ -960,7 +962,11 @@
       "hide_unavailable_confirm": "Hide all {count} recorded or imported unknown/unavailable values in this archive? Original data is retained. Use “Show hidden values” to restore individual values. Manually added values remain unchanged.",
       "hide_values": "Hide values",
       "unavailable_hidden": "{count} unknown/unavailable values hidden.",
-      "ignored_unavailable": "{count} unknown/unavailable values ignored"
+      "ignored_unavailable": "{count} unknown/unavailable values ignored",
+      "use_ha_precision": "Use HA display precision",
+      "ha_precision_current": "Current HA display precision: {precision} decimal places. Only the display changes; saved values remain unchanged.",
+      "ha_precision_unavailable": "No HA display precision is available for this entity. Saved values are displayed unchanged.",
+      "display_precision_saved": "Display setting saved."
     },
     "scripts": {
       "enabled": "Enable script integration",
@@ -1950,7 +1956,9 @@
       "group_by_labels": "Group by labels",
       "all_labels_count": "{p0} all labels",
       "auto_expand_search": "Automatically open groups while searching",
-      "dismiss_message": "Dismiss message"
+      "dismiss_message": "Dismiss message",
+      "back_to_inventory_item": "Back to inventory item",
+      "save_product": "Save product"
     },
     "scanner": {
       "active_then_default": "Active card, then default target",
@@ -2239,7 +2247,8 @@
       "completed_deleted_one": "{count} completed item deleted.",
       "completed_deleted_many": "{count} completed items deleted.",
       "quantity_increased_full": "{item}: Quantity increased from {previous} to {next}.",
-      "quantity_decreased_full": "{item}: Quantity decreased from {previous} to {next}."
+      "quantity_decreased_full": "{item}: Quantity decreased from {previous} to {next}.",
+      "show_edit_shortcuts": "Show edit shortcuts"
     },
     "categories": {
       "optional_auto_assignment": "Automatic assignment (optional)",
@@ -2567,7 +2576,10 @@
       "sent": "Added {p0}× to “{p1}”.",
       "merged": "Increased the existing item on “{p1}” by {p0}.",
       "error": "The item action could not be completed.",
-      "create": "Create"
+      "create": "Create",
+      "shortcuts": "Quick actions",
+      "change_category": "Change category",
+      "change_labels": "Change labels"
     },
     "selection": {
       "categories": "Choose a category",

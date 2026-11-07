@@ -224,17 +224,22 @@ class HaListManagerDatabase:
         """Return configured entity-history sources and their sample counts."""
         return await self._async_run(self._list_tracked_entities)
 
+    async def async_get_entity_history_options(self, entity_id: str) -> dict[str, Any]:
+        """Read one source's preferences without counting every archive."""
+        return await self._async_run(self._get_entity_history_options, entity_id)
+
     async def async_set_entity_tracking(
         self,
         entity_id: str,
-        enabled: bool,
+        enabled: bool | None = None,
         registry_entry_id: str | None = None,
         ignore_unavailable: bool | None = None,
+        use_ha_precision: bool | None = None,
     ) -> TrackedEntityRecord:
         """Persist recording options without deleting existing samples."""
         return await self._async_run(
             self._set_entity_tracking, entity_id, enabled, registry_entry_id,
-            ignore_unavailable,
+            ignore_unavailable, use_ha_precision,
         )
 
     async def async_set_entity_registry_id(
@@ -1294,8 +1299,9 @@ class HaListManagerDatabase:
         category_id: str | None = None,
         category: str | None = None,
         hidden: bool = False,
+        label_ids: list[str] | None = None,
     ) -> InventoryRecord:
-        """Update stock settings for an inventory assignment."""
+        """Update stock settings and optional product labels atomically."""
         return await self._async_run(
             self._update_inventory_entry,
             entry_id,
@@ -1306,6 +1312,7 @@ class HaListManagerDatabase:
             hidden,
             restock_quantity,
             restock_mode,
+            label_ids,
         )
 
     async def async_set_inventory_hidden(
@@ -2444,6 +2451,7 @@ WHERE registry_entry_id IS NOT NULL;
                 last_recorded_at=row["last_recorded_at"],
                 ignore_unavailable=self._entity_history_ignore_option(row["history_options"]),
                 unavailable_count=int(row["unavailable_count"]),
+                use_ha_precision=self._entity_history_options(row["history_options"]).get("use_ha_precision") is True,
             )
             for row in rows
         ]
@@ -2453,15 +2461,20 @@ WHERE registry_entry_id IS NOT NULL;
         return f"entity_history_options:{entity_id.casefold()}"
 
     @staticmethod
-    def _entity_history_ignore_option(value: str | None) -> bool:
+    def _entity_history_options(value: str | None) -> dict[str, Any]:
         if value is not None:
             try:
                 options = json.loads(value)
-                if isinstance(options, dict) and isinstance(options.get("ignore_unavailable"), bool):
-                    return options["ignore_unavailable"]
+                if isinstance(options, dict):
+                    return options
             except (TypeError, ValueError):
                 pass
-        return True
+        return {}
+
+    @classmethod
+    def _entity_history_ignore_option(cls, value: str | None) -> bool:
+        option = cls._entity_history_options(value).get("ignore_unavailable")
+        return option if isinstance(option, bool) else True
 
     def _entity_history_ignores_unavailable(
         self, connection: sqlite3.Connection, entity_id: str
@@ -2472,15 +2485,31 @@ WHERE registry_entry_id IS NOT NULL;
         ).fetchone()
         return self._entity_history_ignore_option(row["value"] if row else None)
 
+    def _get_entity_history_options(self, entity_id: str) -> dict[str, Any]:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT value FROM schema_metadata WHERE key = ?",
+                (self._entity_history_options_key(entity_id),),
+            ).fetchone()
+        return self._entity_history_options(row["value"] if row else None)
+
     def _set_entity_tracking(
         self,
         entity_id: str,
-        enabled: bool,
+        enabled: bool | None = None,
         registry_entry_id: str | None = None,
         ignore_unavailable: bool | None = None,
+        use_ha_precision: bool | None = None,
     ) -> TrackedEntityRecord:
         now = datetime.now(UTC).isoformat()
         with self._connect() as connection:
+            if enabled is None:
+                row = connection.execute(
+                    "SELECT enabled FROM tracked_entities WHERE entity_id = ?", (entity_id,)
+                ).fetchone()
+                if row is None:
+                    raise ValueError(localized_text("history.source_missing"))
+                enabled = bool(row["enabled"])
             connection.execute(
                 """
                 INSERT INTO tracked_entities(
@@ -2497,12 +2526,22 @@ WHERE registry_entry_id IS NOT NULL;
                 """,
                 (entity_id, registry_entry_id, int(enabled), now, now),
             )
-            if ignore_unavailable is not None:
+            if ignore_unavailable is not None or use_ha_precision is not None:
+                key = self._entity_history_options_key(entity_id)
+                row = connection.execute(
+                    "SELECT value FROM schema_metadata WHERE key = ?", (key,)
+                ).fetchone()
+                options = self._entity_history_options(row["value"] if row else None)
+                # Independent preferences share this key; updating one must not
+                # reset the others, including options from future versions.
+                if ignore_unavailable is not None:
+                    options["ignore_unavailable"] = ignore_unavailable
+                if use_ha_precision is not None:
+                    options["use_ha_precision"] = use_ha_precision
                 connection.execute(
                     """INSERT INTO schema_metadata(key, value) VALUES (?, ?)
                     ON CONFLICT(key) DO UPDATE SET value = excluded.value""",
-                    (self._entity_history_options_key(entity_id),
-                     json.dumps({"ignore_unavailable": ignore_unavailable})),
+                    (key, json.dumps(options)),
                 )
         return next(
             item for item in self._list_tracked_entities()
@@ -6571,11 +6610,13 @@ WHERE registry_entry_id IS NOT NULL;
         hidden: bool,
         restock_quantity: int | None = None,
         restock_mode: str | None = None,
+        label_ids: list[str] | None = None,
     ) -> InventoryRecord:
         self._validate_stock(stock, minimum_stock)
         with self._connect() as connection:
             existing = connection.execute(
-                """SELECT inventory_entries.list_id, inventory_entries.stock,
+                """SELECT inventory_entries.list_id, inventory_entries.product_id,
+                          inventory_entries.stock,
                           inventory_entries.restock_quantity, inventory_entries.restock_mode,
                           inventory_group_members.group_id
                    FROM inventory_entries
@@ -6609,6 +6650,22 @@ WHERE registry_entry_id IS NOT NULL;
             )
             if cursor.rowcount != 1:
                 raise InventoryEntryNotFoundError(entry_id)
+            if label_ids is not None:
+                # Validate before resolving scope: an unknown ID must reject
+                # the complete stock correction rather than disappear silently.
+                self._validate_label_ids(connection, label_ids)
+                scoped_labels = self._list_context_label_ids(
+                    connection, "product_labels", "product_id", existing["product_id"],
+                    label_ids, existing["list_id"],
+                )
+                self._replace_labels(
+                    connection, "product_labels", "product_id", existing["product_id"],
+                    scoped_labels,
+                )
+                connection.execute(
+                    "UPDATE products SET updated_at = ? WHERE id = ?",
+                    (self._now(), existing["product_id"]),
+                )
             if int(existing["stock"]) != stock:
                 connection.execute(
                     "DELETE FROM inventory_restock_state WHERE list_id = ? AND ((source_type = 'entry' AND source_id = ?) OR (source_type = 'group' AND source_id = ?))",
@@ -7933,11 +7990,8 @@ WHERE registry_entry_id IS NOT NULL;
         return tuple(records)
 
     @staticmethod
-    def _replace_labels(
+    def _validate_label_ids(
         connection: sqlite3.Connection,
-        assignment_table: str,
-        owner_column: str,
-        owner_id: str,
         label_ids: list[str],
     ) -> None:
         unique_ids = list(dict.fromkeys(label_ids))
@@ -7949,6 +8003,17 @@ WHERE registry_entry_id IS NOT NULL;
             ).fetchone()["count"]
             if count != len(unique_ids):
                 raise LabelNotFoundError(localized_text("backend.label_assignment_unknown"))
+
+    @staticmethod
+    def _replace_labels(
+        connection: sqlite3.Connection,
+        assignment_table: str,
+        owner_column: str,
+        owner_id: str,
+        label_ids: list[str],
+    ) -> None:
+        unique_ids = list(dict.fromkeys(label_ids))
+        HaListManagerDatabase._validate_label_ids(connection, unique_ids)
         connection.execute(
             f"DELETE FROM {assignment_table} WHERE {owner_column} = ?", (owner_id,)
         )

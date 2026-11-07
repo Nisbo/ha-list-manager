@@ -5,7 +5,7 @@ with a shared product database, dashboard cards and an administration panel.
 A separate history card adds long-term recording for selected HA entities.
 
 > [!IMPORTANT]
-> **Beta release: 1.0.0b7.** This is a pre-release for testing before the stable release.
+> **Beta release: 1.0.0b8.** This is a pre-release for testing before the stable release.
 > Back up your Home Assistant configuration and important data before testing.
 > Please report problems with the installed version and steps to reproduce them.
 
@@ -51,6 +51,11 @@ both a drop-down list and a searchable chip popup. Choose one category or select
 several labels, then save the surrounding form. Status and error banners can be
 closed with their right-hand **X**; dismissing a message does not undo its action.
 
+Optional edit shortcut bars open category, labels and the supported item actions directly.
+Changed forms show **Not saved yet** and ask before discarding edits. Product
+editing uses shared fields across cards and administration, with a return path
+to the pending inventory entry.
+
 Saved shopping and inventory items have an **Item actions** menu to create a
 list-specific chip or add a chosen quantity to another local shopping list,
 without moving the source item or changing stock. Administrators can also
@@ -75,13 +80,17 @@ The shared backend also provides:
   inventory data, with an optional transfer of the old EAN database into the
   shared product catalog and explanations for omitted settings.
 
+Archived measurements can optionally use the entity's Home Assistant display
+precision. Raw values stay unchanged, and an explicit history-card decimal
+setting takes precedence.
+
 Products, shopping entries and inventory stock are separate records. Removing a
 shopping entry does not delete its product. Marking a purchase complete does not
 automatically book it into inventory.
 
 ## Requirements
 
-- **Home Assistant 2026.10.0 or newer.** Beta 7 was tested with 2026.11.0.
+- **Home Assistant 2026.10.0 or newer.** Beta 8 was tested with 2026.11.0.
 - **HACS** for the installation method below, or use manual installation.
 - An **administrator account** for installation and backend configuration.
 
@@ -97,7 +106,7 @@ restricted to administrators. See the [permissions guide](https://github.com/Nis
 2. Click the blue button above, select your Home Assistant instance and open
    **HA List Manager** in HACS. Confirm adding the repository if requested.
 3. Open the HACS download dialog, choose a different version and select
-   **1.0.0b7**. Download it and **restart Home Assistant**.
+   **1.0.0b8**. Download it and **restart Home Assistant**.
 4. Open **Settings → Devices & services → Add integration**, search for
    **HA List Manager**, and complete setup.
 5. Open **HA List Manager** in the sidebar to create your lists, then add their
@@ -117,7 +126,7 @@ cards; do not add it as a Dashboard/Frontend-only repository.
 ### Manual installation
 
 1. Download the installation archive
-   [`ha-list-manager-1.0.0b7.zip`](https://github.com/Nisbo/ha-list-manager/releases/download/1.0.0b7/ha-list-manager-1.0.0b7.zip).
+   [`ha-list-manager-1.0.0b8.zip`](https://github.com/Nisbo/ha-list-manager/releases/download/1.0.0b8/ha-list-manager-1.0.0b8.zip).
 2. Extract it into your HA configuration directory so the result is
    `<config>/custom_components/ha_list_manager/manifest.json`.
 3. Restart Home Assistant and add **HA List Manager** under

@@ -584,7 +584,7 @@
       "notification_target_types": "Notify-Entitäten senden an ein Gerät oder einen angebundenen Dienst. Persistente Meldungen erscheinen im Benachrichtigungsbereich von Home Assistant.",
       "append_brand_if_missing": "Nur wenn die Marke noch nicht im ursprünglichen Produktnamen vorkommt.",
       "default_list_icon": "Ohne eigenes Symbol wird automatisch das passende Symbol des Listentyps verwendet.",
-      "inventory_category_override": "Produktvorgabe: „{p0}“. Eine hier gewählte oder neu eingegebene Kategorie überschreibt sie nur in diesem Inventar. Leeren stellt die Produktvorgabe wieder her. Neue dynamische Kategorien können später in der Kategorienverwaltung dauerhaft übernommen werden. Die Produktvorgabe kannst du über „Artikel bearbeiten“ ändern.",
+      "inventory_category_override": "Produktvorgabe: „{p0}“. Eine hier gewählte oder neu eingegebene Kategorie überschreibt sie nur in diesem Inventar. Leeren stellt die Produktvorgabe wieder her. Neue dynamische Kategorien können später in der Kategorienverwaltung dauerhaft übernommen werden. Die Produktvorgabe kannst du über „Produkt bearbeiten“ ändern.",
       "scanner_dynamic_default": "Scanner mit dynamischer Zuordnung verwenden dann das Standardziel aus den Einstellungen.",
       "inventory_group_variants": "Varianten teilen einen Gruppennamen und einen gemeinsamen Mindestbestand.",
       "large_due_category_icon": "Vergrößert das Kategorie-Icon, wenn darunter Fälligkeitsinformationen stehen.",
@@ -622,7 +622,7 @@
       "restock_rules_only": "Automatik greift nur bei Artikeln und Gruppen mit eigener Nachbestellregel.",
       "card_layout_auto": "Automatisch richtet die Darstellung nach Dashboard und verfügbarer Kartenbreite aus. Panel- und Mobilansicht können die Darstellung fest vorgeben.",
       "template_layout_auto": "Automatisch zeigt Vorlagen in breiten Panel- und Großansichten rechts, auf schmalen Karten darunter.",
-      "history_decimal_places": "Begrenzt die Nachkommastellen im Kartenkopf, in der Legende und in der chronologischen Liste.",
+      "history_decimal_places": "Leer: HA-Anzeigepräzision verwenden, wenn sie für die Entität aktiviert ist; sonst 2 Nachkommastellen. Ein gesetzter Wert hat Vorrang. Gilt für Kopfzeile, Legende und chronologische Liste.",
       "history_scroll_limit": "Bei mehr Einträgen erhält die chronologische Liste einen eigenen Scrollbereich.",
       "chip_due_today": "Beim Anklicken des Chips wird der neue Eintrag für den aktuellen Kalendertag fällig. Eine Uhrzeit ist optional.",
       "next_weekday": "Beispiel: „Montag“ bedeutet immer den nächsten kommenden Montag, nicht heute.",
@@ -750,7 +750,7 @@
       "chip_name": "Der Name ist Pflicht und bleibt stabil. Wählst du zuerst ein Produkt, wird dessen aktueller Name automatisch eingetragen. Du kannst ihn anschließend als Beschriftung des Chips ändern.",
       "due_date_offset": "Die Fälligkeit wird beim Anklicken um den gewählten Abstand in Stunden, Tagen oder Monaten nach vorn gerechnet. Eine optionale Uhrzeit legt anschließend die Tageszeit fest.",
       "inventory_category_local": "Die gewählte Kategorie gilt nur für diesen Inventareintrag.",
-      "central_product_editing": "Die Produktdaten werden zentral verwaltet. Nach dem Hinzufügen kannst du sie über „Artikel bearbeiten“ vollständig ändern.",
+      "central_product_editing": "Die Produktdaten werden zentral verwaltet. Nach dem Hinzufügen kannst du sie über „Produkt bearbeiten“ vollständig ändern.",
       "task_recurrence": "Die Wiederholung legt fest, in welchem Abstand nach dem Erledigen die nächste Fälligkeit erzeugt wird. Leer bedeutet: keine Wiederholung.",
       "general_item_chip_availability": "Diese allgemeinen Artikel-Chips stehen ausschließlich in Einkaufs- und Inventarlisten bereit. To-do-Listen verwenden getrennte Vorlagen.",
       "automatic_restock_quantity_only": "Diese gilt für automatische Nachbestellungen, zum Beispiel 6 Artikel. Sie wird hier nicht als Menge verwendet.",
@@ -850,7 +850,9 @@
       "telegram_formats": "Telegram: Text, HTML oder Markdown wird für dieses Versandziel ausdrücklich gesetzt und überschreibt die Formatvorgabe des Bots.",
       "telegram_delivery": "Wähle den gewünschten Chat deines eingerichteten Telegram-Bots. Text, HTML und Markdown stehen für jedes Telegram-Versandziel zur Verfügung.",
       "label_grouping": "Ergänzt einen Button in der Optionsleiste zum Wechseln zwischen Kategorien und Labels. Ein Eintrag mit mehreren Labels erscheint in jeder Label-Gruppe; alle Ansichten verwenden denselben Eintrag. Die Startansicht gilt, bis für diese Karte in diesem Browser eine Auswahl gespeichert wurde.",
-      "auto_expand_search": "Öffnet Kategorien und Labelgruppen mit Treffern vorübergehend, wenn das Eingabefeld die Liste filtert. Nach dem Leeren der Suche gilt wieder der vorherige Auf-/Zuklappzustand."
+      "auto_expand_search": "Öffnet Kategorien und Labelgruppen mit Treffern vorübergehend, wenn das Eingabefeld die Liste filtert. Nach dem Leeren der Suche gilt wieder der vorherige Auf-/Zuklappzustand.",
+      "shopping_edit_shortcuts": "Zeigt unter dem Titel des Bearbeitungsdialogs Symbolbuttons für Kategorie, Labels und Artikelaktionen.",
+      "todo_edit_shortcuts": "Zeigt Schnellbuttons für Kategorie, Labels und das Speichern als Vorlage unter dem Titel im Bearbeitungsdialog."
     },
     "history": {
       "add_sample": "Messwert ergänzen",
@@ -960,7 +962,11 @@
       "hide_unavailable_confirm": "Alle {count} aufgezeichneten oder importierten unknown-/unavailable-Werte dieses Archivs ausblenden? Die Originaldaten bleiben erhalten. Über „Ausgeblendete Werte anzeigen“ kannst du sie einzeln wieder einblenden. Manuell ergänzte Werte bleiben unverändert.",
       "hide_values": "Werte ausblenden",
       "unavailable_hidden": "{count} unknown-/unavailable-Werte ausgeblendet.",
-      "ignored_unavailable": "{count} unknown-/unavailable-Werte ignoriert"
+      "ignored_unavailable": "{count} unknown-/unavailable-Werte ignoriert",
+      "use_ha_precision": "HA-Anzeigepräzision verwenden",
+      "ha_precision_current": "Aktuelle HA-Anzeigepräzision: {precision} Nachkommastellen. Nur die Anzeige ändert sich; gespeicherte Werte bleiben unverändert.",
+      "ha_precision_unavailable": "Für diese Entität ist keine HA-Anzeigepräzision verfügbar. Die gespeicherten Werte werden unverändert angezeigt.",
+      "display_precision_saved": "Anzeigeeinstellung gespeichert."
     },
     "scripts": {
       "enabled": "Skript-Anbindung aktivieren",
@@ -1950,7 +1956,9 @@
       "group_by_labels": "Nach Labels gruppieren",
       "all_labels_count": "Alle Labels {p0}",
       "auto_expand_search": "Gruppen bei Suche automatisch öffnen",
-      "dismiss_message": "Meldung ausblenden"
+      "dismiss_message": "Meldung ausblenden",
+      "back_to_inventory_item": "Zurück zum Inventarartikel",
+      "save_product": "Produkt speichern"
     },
     "scanner": {
       "active_then_default": "Aktive Karte, danach Standardziel",
@@ -2239,7 +2247,8 @@
       "completed_deleted_one": "{count} erledigter Artikel gelöscht.",
       "completed_deleted_many": "{count} erledigte Artikel gelöscht.",
       "quantity_increased_full": "{item}: Anzahl von {previous} auf {next} erhöht.",
-      "quantity_decreased_full": "{item}: Anzahl von {previous} auf {next} verringert."
+      "quantity_decreased_full": "{item}: Anzahl von {previous} auf {next} verringert.",
+      "show_edit_shortcuts": "Schnellleiste beim Bearbeiten anzeigen"
     },
     "categories": {
       "optional_auto_assignment": "Automatische Zuordnung (optional)",
@@ -2567,7 +2576,10 @@
       "sent": "{p0}× zu „{p1}“ hinzugefügt.",
       "merged": "Vorhandenen Artikel auf „{p1}“ um {p0} ergänzt.",
       "error": "Die Artikelaktion konnte nicht ausgeführt werden.",
-      "create": "Erstellen"
+      "create": "Erstellen",
+      "shortcuts": "Schnellaktionen",
+      "change_category": "Kategorie ändern",
+      "change_labels": "Labels ändern"
     },
     "selection": {
       "categories": "Kategorie auswählen",

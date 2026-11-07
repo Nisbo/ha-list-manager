@@ -80,7 +80,7 @@ function haListManagerHistoryCardTextRequest(hass, message) {
 }
 
 const HA_LM_HISTORY_API = "ha_list_manager";
-const CARD_VERSION = "1.0.0b7";
+const CARD_VERSION = "1.0.0b8";
 
 const esc = (value) => String(value ?? "").replace(/[&<>'"]/g, (char) => ({
   "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;",
@@ -193,7 +193,7 @@ class HaListManagerHistoryCard extends HTMLElement {
             { value: "entity_4", label: haListManagerHistoryCardText("history.fourth_entity", {}, hass) },
             { value: "entity_5", label: haListManagerHistoryCardText("ui.fifth_entity", {}, hass) },
           ] } }, default: "entity_1" },
-          { name: "scale_decimals", selector: { number: { min: 0, max: 6, mode: "box" } }, default: 2 },
+          { name: "scale_decimals", selector: { number: { min: 0, max: 6, mode: "box" } } },
           { name: "value_fixed_decimals", selector: { boolean: {} }, default: false },
           { name: "axis_decimals", selector: { number: { min: 0, max: 6, mode: "box" } }, default: 2 },
           { name: "axis_fixed_decimals", selector: { boolean: {} }, default: false },
@@ -253,7 +253,7 @@ class HaListManagerHistoryCard extends HTMLElement {
     this._reloadPending = this._loading;
     this._config = {
       hours_to_show: 168, view: "chart", show_view_toggle: true,
-      header_value: "entity_1", scale_decimals: 2, value_fixed_decimals: false,
+      header_value: "entity_1", value_fixed_decimals: false,
       axis_decimals: 2, axis_fixed_decimals: false,
       list_rows_before_scroll: 8, collapsible: true, initially_collapsed: false,
       legend_collapsible: true, legend_initially_collapsed: true,
@@ -276,7 +276,7 @@ class HaListManagerHistoryCard extends HTMLElement {
   set hass(hass) {
     this._hass = hass;
     const translationsChanged = haListManagerHistoryCardTextUpdateTranslations(this, this._hass);
-    const changed = this._seriesConfigs().map((series) => hass?.states?.[series.entity]?.last_updated || "").join("|");
+    const changed = this._seriesConfigs().map((series) => `${hass?.states?.[series.entity]?.last_updated || ""}:${series.registry_display_precision ?? ""}`).join("|");
     if (changed && changed !== this._lastSourceUpdate) {
       this._lastSourceUpdate = changed;
       this._scheduleLoad(300);
@@ -434,7 +434,9 @@ class HaListManagerHistoryCard extends HTMLElement {
           // More matching rows are expected when the user asks for the last N.
           // Only safety-scan exhaustion or our own row ceiling needs a warning.
           const technicalLimit = result.query_limited || ((!valuesToShow || valuesToShow > 20000) && result.truncated);
-          return { ...series, states: result.states || [], truncated: Boolean(technicalLimit), error: "" };
+          return { ...series, states: result.states || [], truncated: Boolean(technicalLimit), error: "",
+            use_ha_precision: result.use_ha_precision === true,
+            display_precision: result.display_precision ?? null };
         } catch (error) {
           return { ...series, states: [], truncated: false, error: error?.message || String(error) };
         }
@@ -476,7 +478,7 @@ class HaListManagerHistoryCard extends HTMLElement {
     if (previous.length !== next.length) return false;
     return previous.every((series, seriesIndex) => {
       const candidate = next[seriesIndex];
-      if (!candidate || ["entity", "attribute", "name", "icon", "color", "unit", "connectPoints", "truncated", "error"]
+      if (!candidate || ["entity", "attribute", "name", "icon", "color", "unit", "connectPoints", "truncated", "error", "use_ha_precision", "display_precision", "registry_display_precision"]
         .some((key) => series[key] !== candidate[key]) || series.states.length !== candidate.states.length) return false;
       return series.states.every((record, recordIndex) => {
         const nextRecord = candidate.states[recordIndex];
@@ -502,6 +504,7 @@ class HaListManagerHistoryCard extends HTMLElement {
         color: this._color(this._config[`icon_color${suffix}`], defaults[index - 1]),
         connectPoints: this._config[`connect_points${suffix}`] !== false,
         unit: attribute ? "" : (state?.attributes?.unit_of_measurement || ""),
+        registry_display_precision: this._displayPrecision(entity),
       };
     }).filter(Boolean);
   }
@@ -624,12 +627,12 @@ class HaListManagerHistoryCard extends HTMLElement {
       const coords = series.points.map((point) => [x(point.time), y(point.raw)]);
       const path = coords.map(([nextX, nextY], index) => `${index ? "L" : "M"} ${nextX.toFixed(2)} ${nextY.toFixed(2)}`).join(" ");
       const line = series.connectPoints !== false && coords.length > 1 ? `<path d="${path}" class="line" style="stroke:${esc(series.color)}"></path>` : "";
-      return line + series.points.map((point, index) => this._renderSampleMarker(coords[index], point.record, series.color, `${this._formatValue(point.raw)} · ${date(point.time)}`)).join("");
+      return line + series.points.map((point, index) => this._renderSampleMarker(coords[index], point.record, series.color, `${this._formatValue(point.raw, series)} · ${date(point.time)}`)).join("");
     }).join("");
     return `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${haListManagerHistoryCardText("ui.saved_history", {}, this._hass)}">
       ${scale.ticks.map((label) => `<line x1="${left}" y1="${y(label)}" x2="${width - right}" y2="${y(label)}" class="grid"></line><text x="${left - 16}" y="${y(label) + 7}" text-anchor="end">${esc(this._formatAxisValue(label))}</text>`).join("")}
       ${paths}
-      ${references.map((line) => `<line x1="${left}" y1="${y(line.value)}" x2="${width - right}" y2="${y(line.value)}" class="reference-line" style="stroke:${esc(line.color)}"><title>${esc(line.label)}: ${esc(this._formatValue(line.value))}</title></line>`).join("")}
+      ${references.map((line) => `<line x1="${left}" y1="${y(line.value)}" x2="${width - right}" y2="${y(line.value)}" class="reference-line" style="stroke:${esc(line.color)}"><title>${esc(line.label)}: ${esc(this._formatValue(line.value, seriesData[0]))}</title></line>`).join("")}
       <text x="${left}" y="${height - 10}">${esc(date(start))}</text>
       <text x="${width - right}" y="${height - 10}" text-anchor="end">${esc(date(end))}</text>
     </svg>`;
@@ -680,7 +683,7 @@ class HaListManagerHistoryCard extends HTMLElement {
     const plotted = view === "chart" ? this._chartData(seriesData) : [];
     const numeric = plotted.length && plotted.every((series) => series.points.every((point) => point.raw !== "" && Number.isFinite(Number(point.raw))));
     const references = numeric ? this._referenceLines() : [];
-    const referenceLegend = references.length ? `<div class="reference-legend">${references.map((line) => `<span><i style="border-color:${esc(line.color)}"></i>${esc(line.label)}: ${esc(this._formatValue(line.value))}</span>`).join("")}</div>` : "";
+    const referenceLegend = references.length ? `<div class="reference-legend">${references.map((line) => `<span><i style="border-color:${esc(line.color)}"></i>${esc(line.label)}: ${esc(this._formatValue(line.value, seriesData[0]))}</span>`).join("")}</div>` : "";
     const categoricalChart = plotted.length === 1 && new Set(plotted[0].points.map((point) => String(point.raw))).size <= 8;
     const sourceLegend = numeric || categoricalChart ? this._renderSourceLegend(seriesData) : "";
     const content = referenceLegend + sourceLegend + seriesLegend;
@@ -717,24 +720,37 @@ class HaListManagerHistoryCard extends HTMLElement {
     return `<div class="changes">${latest.map((point) => `<div><time>${esc(new Intl.DateTimeFormat(locale, { dateStyle: "short", timeStyle: "medium" }).format(new Date(point.time)))}</time><strong>${esc(typeof point.raw === "object" ? JSON.stringify(point.raw) : point.raw)}</strong></div>`).join("")}</div>`;
   }
 
+  _displayPrecision(entityId, fallback = null) {
+    // HA's entity registry metadata is live; history rows keep their raw state.
+    const valid = (value) => typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= 20;
+    const precision = this._hass?.entities?.[entityId]?.display_precision;
+    return valid(precision) ? precision : valid(fallback) ? fallback : null;
+  }
+
   _formatNumber(value, decimals, fixed) {
-    const numeric = typeof value === "number" ? value : (typeof value === "string" && /^[-+]?\d+(?:[.,]\d+)?$/.test(value.trim()) ? Number(value.replace(",", ".")) : NaN);
+    const numeric = typeof value === "number" ? value : (typeof value === "string" && /^[-+]?(?:\d+(?:[.,]\d*)?|[.,]\d+)(?:e[-+]?\d+)?$/i.test(value.trim()) ? Number(value.trim().replace(",", ".")) : NaN);
     if (!Number.isFinite(numeric)) {
       return typeof value === "object" ? JSON.stringify(value) : value;
     }
-    const digits = Math.max(0, Math.min(6, Math.floor(Number(decimals) || 0)));
+    const digits = Math.max(0, Math.min(20, Math.floor(Number(decimals) || 0)));
     return numeric.toLocaleString(haListManagerHistoryCardTextLocale(this._hass), {
       maximumFractionDigits: digits,
       minimumFractionDigits: fixed ? digits : 0,
     });
   }
 
-  _formatValue(value) {
-    return this._formatNumber(value, this._config.scale_decimals, this._config.value_fixed_decimals === true);
+  _formatValue(value, series = this._seriesData[0] || this._seriesConfigs()[0]) {
+    const configured = this._config.scale_decimals;
+    const explicit = (typeof configured === "number" || (typeof configured === "string" && configured.trim() !== "")) && Number.isFinite(Number(configured));
+    const precision = !series?.attribute && series?.use_ha_precision === true
+      ? this._displayPrecision(series.entity, series.display_precision) : null;
+    const decimals = explicit ? Math.max(0, Math.min(6, Math.floor(Number(configured)))) : precision ?? 2;
+    return this._formatNumber(value, decimals, this._config.value_fixed_decimals === true);
   }
 
   _formatAxisValue(value) {
-    return this._formatNumber(value, this._config.axis_decimals, this._config.axis_fixed_decimals === true);
+    const decimals = Math.max(0, Math.min(6, Math.floor(Number(this._config.axis_decimals) || 0)));
+    return this._formatNumber(value, decimals, this._config.axis_fixed_decimals === true);
   }
 
   _renderList(seriesData) {
@@ -757,7 +773,7 @@ class HaListManagerHistoryCard extends HTMLElement {
     const maxHeight = rowsBeforeScroll * 80 + 58;
     return `<div class="history-list ${scrollable ? "scrollable" : ""}" ${scrollable ? `style="--history-list-max-height:${maxHeight}px"` : ""}>${[...groups.entries()].map(([date, rows]) => `<section><h3>${esc(date)}</h3>${rows.map(({ series, record }) => {
       const value = this._value(record, series);
-      const display = this._formatValue(value);
+      const display = this._formatValue(value, series);
       return `<div class="history-row"><ha-icon icon="${esc(series.icon)}" style="color:${esc(series.color)}"></ha-icon><div><strong>${esc(display)}${series.unit ? ` ${esc(series.unit)}` : ""}</strong><small>${esc(series.name)} · ${esc(timeFormatter.format(new Date(record.last_updated)))}</small></div><span class="source-badge">${esc(this._sourceLabel(record))}</span></div>`;
     }).join("")}</section>`).join("")}</div>`;
   }
@@ -824,13 +840,13 @@ class HaListManagerHistoryCard extends HTMLElement {
     const seriesLegend = seriesData.length > 1 ? `<div class="series-legend">${seriesData.map((series) => {
       const record = series.states[series.states.length - 1];
       const value = record ? this._value(record, series) : undefined;
-      return `<div><ha-icon icon="${esc(series.icon)}" style="color:${esc(series.color)}"></ha-icon><span>${esc(series.name)}</span><strong>${value === undefined ? "–" : esc(this._formatValue(value))}${series.unit ? ` ${esc(series.unit)}` : ""}</strong></div>`;
+      return `<div><ha-icon icon="${esc(series.icon)}" style="color:${esc(series.color)}"></ha-icon><span>${esc(series.name)}</span><strong>${value === undefined ? "–" : esc(this._formatValue(value, series))}${series.unit ? ` ${esc(series.unit)}` : ""}</strong></div>`;
     }).join("")}</div>` : "";
     const legend = this._renderLegend(seriesData, view, seriesLegend);
     this.shadowRoot.innerHTML = `<style>
       :host{display:block;--history-icon-color:${iconColor}}:host([data-expanded-view]){position:fixed!important;top:var(--expanded-top,56px)!important;right:var(--expanded-right,0)!important;bottom:var(--expanded-bottom,0)!important;left:var(--expanded-left,0)!important;z-index:9998;min-width:0!important;max-width:none!important;padding:16px;overflow:hidden;background:var(--primary-background-color,#111)}:host([data-expanded-view]) ha-card{height:100%;min-height:0;overflow:auto;box-shadow:0 16px 48px rgba(0,0,0,.45)}:host([data-expanded-view]) svg[role="img"]{height:clamp(360px,65vh,720px);max-height:none}:host([data-expanded-view]) .history-list.scrollable{max-height:calc(100vh - 240px)}ha-card{padding:18px;color:var(--primary-text-color)}ha-card.collapsed{height:76px;padding:8px 14px}.history-header{display:flex;align-items:center;gap:8px;width:calc(100% + 8px);margin:-4.5px -4px 18.5px;color:var(--primary-text-color)}.collapsed .history-header{width:100%;height:auto;margin:5.5px 0 0}.entity-icon{display:grid;flex:0 0 auto;place-items:center;width:40px;height:40px;padding:5px;border:0;border-radius:50%;--mdc-icon-size:30px;color:var(--history-icon-color);background:transparent;cursor:pointer}.entity-icon:hover,.entity-icon:focus-visible{outline:0;background:color-mix(in srgb,var(--primary-text-color) 10%,transparent)}.history-title{display:flex;min-width:0;flex:1;flex-direction:column;padding:5px 4px;border:0;color:inherit;background:transparent;text-align:left}.history-title.clickable{cursor:pointer}.history-title.clickable:hover{background:color-mix(in srgb,var(--primary-text-color) 5%,transparent)}h2,p{margin:0}h2{overflow:hidden;font-size:21px;text-overflow:ellipsis;white-space:nowrap}.history-header small,.meta,.empty{color:var(--secondary-text-color)}.current{flex:0 0 auto;font-size:22px;font-weight:500}.current small{font-size:13px;font-weight:400}.header-action{display:grid;flex:0 0 auto;place-items:center;width:36px;height:36px;padding:0;border:0;border-radius:50%;color:var(--secondary-text-color);background:transparent;cursor:pointer}.header-action:hover{background:color-mix(in srgb,var(--primary-text-color) 8%,transparent)}.header-action ha-icon{--mdc-icon-size:23px}.view-toolbar{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:0 0 6px}.history-legend{margin-top:8px}.legend-toggle{display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%;min-height:32px;padding:4px 0;border:0;color:var(--secondary-text-color);background:transparent;font:inherit;font-size:13px;text-align:left;cursor:pointer}.legend-toggle:focus-visible{outline:2px solid var(--primary-color);outline-offset:3px}.legend-toggle ha-icon{--mdc-icon-size:20px}[data-legend-content][hidden]{display:none}.source-legend .legend-symbol{display:block;flex:0 0 16px;width:16px;height:16px;max-height:16px;overflow:visible}.source-legend{align-items:center}.source-legend .aggregate-entry{white-space:nowrap;flex-wrap:nowrap}.aggregate-info{display:inline-flex;align-items:center;justify-content:center;flex:0 0 32px;width:32px;height:32px;padding:0;border:0;border-radius:50%;color:inherit;background:transparent;cursor:pointer}.aggregate-info:focus-visible{outline:2px solid var(--primary-color);outline-offset:2px}.aggregate-info ha-icon{--mdc-icon-size:18px}.aggregate-explanation{margin:4px 0 10px;color:var(--secondary-text-color);font-size:12px;line-height:1.45}[data-aggregate-explanation][hidden]{display:none}.series-legend{display:flex;flex-wrap:wrap;gap:4px 12px;margin:2px 0 6px}.series-legend>div{display:grid;grid-template-columns:20px auto auto;align-items:center;gap:4px;min-width:0;font-size:12px}.series-legend ha-icon{--mdc-icon-size:17px}.series-legend span{overflow:hidden;color:var(--secondary-text-color);text-overflow:ellipsis;white-space:nowrap}.series-legend strong{font-weight:500}.meta{flex:1;font-size:12px;line-height:1.35}.view-switch{display:inline-flex;flex:0 0 auto;gap:3px;padding:3px;border:1px solid var(--divider-color);border-radius:17px;background:var(--secondary-background-color)}.view-switch button{display:grid;place-items:center;width:28px;height:28px;padding:0;border:0;border-radius:14px;color:var(--secondary-text-color);background:transparent;cursor:pointer}.view-switch button.active{color:#fff;background:var(--primary-color)}.view-switch ha-icon{--mdc-icon-size:18px}svg{display:block;width:100%;height:auto;max-height:320px;overflow:visible}svg text{fill:var(--secondary-text-color);font:24px sans-serif}.grid{stroke:var(--divider-color);stroke-width:1.5}.line{fill:none;stroke-width:4;stroke-linejoin:round;stroke-linecap:round}.hourly-point{fill:var(--ha-card-background,var(--card-background-color,#1c1c1c));stroke-width:3}.manual-point{stroke:var(--ha-card-background,var(--card-background-color,#1c1c1c));stroke-width:1.5}.reference-line{stroke-width:2;stroke-dasharray:3 7}.reference-legend,.source-legend{display:flex;flex-wrap:wrap;gap:6px 14px;margin:8px 0;color:var(--secondary-text-color);font-size:12px}.reference-legend span,.source-legend span{display:inline-flex;align-items:center;gap:5px;overflow-wrap:anywhere}.reference-legend i{width:22px;border-top:2px solid currentColor;flex-shrink:0}.reference-legend i{border-top-style:dotted}.source-badge{max-width:110px;overflow-wrap:anywhere}.empty{display:grid;min-height:150px;place-items:center;text-align:center}.error{margin-bottom:8px;padding:12px;border-left:4px solid var(--error-color);color:var(--error-color);background:color-mix(in srgb,var(--error-color) 10%,transparent)}.changes{max-height:300px;overflow:auto}.changes>div{display:grid;grid-template-columns:minmax(120px,auto) minmax(0,1fr);gap:14px;padding:9px 2px;border-bottom:1px solid var(--divider-color)}.changes time{color:var(--secondary-text-color)}.changes strong{overflow-wrap:anywhere}.history-limit-notice{display:flex;gap:6px;align-items:center;margin-bottom:8px;color:var(--secondary-text-color);font-size:12px}.history-limit-notice ha-icon{--mdc-icon-size:18px}.history-limit-notice ha-icon{flex-shrink:0;color:var(--warning-color,#f0a000)}.unit-warning{color:var(--warning-color,#f0a000)}.history-list.scrollable{max-height:var(--history-list-max-height);padding-right:5px;overflow-y:auto;overscroll-behavior:contain}.history-list section+section{margin-top:18px}.history-list h3{position:sticky;top:0;z-index:1;margin:0;padding:10px 4px;border-bottom:1px solid var(--divider-color);background:var(--ha-card-background,var(--card-background-color));font-size:17px}.history-row{display:grid;grid-template-columns:34px minmax(0,1fr) auto;align-items:center;gap:10px;min-height:64px;padding:8px 4px;border-bottom:1px dashed var(--divider-color)}.history-row>ha-icon{color:var(--history-icon-color)}.history-row>div{display:flex;min-width:0;flex-direction:column;gap:3px}.history-row strong{overflow-wrap:anywhere;font-weight:500}.history-row small{color:var(--secondary-text-color)}.source-badge{padding:3px 7px;border-radius:12px;color:var(--secondary-text-color);background:var(--secondary-background-color);font-size:11px}
       [data-message]{display:flex;align-items:center;gap:8px}[data-message]>.message-text{flex:1;min-width:0;overflow-wrap:anywhere}.message-close{display:grid;place-items:center;flex:0 0 32px;width:32px;height:32px;margin-left:auto;padding:0;border:0;border-radius:50%;color:inherit;background:transparent;cursor:pointer}.message-close ha-icon{--mdc-icon-size:20px}.message-close:hover{background:color-mix(in srgb,currentColor 12%,transparent)}.message-close:focus-visible{outline:2px solid var(--primary-color);outline-offset:2px}
-    </style><ha-card class="${collapsed ? "collapsed" : ""}"><div class="history-header"><button type="button" class="entity-icon" data-toggle-expanded-view aria-pressed="${this._expandedView}" title="${this._expandedView ? haListManagerHistoryCardText("ui.close_large_view", {}, this._hass) : haListManagerHistoryCardText("ui.open_large_view", {}, this._hass)}" aria-label="${this._expandedView ? haListManagerHistoryCardText("ui.close_large_view", {}, this._hass) : haListManagerHistoryCardText("ui.open_large_view", {}, this._hass)}"><ha-icon icon="${esc(icon)}"></ha-icon></button><button type="button" class="history-title ${collapsible ? "clickable" : ""}" ${collapsible ? "data-toggle-history" : ""} aria-expanded="${collapsed ? "false" : "true"}"><h2>${esc(title)}</h2>${seriesData.length > 1 ? `<small>${haListManagerHistoryCardText("history.entity_count", {p0:(seriesData.length)}, this._hass)}</small>` : ""}</button>${latest !== undefined && headerSeries ? `<span class="current">${esc(this._formatValue(latest))}${headerSeries.unit ? ` <small>${esc(headerSeries.unit)}</small>` : ""}</span>` : ""}${collapsible ? `<button type="button" class="header-action" data-toggle-history title="${collapsed ? haListManagerHistoryCardText("ui.expand_card", {}, this._hass) : haListManagerHistoryCardText("ui.collapse_card", {}, this._hass)}" aria-label="${collapsed ? haListManagerHistoryCardText("ui.expand_card", {}, this._hass) : haListManagerHistoryCardText("ui.collapse_card", {}, this._hass)}"><ha-icon icon="mdi:chevron-${collapsed ? "down" : "up"}"></ha-icon></button>` : ""}</div>
+    </style><ha-card class="${collapsed ? "collapsed" : ""}"><div class="history-header"><button type="button" class="entity-icon" data-toggle-expanded-view aria-pressed="${this._expandedView}" title="${this._expandedView ? haListManagerHistoryCardText("ui.close_large_view", {}, this._hass) : haListManagerHistoryCardText("ui.open_large_view", {}, this._hass)}" aria-label="${this._expandedView ? haListManagerHistoryCardText("ui.close_large_view", {}, this._hass) : haListManagerHistoryCardText("ui.open_large_view", {}, this._hass)}"><ha-icon icon="${esc(icon)}"></ha-icon></button><button type="button" class="history-title ${collapsible ? "clickable" : ""}" ${collapsible ? "data-toggle-history" : ""} aria-expanded="${collapsed ? "false" : "true"}"><h2>${esc(title)}</h2>${seriesData.length > 1 ? `<small>${haListManagerHistoryCardText("history.entity_count", {p0:(seriesData.length)}, this._hass)}</small>` : ""}</button>${latest !== undefined && headerSeries ? `<span class="current">${esc(this._formatValue(latest, headerSeries))}${headerSeries.unit ? ` <small>${esc(headerSeries.unit)}</small>` : ""}</span>` : ""}${collapsible ? `<button type="button" class="header-action" data-toggle-history title="${collapsed ? haListManagerHistoryCardText("ui.expand_card", {}, this._hass) : haListManagerHistoryCardText("ui.collapse_card", {}, this._hass)}" aria-label="${collapsed ? haListManagerHistoryCardText("ui.expand_card", {}, this._hass) : haListManagerHistoryCardText("ui.collapse_card", {}, this._hass)}"><ha-icon icon="mdi:chevron-${collapsed ? "down" : "up"}"></ha-icon></button>` : ""}</div>
       ${collapsed ? "" : `${this._messageMarkup("error", this._error, "error", "alert", "alert-circle-outline")}${this._truncated ? this._messageMarkup("limit", haListManagerHistoryCardText("history.query_limit_reached", {}, this._hass), "history-limit-notice", "status", "information-outline") : ""}<div class="view-toolbar"><div class="meta">${esc(summaryParts.join(" · "))}${unitWarning ? ` · <span class="unit-warning">${esc(unitWarning)}</span>` : ""}</div>${showViewToggle ? `<div class="view-switch" aria-label="${haListManagerHistoryCardText("ui.appearance", {}, this._hass)}"><button type="button" class="${view === "chart" ? "active" : ""}" data-set-view="chart" title="${haListManagerHistoryCardText("ui.chart", {}, this._hass)}" aria-label="${haListManagerHistoryCardText("ui.chart", {}, this._hass)}"><ha-icon icon="mdi:chart-line"></ha-icon></button><button type="button" class="${view === "list" ? "active" : ""}" data-set-view="list" title="${haListManagerHistoryCardText("ui.list", {}, this._hass)}" aria-label="${haListManagerHistoryCardText("ui.list", {}, this._hass)}"><ha-icon icon="mdi:format-list-bulleted"></ha-icon></button></div>` : ""}</div>${content}${legend}`}
     </ha-card>`;
     this.shadowRoot.querySelectorAll("[data-dismiss-message]").forEach((button) => button.addEventListener("click", (event) => {
@@ -871,6 +887,7 @@ class HaListManagerHistoryCardEditor extends HTMLElement {
       this._remainingForm = document.createElement("ha-form");
       [this._form, this._remainingForm].forEach((form) => form.addEventListener("value-changed", (event) => {
         this._config = { ...this._config, ...event.detail.value };
+        if (this._config.scale_decimals === "" || this._config.scale_decimals == null) delete this._config.scale_decimals;
         this._notifyConfig();
       }));
       this.shadowRoot.append(this._form);
