@@ -2248,7 +2248,22 @@
       "completed_deleted_many": "{count} completed items deleted.",
       "quantity_increased_full": "{item}: Quantity increased from {previous} to {next}.",
       "quantity_decreased_full": "{item}: Quantity decreased from {previous} to {next}.",
-      "show_edit_shortcuts": "Show edit shortcuts"
+      "show_edit_shortcuts": "Show edit shortcuts",
+      "remember_product_category": "Use as the product category for this list",
+      "remember_product_category_help": "Saved with this item. Replaces the product preference for this list only; global preferences and other existing entries stay unchanged.",
+      "remember_product_category_needs_saved": "Choose a saved category first. Dynamic categories must be saved permanently before they can be used as a product preference.",
+      "offer_filter": "Offer filter",
+      "offer_filter_all": "All items",
+      "offer_filter_hide": "Without offer items",
+      "offer_filter_only": "Only offer items",
+      "remember_product_labels": "Also save labels on the product",
+      "product_labels_help": "Global and list-type product assignments also affect other lists. Changes are saved with this item.",
+      "product_labels_added": "Add to product: {labels}",
+      "product_labels_removed": "Remove from product: {labels}",
+      "product_labels_unchanged": "No changes to the product labels.",
+      "product_category_to_save": "Product category to save for this list: {category}.",
+      "product_labels_need_product": "Save this item in the product database first to assign labels permanently to the product.",
+      "product_category_needs_product": "Save this item in the product database first to set a permanent product category for this list."
     },
     "categories": {
       "optional_auto_assignment": "Automatic assignment (optional)",

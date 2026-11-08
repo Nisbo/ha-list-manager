@@ -80,7 +80,7 @@ function haListManagerHistoryCardTextRequest(hass, message) {
 }
 
 const HA_LM_HISTORY_API = "ha_list_manager";
-const CARD_VERSION = "1.0.0b8";
+const CARD_VERSION = "1.0.0b9";
 
 const esc = (value) => String(value ?? "").replace(/[&<>'"]/g, (char) => ({
   "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;",

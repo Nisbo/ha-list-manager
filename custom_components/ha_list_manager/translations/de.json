@@ -2248,7 +2248,22 @@
       "completed_deleted_many": "{count} erledigte Artikel gelöscht.",
       "quantity_increased_full": "{item}: Anzahl von {previous} auf {next} erhöht.",
       "quantity_decreased_full": "{item}: Anzahl von {previous} auf {next} verringert.",
-      "show_edit_shortcuts": "Schnellleiste beim Bearbeiten anzeigen"
+      "show_edit_shortcuts": "Schnellleiste beim Bearbeiten anzeigen",
+      "remember_product_category": "Für dieses Produkt in dieser Liste als Vorgabe speichern",
+      "remember_product_category_help": "Wird mit diesem Artikel gespeichert. Ersetzt nur die Produktvorgabe für diese Liste; globale Vorgaben und andere vorhandene Einträge bleiben unverändert.",
+      "remember_product_category_needs_saved": "Wähle zuerst eine gespeicherte Kategorie. Dynamische Kategorien müssen dauerhaft angelegt werden, bevor sie als Produktvorgabe verwendet werden können.",
+      "offer_filter": "Angebotsfilter",
+      "offer_filter_all": "Alle Artikel",
+      "offer_filter_hide": "Ohne Angebotsartikel",
+      "offer_filter_only": "Nur Angebotsartikel",
+      "remember_product_labels": "Labels auch am Produkt speichern",
+      "product_labels_help": "Globale und Listentyp-Produktzuordnungen betreffen auch andere Listen. Änderungen werden mit diesem Artikel gespeichert.",
+      "product_labels_added": "Am Produkt hinzufügen: {labels}",
+      "product_labels_removed": "Am Produkt entfernen: {labels}",
+      "product_labels_unchanged": "Keine Änderungen an den Produktlabels.",
+      "product_category_to_save": "Produktvorgabe beim Speichern für diese Liste: {category}.",
+      "product_labels_need_product": "Speichere diesen Artikel zuerst in der Produkt-DB, um Labels dauerhaft am Produkt zuzuweisen.",
+      "product_category_needs_product": "Speichere diesen Artikel zuerst in der Produkt-DB, um eine dauerhafte Produktkategorie für diese Liste festzulegen."
     },
     "categories": {
       "optional_auto_assignment": "Automatische Zuordnung (optional)",

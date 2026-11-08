@@ -1362,6 +1362,8 @@ async def websocket_list_items(
         probatio.Optional("label_ids"): [str],
         probatio.Optional("product_id"): probatio.Any(str, None),
         probatio.Optional("offer_only"): bool,
+        probatio.Optional("remember_product_category"): bool,
+        probatio.Optional("remember_product_labels"): bool,
     }
 )
 async def websocket_create_item(
@@ -1388,6 +1390,8 @@ async def websocket_create_item(
         if list_record.list_type != "todo" and recurrence_interval is not None:
             raise ValueError(localized_text("errors.recurrence_todo_only"))
         if list_record.provider == "bring":
+            if msg.get("remember_product_category", False) or msg.get("remember_product_labels", False):
+                raise ValueError(localized_text("backend.local_shopping_target_required"))
             record = await _runtime(hass).external_lists.async_create_item(
                 msg["list_id"], **values
             )
@@ -1399,6 +1403,8 @@ async def websocket_create_item(
                 _clean_text(msg.get("due_at"), maximum=40, required=False),
                 values["label_ids"], values["product_id"], None,
                 recurrence_interval, recurrence_unit, values["offer_only"],
+                msg.get("remember_product_category", False),
+                msg.get("remember_product_labels", False),
             )
     except ValueError as error:
         _send_input_error(connection, msg, error)
@@ -1418,6 +1424,10 @@ async def websocket_create_item(
         return
     if list_record.provider != "bring":
         _fire_items_changed(hass, record.list_id)
+        if msg.get("remember_product_labels", False):
+            _fire_lists_changed(hass)
+        elif msg.get("remember_product_category", False):
+            _fire_lists_changed(hass, record.list_id)
     connection.send_result(msg["id"], {"item": record.as_dict()})
 
 
@@ -1518,6 +1528,8 @@ async def websocket_item_action_send(hass, connection, msg) -> None:
         probatio.Optional("label_ids"): [str],
         probatio.Optional("product_id"): probatio.Any(str, None),
         probatio.Optional("offer_only"): bool,
+        probatio.Optional("remember_product_category"): bool,
+        probatio.Optional("remember_product_labels"): bool,
     }
 )
 async def websocket_update_item(
@@ -1561,12 +1573,16 @@ async def websocket_update_item(
         updates["recurrence_interval"] = recurrence_interval
         updates["recurrence_unit"] = recurrence_unit
         if list_record.provider == "bring":
+            if msg.get("remember_product_category", False) or msg.get("remember_product_labels", False):
+                raise ValueError(localized_text("backend.local_shopping_target_required"))
             record = await _runtime(hass).external_lists.async_update_item(
                 msg["item_id"], **updates
             )
         else:
             record = await _runtime(hass).database.async_update_item(
-                msg["item_id"], **updates
+                msg["item_id"], **updates,
+                remember_product_category=msg.get("remember_product_category", False),
+                remember_product_labels=msg.get("remember_product_labels", False),
             )
     except ValueError as error:
         _send_input_error(connection, msg, error)
@@ -1586,6 +1602,10 @@ async def websocket_update_item(
         return
     if list_record.provider != "bring":
         _fire_items_changed(hass, record.list_id)
+        if msg.get("remember_product_labels", False):
+            _fire_lists_changed(hass)
+        elif msg.get("remember_product_category", False):
+            _fire_lists_changed(hass, record.list_id)
     connection.send_result(msg["id"], {"item": record.as_dict()})
 
 

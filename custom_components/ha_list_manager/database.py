@@ -504,6 +504,8 @@ class HaListManagerDatabase:
         recurrence_interval: int | None = None,
         recurrence_unit: str | None = None,
         offer_only: bool | object = False,
+        remember_product_category: bool = False,
+        remember_product_labels: bool = False,
     ) -> ListItemRecord:
         """Create and return a list item."""
         record = await self._async_run(
@@ -521,6 +523,8 @@ class HaListManagerDatabase:
             recurrence_interval,
             recurrence_unit,
             offer_only,
+            remember_product_category,
+            remember_product_labels,
         )
         self._fire_item_mutated(None, record)
         return record
@@ -738,6 +742,8 @@ class HaListManagerDatabase:
         recurrence_interval: int | None = None,
         recurrence_unit: str | None = None,
         offer_only: bool | object = _UNSET,
+        remember_product_category: bool = False,
+        remember_product_labels: bool = False,
     ) -> ListItemRecord:
         """Update and return a list item."""
         before = await self._async_run(self._get_item, item_id)
@@ -757,6 +763,8 @@ class HaListManagerDatabase:
             recurrence_interval,
             recurrence_unit,
             offer_only,
+            remember_product_category,
+            remember_product_labels,
         )
         self._fire_item_mutated(before, record)
         return record
@@ -3831,16 +3839,28 @@ WHERE registry_entry_id IS NOT NULL;
         recurrence_interval: int | None = None,
         recurrence_unit: str | None = None,
         offer_only: bool | object = False,
+        remember_product_category: bool = False,
+        remember_product_labels: bool = False,
     ) -> ListItemRecord:
         now = self._now()
         recurrence_interval, recurrence_unit = self._validate_recurrence(
             recurrence_interval, recurrence_unit
         )
         with self._connect() as connection:
+            if remember_product_category or remember_product_labels:
+                connection.execute("BEGIN IMMEDIATE")
             self._require_list(connection, list_id)
             kind = connection.execute("SELECT list_type FROM lists WHERE id = ?", (list_id,)).fetchone()[0]
             if offer_only and kind != "shopping":
                 raise ValueError(localized_text("backend.offers_shopping_only"))
+            if remember_product_category:
+                category_id, category = self._remember_item_product_category(
+                    connection, list_id, product_id, category_id
+                )
+            if remember_product_labels:
+                self._remember_item_product_labels(
+                    connection, list_id, product_id, label_ids
+                )
             if product_id is not None:
                 self._require_product(connection, product_id)
                 if category_id is None and category is None:
@@ -3952,11 +3972,15 @@ WHERE registry_entry_id IS NOT NULL;
         recurrence_interval: int | None = None,
         recurrence_unit: str | None = None,
         offer_only: bool | object = _UNSET,
+        remember_product_category: bool = False,
+        remember_product_labels: bool = False,
     ) -> ListItemRecord:
         recurrence_interval, recurrence_unit = self._validate_recurrence(
             recurrence_interval, recurrence_unit
         )
         with self._connect() as connection:
+            if remember_product_category or remember_product_labels:
+                connection.execute("BEGIN IMMEDIATE")
             existing = connection.execute(
                 "SELECT list_id, product_id, external_uid FROM list_items WHERE id = ?", (item_id,)
             ).fetchone()
@@ -3974,6 +3998,15 @@ WHERE registry_entry_id IS NOT NULL;
             category_id, category = self._resolve_item_category(
                 connection, existing["list_id"], category_id, category
             )
+            if remember_product_category:
+                category_id, category = self._remember_item_product_category(
+                    connection, existing["list_id"], next_product_id, category_id
+                )
+            if remember_product_labels:
+                self._remember_item_product_labels(
+                    connection, existing["list_id"], next_product_id, label_ids,
+                    item_id,
+                )
             connection.execute(
                 """
                 UPDATE list_items
@@ -4493,6 +4526,109 @@ WHERE registry_entry_id IS NOT NULL;
                 WHERE list_id = ? AND profile_id = ?""",
                 (list_id, profile_id),
             )
+
+    def _remember_item_product_labels(
+        self,
+        connection: sqlite3.Connection,
+        list_id: str,
+        product_id: str | None,
+        label_ids: list[str],
+        item_id: str | None = None,
+    ) -> None:
+        """Replace only direct product assignments editable in this list."""
+        target = connection.execute(
+            "SELECT list_type, provider FROM lists WHERE id = ?", (list_id,),
+        ).fetchone()
+        if target is None:
+            raise ListNotFoundError(list_id)
+        if target["list_type"] != "shopping" or target["provider"] != "local":
+            raise ValueError(localized_text("backend.local_shopping_target_required"))
+        if product_id is None:
+            raise ProductNotFoundError(product_id)
+        self._require_product(connection, product_id)
+        self._validate_label_ids(connection, label_ids)
+        visible_ids = self._applicable_label_ids(connection, list_id)
+        stored_ids = {
+            label.id for label in self._labels_for(
+                connection, "product_labels", "product_id", product_id
+            )
+        }
+        selected_ids = set(label_ids)
+        retained_item_ids = {
+            label.id for label in self._labels_for(
+                connection, "list_item_labels", "item_id", item_id
+            )
+        } if item_id is not None else set()
+        # Drafts can retain unavailable assignments, but cannot introduce a
+        # label from another list, a disabled scope or a shadowed definition.
+        if selected_ids - visible_ids - stored_ids - retained_item_ids:
+            raise LabelNotFoundError(localized_text("backend.label_assignment_unknown"))
+        next_ids = (stored_ids - visible_ids) | (selected_ids & visible_ids)
+        if next_ids != stored_ids:
+            self._replace_labels(
+                connection, "product_labels", "product_id", product_id,
+                sorted(next_ids),
+            )
+            connection.execute(
+                "UPDATE products SET updated_at = ? WHERE id = ?",
+                (self._now(), product_id),
+            )
+
+    def _remember_item_product_category(
+        self,
+        connection: sqlite3.Connection,
+        list_id: str,
+        product_id: str | None,
+        category_id: str | None,
+    ) -> tuple[str, str]:
+        """Store the saved item's default only in this product/list context."""
+        target = connection.execute(
+            "SELECT list_type, provider, use_global_categories, use_type_categories "
+            "FROM lists WHERE id = ?", (list_id,),
+        ).fetchone()
+        if target is None:
+            raise ListNotFoundError(list_id)
+        if target["list_type"] != "shopping" or target["provider"] != "local":
+            raise ValueError(localized_text("backend.local_shopping_target_required"))
+        if product_id is None:
+            raise ProductNotFoundError(product_id)
+        self._require_product(connection, product_id)
+        category = connection.execute(
+            "SELECT * FROM categories WHERE id = ?", (category_id,),
+        ).fetchone()
+        if category is None or not (
+            category["scope"] == "list" and category["list_id"] == list_id
+            or category["scope"] == "global" and target["use_global_categories"]
+            or category["scope"] == "list_type" and category["list_type"] == "shopping"
+            and target["use_type_categories"]
+        ):
+            raise CategoryNotFoundError(category_id)
+        local = connection.execute(
+            "SELECT * FROM categories WHERE scope = 'list' AND list_id = ? "
+            "AND name = ? COLLATE NOCASE", (list_id, category["name"]),
+        ).fetchone()
+        local_id = local["id"] if local else str(uuid4())
+        if local is None:
+            now = self._now()
+            connection.execute(
+                "INSERT INTO categories(id,name,scope,list_type,list_id,icon,color,"
+                "position,created_at,updated_at) VALUES(?,?,'list',NULL,?,?,?,?,?,?)",
+                (local_id, category["name"], list_id, category["icon"],
+                 category["color"], category["position"], now, now),
+            )
+        # Unlike category administration, this opt-in save must never move
+        # sibling entries or overwrite the product's broader defaults.
+        connection.execute(
+            "DELETE FROM product_category_assignments WHERE product_id = ? "
+            "AND category_id IN (SELECT id FROM categories "
+            "WHERE scope = 'list' AND list_id = ?)",
+            (product_id, list_id),
+        )
+        connection.execute(
+            "INSERT INTO product_category_assignments(product_id, category_id) VALUES (?, ?)",
+            (product_id, local_id),
+        )
+        return local_id, local["name"] if local else category["name"]
 
     @staticmethod
     def _resolve_item_category(
