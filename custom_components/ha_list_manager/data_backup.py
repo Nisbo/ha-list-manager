@@ -94,8 +94,13 @@ def validate(path: Path) -> dict:
                     if connection.execute('PRAGMA integrity_check').fetchone()[0] != 'ok':
                         raise BackupError(text('backup.invalid'))
                     version = int(connection.execute("SELECT value FROM schema_metadata WHERE key='schema_version'").fetchone()[0])
-                    if version != DATABASE_SCHEMA_VERSION:
+                    if version not in {1, DATABASE_SCHEMA_VERSION}:
                         raise BackupError(text('backup.version'))
+                    if version == 1 and DATABASE_SCHEMA_VERSION == 2:
+                        # Compare against the actual old shape; never migrate the
+                        # uploaded file during inspection. Setup upgrades on restore.
+                        expected.execute('DROP TABLE alexa_receipts')
+                        expected.execute('DROP TABLE alexa_inbox')
                     expected_tables = {row[0] for row in expected.execute("SELECT name FROM sqlite_master WHERE type='table'")}
                     actual_tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
                     if expected_tables != actual_tables:
@@ -109,7 +114,7 @@ def validate(path: Path) -> dict:
                         raise BackupError(text('backup.invalid'))
                     summary = {key: connection.execute(f'SELECT COUNT(*) FROM {table}').fetchone()[0] for key, table in (
                         ('lists', 'lists'), ('products', 'products'), ('inventory', 'inventory_entries'), ('items', 'list_items'))}
-                    summary.update(schema_version=DATABASE_SCHEMA_VERSION)
+                    summary.update(schema_version=version)
         return summary
     except BackupError:
         raise

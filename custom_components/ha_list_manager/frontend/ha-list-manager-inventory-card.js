@@ -154,7 +154,7 @@ function inventoryState(entry) {
   return "stock-normal";
 }
 
-const CARD_VERSION = "1.0.0b9";
+const CARD_VERSION = "1.0.0b10";
 const PICKER_RESULT_LIMIT = 100;
 const MODES = (hass = null) => ({
   add: { label: haListManagerInventoryCardText("ui.stock_in", {}, hass), icon: "mdi:package-variant-plus", color: "var(--success-color,#2e7d32)", help: haListManagerInventoryCardText("inventory.stock_in_activated", {}, hass) },

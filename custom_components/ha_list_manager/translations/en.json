@@ -468,7 +468,28 @@
     "actions_exact_rule_required": "Names containing * cannot be assigned exactly here. Use the rule editor instead.",
     "actions_source_required": "Select exactly one saved article as the source.",
     "actions_different_list_required": "Select a different target list.",
-    "actions_shopping_target_required": "Select an enabled local shopping list as the target."
+    "actions_shopping_target_required": "Select an enabled local shopping list as the target.",
+    "alexa_source_required": "Choose an Alexa list.",
+    "alexa_source_invalid": "Select an existing Alexa Devices to-do list.",
+    "alexa_source_unavailable": "The Alexa list is currently unavailable. Nothing was imported or removed.",
+    "alexa_target_required": "Choose a fixed target shopping list.",
+    "alexa_target_invalid": "Select an enabled local shopping list.",
+    "alexa_settings_invalid": "The Alexa settings are invalid. Check the entered values.",
+    "alexa_invalid_response": "The Alexa list could not be read completely. No source entries were changed.",
+    "alexa_item_invalid": "An Alexa entry contains invalid or excessively long data.",
+    "alexa_processing_failed": "The Alexa entry could not be processed.",
+    "alexa_cleanup_failed": "Imported successfully; Alexa cleanup is pending.",
+    "alexa_cleanup_changed": "The Alexa entry changed after import. Cleanup was paused to preserve the change.",
+    "alexa_settings_missing": "Save a valid Alexa connection first.",
+    "alexa_invalid_source": "The Alexa source is invalid.",
+    "alexa_invalid_cleanup": "Choose keep, complete, or delete for Alexa entries.",
+    "alexa_invalid_languages": "Choose at least one supported language for number-word recognition.",
+    "alexa_invalid_number_mapping": "Invalid number-word mapping on line {line}. Use number=expression.",
+    "alexa_invalid_unit_mapping": "Invalid unit mapping on line {line}. Use abbreviation=expression.",
+    "alexa_conflicting_number_mapping": "Conflicting number-word mapping on line {line}: the same expression maps to different numbers.",
+    "alexa_conflicting_unit_mapping": "Conflicting unit mapping on line {line}: the same expression maps to different abbreviations.",
+    "alexa_mapping_too_long": "The mapping list “{field}” is too long.",
+    "alexa_invalid_exceptions": "The exception list is invalid or contains excessively long item names."
   },
   "config_panel": {
     "backup": {
@@ -515,8 +536,8 @@
     },
     "help": {
       "legend_collapsible": "Combines reference lines, point symbols, and data series in one collapsible legend. Its state is saved per card in this browser.",
-      "monthly_due_warning": "Marks a task with a monthly repeat interval as due soon when this much time remains. Enter minutes: 60 = 1 hour, 1,440 = 1 day, 10,080 = 1 week.",
-      "nonrepeating_due_warning": "Marks a task without a repeat interval as due soon when this much time remains. Enter minutes: 60 = 1 hour, 1,440 = 1 day, 10,080 = 1 week.",
+      "monthly_due_warning": "Marks a task with a monthly repeat interval as due soon when this much time remains. Enter minutes: 60 = 1 hour, 1,440 = 1 day, 10,080 = 1 week. 0 disables the orange advance warning.",
+      "nonrepeating_due_warning": "Marks a task without a repeat interval as due soon when this much time remains. Enter minutes: 60 = 1 hour, 1,440 = 1 day, 10,080 = 1 week. 0 disables the orange advance warning.",
       "local_data_bring_sync": "All information comes from local storage. Bring! items are synced through the linked Home Assistant list.",
       "todo_category_order": "General comes first. Categories are then sorted alphabetically, by source, or by their saved position.",
       "history_independent_storage": "Permanently store selected Home Assistant states independently of Recorder.",
@@ -616,7 +637,7 @@
       "history_numeric_attribute": "Shows a numeric attribute instead of the state. Use dots to specify nested attributes.",
       "todo_item_dividers": "Shows a horizontal divider between tasks.",
       "legend_initially_collapsed": "Initial setting used until a legend state for this card has been saved in the browser.",
-      "hourly_due_warning": "Tasks with an hourly interval are marked as due soon within this time. Enter minutes: 10 = 10 minutes, 60 = 1 hour, 1,440 = 1 day.",
+      "hourly_due_warning": "Tasks with an hourly interval are marked as due soon within this time. Enter minutes: 10 = 10 minutes, 60 = 1 hour, 1,440 = 1 day. 0 disables the orange advance warning.",
       "content_enablement": "Enable or disable global content and content for specific list types directly.",
       "shopping_category_order": "General comes first. Set the manual order in category management for this list.",
       "restock_rules_only": "Automatic restocking only applies to items and groups with their own restock rule.",
@@ -727,7 +748,7 @@
       "inventory_product_suggestions": "Shows matching products from the product database while you type.",
       "central_dishes": "Central dishes can be enabled in regular shopping lists and used there as quick entries.",
       "connect_points": "Connects this entity’s data points with lines. When disabled, only the individual point symbols remain visible.",
-      "daily_interval_warning": "Tasks with a daily interval are marked as due soon within this period. Enter minutes: 60 = 1 hour, 1,440 = 1 day, 10,080 = 1 week.",
+      "daily_interval_warning": "Tasks with a daily interval are marked as due soon within this period. Enter minutes: 60 = 1 hour, 1,440 = 1 day, 10,080 = 1 week. 0 disables the orange advance warning.",
       "manual_restock_locks": "Active restock locks also apply here. With “Fixed quantity”, a successful manual transfer sets the lock again. The quantity already on the shopping list is shown for information only and is never deducted.",
       "item_chip_scopes": "Item chips are only available in shopping and inventory lists. Chips with the same name are resolved in this order: list → list type → general items.",
       "list_todo_templates": "Task templates for this to-do list only.",
@@ -852,7 +873,8 @@
       "label_grouping": "Adds a toolbar button to switch between categories and labels. An entry with multiple labels appears in each label group; all copies use the same entry. The initial view applies until a choice is saved for this card in this browser.",
       "auto_expand_search": "Temporarily opens categories and label groups with matching entries while the list is filtered by the input field. Clearing the search restores the previous open/closed state.",
       "shopping_edit_shortcuts": "Shows icon buttons for category, labels and item actions below the edit-dialog title.",
-      "todo_edit_shortcuts": "Shows quick buttons for category, labels and saving the task as a template below the edit-dialog title."
+      "todo_edit_shortcuts": "Shows quick buttons for category, labels and saving the task as a template below the edit-dialog title.",
+      "date_only_end_of_day": "Tasks without a time turn red at the next local midnight. Tasks with a time keep their exact deadline. Default: off."
     },
     "history": {
       "add_sample": "Add reading",
@@ -2215,7 +2237,8 @@
       "delete_completed_count": "{p0} completed tasks will be permanently removed.",
       "templates_for_list_one": "{count} template for this list",
       "templates_for_list_many": "{count} templates for this list",
-      "less_than_minute": "< 1 minute"
+      "less_than_minute": "< 1 minute",
+      "date_only_end_of_day": "Mark date-only tasks red after the day ends"
     },
     "shopping": {
       "show_quantity_one": "Show quantity of 1",
@@ -2605,6 +2628,140 @@
       "empty": "No matching entries.",
       "choose_categories": "Show categories as chips",
       "choose_labels": "Show labels as chips"
+    },
+    "alexa": {
+      "title": "Alexa",
+      "intro": "Imports new Alexa entries into exactly one assigned shopping list.",
+      "connection": "Connection",
+      "quantities": "Quantities",
+      "units": "Units",
+      "units_dependency": "Unit recognition requires quantity recognition in the Quantities tab. The test uses both current options, including unsaved changes.",
+      "connection_help": "Choose an existing to-do list from the HA Alexa Devices integration and a local HA List Manager shopping list. The assignment applies centrally to all devices.",
+      "enabled": "Enable Alexa input",
+      "enabled_help": "New entries are imported in the backend, even when no card is open. HA List Manager does not send shopping items to Alexa.",
+      "source": "Alexa source list",
+      "target": "Fixed target list",
+      "choose_source": "Choose an Alexa list",
+      "choose_target": "Choose a shopping list",
+      "unavailable": "Unavailable",
+      "no_sources": "No Alexa list is available. Set up Alexa Devices in this Home Assistant and check its to-do entities. Amazon credentials are not stored here.",
+      "no_targets": "Create a local shopping list first or enable an existing one. Bring, inventory, and task lists are not targets for this input.",
+      "unsaved": "Not saved yet",
+      "saved": "Settings in this tab saved. Unsaved changes in other tabs are retained.",
+      "free_items": "Without product matching, entries are imported as free shopping items. Recognized amounts and units never change fixed product package sizes. Free items are combined only when the name and quantity description match.",
+      "recognize_numbers": "Recognize number words as quantities",
+      "numbers_help": "Only matching expressions at the beginning are recognized. Without a match, the complete name is retained with quantity 1.",
+      "languages": "Languages for number words",
+      "languages_help": "Choose the shipped languages to use for recognition. Custom mappings extend their built-in rules and override the same expression. The interface language stays unchanged.",
+      "number_mappings": "Custom number-word mappings",
+      "number_mapping_help": "One mapping per line: number=expression, for example 2=two. Several expressions may map to the same number. Multi-word expressions are supported; the longest matching expression is checked first.",
+      "recognize_units": "Recognize measurement units",
+      "units_help": "Requires number-word recognition. A recognized unit after the amount is written to the quantity description; the item count then remains 1.",
+      "unit_mappings": "Custom unit mappings",
+      "unit_mapping_help": "One mapping per line: abbreviation=expression, for example g=grams or ml=milli litre. This abbreviates the unit; package sizes are not calculated and units are not converted.",
+      "exceptions": "Exceptions for complete item names",
+      "exceptions_help": "One complete item name per line, for example seven up. These names are imported without quantity or unit recognition. Matching is case-insensitive.",
+      "speaking_title": "How to phrase your requests",
+      "speaking_help": "Say the quantity first, followed by the item: “Alexa, add two cucumbers to the shopping list”. Use a configured expression. “Times” is recognized only when explicitly included in a custom mapping, for example 2=two times.",
+      "plural_help": "Use the same wording consistently, for example “cucumbers” and “two cucumbers”. Singular and plural are not normalized automatically: “cucumber” and “cucumbers” are different items.",
+      "units_example": "With a recognized unit, “five hundred grams tomatoes” becomes tomatoes, item count 1, quantity description 500 g. Without a unit, “two cucumbers” becomes cucumbers, item count 2.",
+      "processing": "Import and Alexa list",
+      "cleanup": "After successful import, in Alexa",
+      "keep": "Keep the entry",
+      "complete": "Mark the entry complete",
+      "delete": "Delete the entry",
+      "cleanup_help": "Completing or deleting happens only after successful storage in the assigned HA List Manager shopping list. If cleanup fails, cleanup is retried without increasing the saved quantity again.",
+      "delete_help": "Deletes only the successfully imported source entry from Alexa. The HA List Manager shopping item is retained. Later local changes are not sent to Alexa.",
+      "existing_help": "Entries already present when enabling the input are not imported automatically. Review them in the preview and explicitly confirm their import if needed.",
+      "preview_existing": "Review existing entries",
+      "retry_cleanup": "Retry pending processing",
+      "save_before_import": "Save changes in each affected tab before reviewing existing entries or retrying processing.",
+      "preview_title": "Existing entries preview",
+      "preview_help": "This preview changes no data. It shows the names, counts, and quantity descriptions recognized using the saved settings. Previously imported entries are not added again.",
+      "already_processed": "Already imported — will not be added again.",
+      "no_open_entries": "No open Alexa entries are available.",
+      "confirm_existing": "Import displayed entries: {count}. The saved settings also apply to cleanup of the Alexa list.",
+      "import_existing": "Import entries",
+      "processed": "Processing completed. The current result is shown below under Status.",
+      "status": "Status",
+      "disabled": "Alexa input is disabled",
+      "ready": "Alexa input is ready",
+      "waiting": "The source or target list is currently unavailable",
+      "last_checked": "Last checked",
+      "last_success": "Last successful import",
+      "not_yet": "Not yet",
+      "imported_total": "Imported entries",
+      "pending_cleanup": "Pending Alexa cleanup",
+      "push_help": "Timing depends on push updates from the Alexa Devices integration. Missing push updates can delay imports.",
+      "recent": "Show recent imports",
+      "no_recent": "No imports have been recorded yet.",
+      "cleanup_pending": "Imported; Alexa cleanup is still pending.",
+      "number_example": "1=one\n2=two\n33=thirty three\n330=three hundred thirty",
+      "unit_example": "g=grams\nl=litres\nml=millilitres\nml=milli litres",
+      "exceptions_example": "seven up\n7up",
+      "match_products": "Match names to products in the product database",
+      "match_products_help": "Optional: an exact, unambiguous product name adds that product or increases its existing shopping quantity. No match, ambiguous matches, or a recognized measurement unit create a free item. Fixed package sizes remain unchanged; amounts are never converted to package counts.",
+      "example_input": "Spoken entry",
+      "example_result": "Result with recognition and product matching enabled",
+      "example_product_input": "two Pepsi",
+      "example_product_result": "One exact Pepsi product: add or increase that product by 2. Its fixed package size stays unchanged.",
+      "example_free_input": "two cucumbers",
+      "example_free_result": "No exact product or several matches: a free “cucumbers” item with count 2.",
+      "example_unit_input": "five hundred grams rice",
+      "example_unit_result": "A free “rice” item with count 1 and quantity description 500 g, even when a rice product exists.",
+      "custom_rules": "Custom rules",
+      "number_rules": "Browse built-in number words",
+      "number_range": "{language}: numbers {min}–{max} ({count} expressions)",
+      "number_ranges": "Built-in: {ranges}",
+      "unit_rules": "Built-in units",
+      "rules_language": "Rule language",
+      "rules_language_help": "This selection only browses built-in rules; it does not change the enabled recognition languages.",
+      "rules_search": "Search number words or numbers",
+      "rules_search_button": "Search",
+      "rules_more": "Load more",
+      "rules_count": "Shown: {count} of {total}",
+      "rules_empty": "No matching rules.",
+      "rule_number": "Number",
+      "rule_unit": "Abbreviation",
+      "rule_phrase": "Recognized expression",
+      "test_title": "Test recognition",
+      "test_help": "Uses the current settings, including unsaved changes in all tabs. No items are saved, no settings are changed, and nothing is read from or sent to Amazon.",
+      "test_input": "Sample text",
+      "test_number_example": "two cucumbers",
+      "test_name": "Item name",
+      "test_quantity": "Incoming item count",
+      "test_result_quantity": "Item count afterwards",
+      "test_description": "Quantity description",
+      "test_action": "Action preview",
+      "test_product": "Matched product",
+      "test_disabled": "Product matching is disabled: the entry remains a free shopping item.",
+      "test_unit": "A measurement unit was recognized: the entry remains a free item and no package calculation is performed.",
+      "test_no_match": "No product with an exact name was found: the entry remains a free shopping item.",
+      "test_multiple_products": "Several products have the same name ({count}): the entry remains a free shopping item.",
+      "test_multiple_items": "Several matching shopping entries exist: no product entry can be selected unambiguously, so a free item is used.",
+      "test_unique_product": "Exactly one matching product was found. Its stored package size remains unchanged.",
+      "test_target_missing": "A target list is required for adding or increasing shopping items. Name and product recognition can still be tested without a target.",
+      "test_product_add": "Add a product",
+      "test_product_increase": "Increase a product quantity",
+      "test_free_add": "Add a free item",
+      "test_free_increase": "Increase a free item quantity",
+      "test": "Test",
+      "test_active": "Active",
+      "test_inactive": "Off",
+      "test_units_waiting": "Selected, but inactive without quantity recognition",
+      "test_no_languages": "No recognition language selected",
+      "test_no_target": "No target selected",
+      "test_target_unavailable": "Selected target unavailable",
+      "test_unsaved_tabs": "Using unsaved changes from: {tabs}. This test does not save these settings.",
+      "test_saved_settings": "Using the saved settings from all three configuration tabs.",
+      "test_input_disabled": "Alexa input is disabled. The test still works; real Alexa entries are not imported.",
+      "test_numbers_disabled": "Quantity recognition is off. Leading number words remain part of the item name and the item count is 1.",
+      "test_units_dependency": "Unit recognition is inactive because quantity recognition is off. Both options must be enabled to recognize an amount such as 500 g.",
+      "test_target_required": "Select a target list before adding or increasing an item",
+      "test_action_unknown": "No target action could be determined",
+      "test_inactive_options": "Inactive in this test: {features}.",
+      "test_products_short": "product matching",
+      "test_target_unavailable_help": "The selected target list is unavailable. Choose an enabled local shopping list in the Connection tab."
     }
   },
   "exceptions": {
@@ -3363,6 +3520,69 @@
     },
     "actions_shopping_target_required": {
       "message": "Select an enabled local shopping list as the target."
+    },
+    "alexa_source_required": {
+      "message": "Choose an Alexa list."
+    },
+    "alexa_source_invalid": {
+      "message": "Select an existing Alexa Devices to-do list."
+    },
+    "alexa_source_unavailable": {
+      "message": "The Alexa list is currently unavailable. Nothing was imported or removed."
+    },
+    "alexa_target_required": {
+      "message": "Choose a fixed target shopping list."
+    },
+    "alexa_target_invalid": {
+      "message": "Select an enabled local shopping list."
+    },
+    "alexa_settings_invalid": {
+      "message": "The Alexa settings are invalid. Check the entered values."
+    },
+    "alexa_invalid_response": {
+      "message": "The Alexa list could not be read completely. No source entries were changed."
+    },
+    "alexa_item_invalid": {
+      "message": "An Alexa entry contains invalid or excessively long data."
+    },
+    "alexa_processing_failed": {
+      "message": "The Alexa entry could not be processed."
+    },
+    "alexa_cleanup_failed": {
+      "message": "Imported successfully; Alexa cleanup is pending."
+    },
+    "alexa_cleanup_changed": {
+      "message": "The Alexa entry changed after import. Cleanup was paused to preserve the change."
+    },
+    "alexa_settings_missing": {
+      "message": "Save a valid Alexa connection first."
+    },
+    "alexa_invalid_source": {
+      "message": "The Alexa source is invalid."
+    },
+    "alexa_invalid_cleanup": {
+      "message": "Choose keep, complete, or delete for Alexa entries."
+    },
+    "alexa_invalid_languages": {
+      "message": "Choose at least one supported language for number-word recognition."
+    },
+    "alexa_invalid_number_mapping": {
+      "message": "Invalid number-word mapping on line {line}. Use number=expression."
+    },
+    "alexa_invalid_unit_mapping": {
+      "message": "Invalid unit mapping on line {line}. Use abbreviation=expression."
+    },
+    "alexa_conflicting_number_mapping": {
+      "message": "Conflicting number-word mapping on line {line}: the same expression maps to different numbers."
+    },
+    "alexa_conflicting_unit_mapping": {
+      "message": "Conflicting unit mapping on line {line}: the same expression maps to different abbreviations."
+    },
+    "alexa_mapping_too_long": {
+      "message": "The mapping list “{field}” is too long."
+    },
+    "alexa_invalid_exceptions": {
+      "message": "The exception list is invalid or contains excessively long item names."
     }
   }
 }

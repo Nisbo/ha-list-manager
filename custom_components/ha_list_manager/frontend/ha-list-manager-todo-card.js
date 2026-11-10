@@ -84,7 +84,7 @@ function haListManagerTodoCardTextRequest(hass, message) {
 const HA_LM_API = "ha_list_manager";
 const HA_LM_ITEMS_EVENT = "ha_list_manager_items_changed";
 const HA_LM_LISTS_EVENT = "ha_list_manager_lists_changed";
-const CARD_VERSION = "1.0.0b9";
+const CARD_VERSION = "1.0.0b10";
 
 const esc = (value) => String(value ?? "").replace(/[&<>'"]/g, (char) => ({
   "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;",
@@ -183,7 +183,7 @@ class HaListManagerTodoCard extends HTMLElement {
       show_cat_exclamation_mark: true, cat_double_sized_icon: true,
       todo_filter: "all", show_todo_filter_menu: true,
       todo_default_action: "done", todo_action_behavior: "menu",
-      todo_yellow_m: 1440, todo_yellow_d: 120, todo_yellow_h: 10, todo_yellow_s: 120,
+      todo_yellow_m: 1440, todo_yellow_d: 120, todo_yellow_h: 10, todo_yellow_s: 120, todo_date_only_end_of_day: false,
       list_reload_time: 10,
     };
   }
@@ -213,6 +213,7 @@ class HaListManagerTodoCard extends HTMLElement {
       cat_double_sized_icon: haListManagerTodoCardText("todo.large_due_category_icon", {}, hass),
       todo_filter: haListManagerTodoCardText("ui.default_filter", {}, hass), show_todo_filter_menu: haListManagerTodoCardText("ui.show_filter_button", {}, hass),
       todo_default_action: haListManagerTodoCardText("ui.default_action", {}, hass), todo_action_behavior: haListManagerTodoCardText("todo.action_box_behavior", {}, hass),
+      todo_date_only_end_of_day: haListManagerTodoCardText("todo.date_only_end_of_day", {}, hass),
       todo_yellow_m: haListManagerTodoCardText("ui.monthly_interval_warning", {}, hass), todo_yellow_d: haListManagerTodoCardText("ui.warning_daily_intervals", {}, hass),
       todo_yellow_h: haListManagerTodoCardText("todo.hourly_warning_lead_time", {}, hass), todo_yellow_s: haListManagerTodoCardText("ui.warning_nonrecurring_tasks", {}, hass),
       list_reload_time: haListManagerTodoCardText("ui.refresh_due_display", {}, hass),
@@ -294,10 +295,11 @@ class HaListManagerTodoCard extends HTMLElement {
           { name: "chips_position", selector: dropdown([{ value: "auto", label: haListManagerTodoCardText("ui.automatic", {}, hass) }, { value: "bottom", label: haListManagerTodoCardText("ui.bottom", {}, hass) }, { value: "right", label: haListManagerTodoCardText("ui.right", {}, hass) }]), default: "auto" },
         ] },
         { type: "expandable", label: haListManagerTodoCardText("ui.advance_warning_times", {}, hass), icon: "mdi:alert-outline", schema: [
-          { name: "todo_yellow_m", selector: { number: { min: 1, max: 300000, mode: "box", unit_of_measurement: "min" } }, default: 1440 },
-          { name: "todo_yellow_d", selector: { number: { min: 1, max: 300000, mode: "box", unit_of_measurement: "min" } }, default: 120 },
-          { name: "todo_yellow_h", selector: { number: { min: 1, max: 300000, mode: "box", unit_of_measurement: "min" } }, default: 10 },
-          { name: "todo_yellow_s", selector: { number: { min: 1, max: 300000, mode: "box", unit_of_measurement: "min" } }, default: 120 },
+          { name: "todo_date_only_end_of_day", selector: { boolean: {} }, default: false },
+          { name: "todo_yellow_m", selector: { number: { min: 0, max: 300000, mode: "box", unit_of_measurement: "min" } }, default: 1440 },
+          { name: "todo_yellow_d", selector: { number: { min: 0, max: 300000, mode: "box", unit_of_measurement: "min" } }, default: 120 },
+          { name: "todo_yellow_h", selector: { number: { min: 0, max: 300000, mode: "box", unit_of_measurement: "min" } }, default: 10 },
+          { name: "todo_yellow_s", selector: { number: { min: 0, max: 300000, mode: "box", unit_of_measurement: "min" } }, default: 120 },
           { name: "list_reload_time", selector: { number: { min: 1, max: 3600, mode: "box", unit_of_measurement: "s" } }, default: 10 },
         ] },
       ],
@@ -354,6 +356,7 @@ class HaListManagerTodoCard extends HTMLElement {
         cat_double_sized_icon: haListManagerTodoCardText("help.large_due_category_icon", {}, hass),
         todo_default_action: haListManagerTodoCardText("help.default_chip_action", {}, hass),
         todo_action_behavior: haListManagerTodoCardText("help.chip_click_actions", {}, hass),
+        todo_date_only_end_of_day: haListManagerTodoCardText("help.date_only_end_of_day", {}, hass),
         todo_yellow_m: haListManagerTodoCardText("help.monthly_due_warning", {}, hass),
         todo_yellow_d: haListManagerTodoCardText("help.daily_interval_warning", {}, hass),
         todo_yellow_h: haListManagerTodoCardText("help.hourly_due_warning", {}, hass),
@@ -375,6 +378,12 @@ class HaListManagerTodoCard extends HTMLElement {
     this._config.item_divider_after_spacing = normalizeAppearanceNumber(this._config.item_divider_after_spacing, 10, 0, 32);
     this._config.item_font_size = normalizeAppearanceNumber(this._config.item_font_size, 16, 12, 24);
     this._config.category_font_scale = normalizeAppearanceNumber(this._config.category_font_scale, 110, 80, 160);
+    for (const [key, fallback] of Object.entries({ todo_yellow_m: 1440, todo_yellow_d: 120, todo_yellow_h: 10, todo_yellow_s: 120 })) {
+      const value = this._config[key];
+      const minutes = Number(value);
+      this._config[key] = ["number", "string"].includes(typeof value) && String(value).trim() !== "" && Number.isFinite(minutes) && minutes >= 0 ? minutes : fallback;
+    }
+    this._config.todo_date_only_end_of_day = this._config.todo_date_only_end_of_day === true;
     if (!["disabled", "categories", "labels"].includes(this._config.label_grouping)) this._config.label_grouping = "disabled";
     if (!["card_and_large", "card_only", "large_only"].includes(this._config.content_display)) this._config.content_display = "card_and_large";
     if (this._expandedView && this._config.content_display === "card_only") this._setExpandedView(false);
@@ -720,14 +729,35 @@ class HaListManagerTodoCard extends HTMLElement {
     return null;
   }
   _due(item) { if (!item?.due_at) return null; const date = new Date(item.due_at); return Number.isNaN(date.getTime()) ? null : date; }
+  _calendarDue(item) {
+    const value = String(item?.due_at || "");
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return this._due(item);
+    const [year, month, day] = value.split("-").map(Number);
+    return new Date(year, month - 1, day);
+  }
+  _warningDue(item) {
+    const due = this._calendarDue(item);
+    if (due && this._config.todo_date_only_end_of_day && /^\d{4}-\d{2}-\d{2}$/.test(String(item?.due_at))) {
+      // Shift a calendar day, not 24 hours: local midnight can cross DST.
+      due.setDate(due.getDate() + 1);
+    }
+    return due;
+  }
   _dateOnly(item) { return Boolean(item?.due_at && !String(item.due_at).includes("T")); }
   _startToday() { const d = new Date(); d.setHours(0, 0, 0, 0); return d; }
   _isDue(item) { const due = this._due(item); if (!due || item.completed) return false; return this._dateOnly(item) ? due < new Date(this._startToday().getTime() + 86400000) : due <= new Date(); }
   _isOverdue(item) { const due = this._due(item); return Boolean(due && !item.completed && due < this._startToday()); }
   _warningMinutes(item) { const interval = this._interval(item); return Number(interval ? this._config[`todo_yellow_${interval.unit.toLowerCase()}`] : this._config.todo_yellow_s) || 0; }
-  _status(item) { const due = this._due(item); if (!due || item.completed) return ""; const minutes = (due.getTime() - Date.now()) / 60000; if (this._isDue(item)) return "overdue"; if (minutes <= this._warningMinutes(item)) return "soon"; return "future"; }
+  _status(item) {
+    const due = this._warningDue(item);
+    if (!due || item.completed) return "";
+    const minutes = (due.getTime() - Date.now()) / 60000;
+    if (minutes <= 0) return "overdue";
+    const warning = this._warningMinutes(item);
+    return warning > 0 && minutes <= warning ? "soon" : "future";
+  }
   _formatDue(item) {
-    const due = this._due(item); if (!due) return "";
+    const due = this._calendarDue(item); if (!due) return "";
     const options = this._dateOnly(item) ? { weekday: "short", day: "2-digit", month: "2-digit", year: "numeric" } : { weekday: "short", day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" };
     return new Intl.DateTimeFormat(haListManagerTodoCardTextLocale(this._hass), options).format(due);
   }

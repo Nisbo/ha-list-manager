@@ -468,7 +468,28 @@
     "actions_exact_rule_required": "Für Namen mit * kann hier keine genaue Zuordnung erstellt werden. Verwende dafür die Regelverwaltung.",
     "actions_source_required": "Wähle genau einen gespeicherten Artikel als Quelle.",
     "actions_different_list_required": "Wähle eine andere Zielliste.",
-    "actions_shopping_target_required": "Wähle eine aktive lokale Einkaufsliste als Ziel."
+    "actions_shopping_target_required": "Wähle eine aktive lokale Einkaufsliste als Ziel.",
+    "alexa_source_required": "Wähle eine Alexa-Liste.",
+    "alexa_source_invalid": "Wähle eine vorhandene To-do-Liste aus Alexa Devices.",
+    "alexa_source_unavailable": "Die Alexa-Liste ist derzeit nicht verfügbar. Es wurde nichts übernommen oder entfernt.",
+    "alexa_target_required": "Wähle eine feste Einkaufsliste als Ziel.",
+    "alexa_target_invalid": "Wähle eine aktivierte lokale Einkaufsliste.",
+    "alexa_settings_invalid": "Die Alexa-Einstellungen sind ungültig. Prüfe die Eingaben.",
+    "alexa_invalid_response": "Die Alexa-Liste konnte nicht vollständig gelesen werden. Es wurden keine Quelleinträge geändert.",
+    "alexa_item_invalid": "Ein Alexa-Eintrag enthält ungültige oder zu lange Daten.",
+    "alexa_processing_failed": "Der Alexa-Eintrag konnte nicht verarbeitet werden.",
+    "alexa_cleanup_failed": "Erfolgreich übernommen; die Alexa-Bereinigung steht noch aus.",
+    "alexa_cleanup_changed": "Der Alexa-Eintrag wurde nach der Übernahme geändert. Die Bereinigung wurde zum Schutz dieser Änderung angehalten.",
+    "alexa_settings_missing": "Speichere zuerst eine gültige Alexa-Verbindung.",
+    "alexa_invalid_source": "Die Alexa-Quelle ist ungültig.",
+    "alexa_invalid_cleanup": "Wähle Behalten, Abhaken oder Löschen für die Alexa-Einträge.",
+    "alexa_invalid_languages": "Wähle mindestens eine unterstützte Sprache für die Zahlwort-Erkennung.",
+    "alexa_invalid_number_mapping": "Ungültige Zahlwort-Zuordnung in Zeile {line}. Verwende Zahl=Ausdruck.",
+    "alexa_invalid_unit_mapping": "Ungültige Einheiten-Zuordnung in Zeile {line}. Verwende Kürzel=Ausdruck.",
+    "alexa_conflicting_number_mapping": "Widersprüchliche Zahlwort-Zuordnung in Zeile {line}: Derselbe Ausdruck ist verschiedenen Zahlen zugeordnet.",
+    "alexa_conflicting_unit_mapping": "Widersprüchliche Einheiten-Zuordnung in Zeile {line}: Derselbe Ausdruck ist verschiedenen Kürzeln zugeordnet.",
+    "alexa_mapping_too_long": "Die Zuordnungsliste „{field}“ ist zu lang.",
+    "alexa_invalid_exceptions": "Die Ausnahmeliste ist ungültig oder enthält zu lange Artikelnamen."
   },
   "config_panel": {
     "backup": {
@@ -515,8 +536,8 @@
     },
     "help": {
       "legend_collapsible": "Fasst Referenzlinien, Punktsymbole und Datenreihen in einer gemeinsam aufklappbaren Legende zusammen. Der Zustand wird pro Karte in diesem Browser gespeichert.",
-      "monthly_due_warning": "Ab diesem Abstand wird eine Aufgabe mit Monatsintervall als bald fällig markiert. Eingabe in Minuten: 60 = 1 Stunde, 1.440 = 1 Tag, 10.080 = 1 Woche.",
-      "nonrepeating_due_warning": "Ab diesem Abstand wird eine Aufgabe ohne Wiederholungsintervall als bald fällig markiert. Eingabe in Minuten: 60 = 1 Stunde, 1.440 = 1 Tag, 10.080 = 1 Woche.",
+      "monthly_due_warning": "Ab diesem Abstand wird eine Aufgabe mit Monatsintervall als bald fällig markiert. Eingabe in Minuten: 60 = 1 Stunde, 1.440 = 1 Tag, 10.080 = 1 Woche. 0 deaktiviert die orange Vorwarnung.",
+      "nonrepeating_due_warning": "Ab diesem Abstand wird eine Aufgabe ohne Wiederholungsintervall als bald fällig markiert. Eingabe in Minuten: 60 = 1 Stunde, 1.440 = 1 Tag, 10.080 = 1 Woche. 0 deaktiviert die orange Vorwarnung.",
       "local_data_bring_sync": "Alle Angaben stammen aus dem lokalen Datenspeicher. Bring!-Einträge werden über die verknüpfte Home-Assistant-Liste synchronisiert.",
       "todo_category_order": "Allgemein steht zuerst. Danach werden Kategorien alphabetisch, nach Herkunft oder nach ihrer gespeicherten Position sortiert.",
       "history_independent_storage": "Ausgewählte Home-Assistant-Zustände dauerhaft und unabhängig vom Recorder speichern.",
@@ -616,7 +637,7 @@
       "history_numeric_attribute": "Zeigt statt des Zustands ein numerisches Attribut an. Verschachtelte Attribute können mit Punkten angegeben werden.",
       "todo_item_dividers": "Zeigt zwischen den Aufgaben eine horizontale Trennlinie an.",
       "legend_initially_collapsed": "Anfangsvorgabe, solange für diese Karte noch kein Legendenzustand im Browser gespeichert wurde.",
-      "hourly_due_warning": "Ab diesem Abstand wird eine Aufgabe mit Stundenintervall als bald fällig markiert. Eingabe in Minuten: 10 = 10 Minuten, 60 = 1 Stunde, 1.440 = 1 Tag.",
+      "hourly_due_warning": "Ab diesem Abstand wird eine Aufgabe mit Stundenintervall als bald fällig markiert. Eingabe in Minuten: 10 = 10 Minuten, 60 = 1 Stunde, 1.440 = 1 Tag. 0 deaktiviert die orange Vorwarnung.",
       "content_enablement": "Aktiviere oder deaktiviere globale und listentypbezogene Inhalte direkt.",
       "shopping_category_order": "Allgemein steht zuerst. Die manuelle Reihenfolge wird in der Kategorienverwaltung für diese Liste festgelegt.",
       "restock_rules_only": "Automatik greift nur bei Artikeln und Gruppen mit eigener Nachbestellregel.",
@@ -727,7 +748,7 @@
       "inventory_product_suggestions": "Zeigt während der Eingabe passende Produkte aus der Produktdatenbank an.",
       "central_dishes": "Zentrale Gerichte können in normalen Einkaufslisten aktiviert und dort als Schnelleingabe verwendet werden.",
       "connect_points": "Verbindet die Messpunkte dieser Entität mit Linien. Ausgeschaltet bleiben nur die einzelnen Punktsymbole sichtbar.",
-      "daily_interval_warning": "Ab diesem Abstand wird eine Aufgabe mit Tagesintervall als bald fällig markiert. Eingabe in Minuten: 60 = 1 Stunde, 1.440 = 1 Tag, 10.080 = 1 Woche.",
+      "daily_interval_warning": "Ab diesem Abstand wird eine Aufgabe mit Tagesintervall als bald fällig markiert. Eingabe in Minuten: 60 = 1 Stunde, 1.440 = 1 Tag, 10.080 = 1 Woche. 0 deaktiviert die orange Vorwarnung.",
       "manual_restock_locks": "Aktive Nachbestellsperren gelten auch hier. Bei „Feste Menge“ setzt eine erfolgreiche manuelle Übertragung die Sperre erneut. Bereits offene Einkaufsmenge dient nur zur Information und wird niemals abgezogen.",
       "item_chip_scopes": "Artikel-Chips stehen nur in Einkaufs- und Inventarlisten bereit. Gleichnamige Chips werden nach Liste → Listentyp → allgemeine Artikel aufgelöst.",
       "list_todo_templates": "Aufgabenvorlagen nur für diese To-do-Liste.",
@@ -852,7 +873,8 @@
       "label_grouping": "Ergänzt einen Button in der Optionsleiste zum Wechseln zwischen Kategorien und Labels. Ein Eintrag mit mehreren Labels erscheint in jeder Label-Gruppe; alle Ansichten verwenden denselben Eintrag. Die Startansicht gilt, bis für diese Karte in diesem Browser eine Auswahl gespeichert wurde.",
       "auto_expand_search": "Öffnet Kategorien und Labelgruppen mit Treffern vorübergehend, wenn das Eingabefeld die Liste filtert. Nach dem Leeren der Suche gilt wieder der vorherige Auf-/Zuklappzustand.",
       "shopping_edit_shortcuts": "Zeigt unter dem Titel des Bearbeitungsdialogs Symbolbuttons für Kategorie, Labels und Artikelaktionen.",
-      "todo_edit_shortcuts": "Zeigt Schnellbuttons für Kategorie, Labels und das Speichern als Vorlage unter dem Titel im Bearbeitungsdialog."
+      "todo_edit_shortcuts": "Zeigt Schnellbuttons für Kategorie, Labels und das Speichern als Vorlage unter dem Titel im Bearbeitungsdialog.",
+      "date_only_end_of_day": "Aufgaben ohne Uhrzeit werden ab dem nächsten lokalen Tagesbeginn rot markiert. Termine mit Uhrzeit gelten weiterhin zum angegebenen Zeitpunkt. Standard: aus."
     },
     "history": {
       "add_sample": "Messwert ergänzen",
@@ -2215,7 +2237,8 @@
       "delete_completed_count": "{p0} erledigte Aufgaben werden dauerhaft entfernt.",
       "templates_for_list_one": "{count} Vorlage für diese Liste",
       "templates_for_list_many": "{count} Vorlagen für diese Liste",
-      "less_than_minute": "< 1 Minute"
+      "less_than_minute": "< 1 Minute",
+      "date_only_end_of_day": "Aufgaben ohne Uhrzeit erst nach Tagesende rot markieren"
     },
     "shopping": {
       "show_quantity_one": "Anzahl 1 anzeigen",
@@ -2605,6 +2628,140 @@
       "empty": "Keine passenden Einträge.",
       "choose_categories": "Kategorien als Chips anzeigen",
       "choose_labels": "Labels als Chips anzeigen"
+    },
+    "alexa": {
+      "title": "Alexa",
+      "intro": "Übernimmt neue Alexa-Einträge in genau eine fest zugeordnete Einkaufsliste.",
+      "connection": "Verbindung",
+      "quantities": "Mengen",
+      "units": "Einheiten",
+      "units_dependency": "Die Einheitenerkennung benötigt die Mengenerkennung im Tab Mengen. Der Test verwendet beide aktuellen Optionen, einschließlich ungespeicherter Änderungen.",
+      "connection_help": "Wähle eine vorhandene To-do-Liste der HA-Integration Alexa Devices und eine lokale Einkaufsliste aus HA List Manager. Die Zuordnung gilt zentral für alle Geräte.",
+      "enabled": "Alexa-Eingang aktivieren",
+      "enabled_help": "Neue Einträge werden im Backend übernommen, auch wenn keine Karte geöffnet ist. HA List Manager sendet keine Einkaufsartikel an Alexa.",
+      "source": "Alexa-Quellliste",
+      "target": "Feste Zielliste",
+      "choose_source": "Alexa-Liste auswählen",
+      "choose_target": "Einkaufsliste auswählen",
+      "unavailable": "Nicht verfügbar",
+      "no_sources": "Keine Alexa-Liste verfügbar. Richte Alexa Devices in diesem Home Assistant ein und prüfe dort die To-do-Entitäten. Hier werden keine Amazon-Zugangsdaten hinterlegt.",
+      "no_targets": "Lege zuerst eine lokale Einkaufsliste an oder aktiviere eine vorhandene Liste. Bring-, Inventar- und Aufgabenlisten sind keine Ziele für diesen Eingang.",
+      "unsaved": "Noch nicht gespeichert",
+      "saved": "Einstellungen dieses Tabs gespeichert. Ungespeicherte Änderungen in anderen Tabs bleiben erhalten.",
+      "free_items": "Ohne Produktabgleich werden Einträge als freie Einkaufsartikel übernommen. Erkannte Mengen und Einheiten ändern keine festen Packungsgrößen am Produkt. Freie Artikel werden nur bei gleichem Namen und gleicher Mengenbeschreibung zusammengefasst.",
+      "recognize_numbers": "Zahlwörter als Anzahl erkennen",
+      "numbers_help": "Nur passende Ausdrücke am Anfang werden erkannt. Ohne Treffer bleibt der vollständige Name mit Anzahl 1 erhalten.",
+      "languages": "Sprachen für Zahlwörter",
+      "languages_help": "Wähle die mitgelieferten Sprachen für die Erkennung. Eigene Zuordnungen ergänzen die enthaltenen Regeln und überschreiben denselben Ausdruck. Die Sprache der Oberfläche bleibt unverändert.",
+      "number_mappings": "Eigene Zahlwort-Zuordnungen",
+      "number_mapping_help": "Eine Zuordnung pro Zeile: Zahl=Ausdruck, zum Beispiel 2=zwei. Mehrere Ausdrücke für dieselbe Zahl sind erlaubt. Mehrteilige Ausdrücke werden unterstützt; der längste passende Ausdruck wird zuerst geprüft.",
+      "recognize_units": "Maßeinheiten erkennen",
+      "units_help": "Benötigt die Zahlwort-Erkennung. Eine erkannte Einheit nach der Menge wird in die Mengenbeschreibung geschrieben; die Artikelanzahl bleibt dann 1.",
+      "unit_mappings": "Eigene Einheiten-Zuordnungen",
+      "unit_mapping_help": "Eine Zuordnung pro Zeile: Kürzel=Ausdruck, zum Beispiel g=gramm oder ml=milli liter. Dies kürzt die Einheit ab; es werden keine Packungsgrößen berechnet oder Einheiten umgerechnet.",
+      "exceptions": "Ausnahmen für vollständige Artikelnamen",
+      "exceptions_help": "Ein vollständiger Artikelname pro Zeile, zum Beispiel sieben up. Diese Namen werden ohne Mengen- oder Einheitenerkennung übernommen. Groß- und Kleinschreibung spielt keine Rolle.",
+      "speaking_title": "So kannst du sprechen",
+      "speaking_help": "Sprich zuerst die Anzahl und danach den Artikel: „Alexa, setze zwei Gurken auf die Einkaufsliste“. Verwende einen hinterlegten Ausdruck. „Mal“ wird nur erkannt, wenn es ausdrücklich in einer eigenen Zuordnung steht, zum Beispiel 2=zwei mal.",
+      "plural_help": "Verwende möglichst immer dieselbe Bezeichnung, zum Beispiel „Gurken“ und „zwei Gurken“. Singular und Plural werden nicht automatisch vereinheitlicht: „Gurke“ und „Gurken“ sind unterschiedliche Artikel.",
+      "units_example": "Mit erkannter Einheit wird zum Beispiel „fünfhundert Gramm Tomaten“ zu Tomaten, Anzahl 1, Mengenbeschreibung 500 g. Ohne Einheit wird „zwei Gurken“ zu Gurken, Anzahl 2.",
+      "processing": "Übernahme und Alexa-Liste",
+      "cleanup": "Nach erfolgreicher Übernahme bei Alexa",
+      "keep": "Eintrag behalten",
+      "complete": "Eintrag abhaken",
+      "delete": "Eintrag löschen",
+      "cleanup_help": "Erledigen oder Löschen erfolgt erst nach erfolgreichem Speichern in der zugeordneten Einkaufsliste in HA List Manager. Schlägt die Bereinigung fehl, wird sie wiederholt, ohne die gespeicherte Anzahl erneut zu erhöhen.",
+      "delete_help": "Löscht nur den erfolgreich übernommenen Quelleintrag aus Alexa. Der Einkaufsartikel in HA List Manager bleibt erhalten. Spätere lokale Änderungen werden nicht an Alexa gesendet.",
+      "existing_help": "Beim Aktivieren werden bereits vorhandene Einträge nicht automatisch übernommen. Prüfe sie bei Bedarf in der Vorschau und bestätige die Übernahme ausdrücklich.",
+      "preview_existing": "Vorhandene Einträge prüfen",
+      "retry_cleanup": "Ausstehende Verarbeitung erneut versuchen",
+      "save_before_import": "Speichere Änderungen in jedem betroffenen Tab, bevor du vorhandene Einträge prüfst oder die Verarbeitung wiederholst.",
+      "preview_title": "Vorschau vorhandener Einträge",
+      "preview_help": "Diese Vorschau verändert keine Daten. Gezeigt werden die erkannten Namen, Anzahlen und Mengenbeschreibungen aus den gespeicherten Einstellungen. Bereits übernommene Einträge werden nicht nochmals hinzugefügt.",
+      "already_processed": "Bereits übernommen – wird nicht erneut hinzugefügt.",
+      "no_open_entries": "Keine offenen Alexa-Einträge vorhanden.",
+      "confirm_existing": "Angezeigte Einträge übernehmen: {count}. Die gespeicherten Einstellungen gelten auch für die Bereinigung der Alexa-Liste.",
+      "import_existing": "Einträge übernehmen",
+      "processed": "Verarbeitung abgeschlossen. Den aktuellen Stand findest du unten unter Status.",
+      "status": "Status",
+      "disabled": "Alexa-Eingang ist ausgeschaltet",
+      "ready": "Alexa-Eingang ist bereit",
+      "waiting": "Quelle oder Zielliste ist derzeit nicht verfügbar",
+      "last_checked": "Zuletzt geprüft",
+      "last_success": "Letzte erfolgreiche Übernahme",
+      "not_yet": "Noch nicht erfolgt",
+      "imported_total": "Übernommene Einträge",
+      "pending_cleanup": "Ausstehende Alexa-Bereinigungen",
+      "push_help": "Die Geschwindigkeit hängt von den Push-Meldungen der Integration Alexa Devices ab. Fehlende Push-Meldungen können die Übernahme verzögern.",
+      "recent": "Letzte Übernahmen anzeigen",
+      "no_recent": "Bisher keine Übernahme protokolliert.",
+      "cleanup_pending": "Übernommen; Alexa-Bereinigung steht noch aus.",
+      "number_example": "1=eins\n2=zwei\n33=dreiunddreißig\n330=drei hundert dreißig",
+      "unit_example": "g=gramm\nl=liter\nml=milliliter\nml=milli liter",
+      "exceptions_example": "sieben up\n7up",
+      "match_products": "Namen mit Produkten aus der Produktdatenbank abgleichen",
+      "match_products_help": "Optional: Ein exakt und eindeutig passender Produktname fügt dieses Produkt hinzu oder erhöht dessen vorhandene Einkaufsmenge. Ohne Treffer, bei mehrdeutigen Treffern oder einer erkannten Maßeinheit entsteht ein freier Artikel. Feste Packungsgrößen bleiben erhalten; Mengen werden nicht in Packungsanzahlen umgerechnet.",
+      "example_input": "Gesprochener Eintrag",
+      "example_result": "Ergebnis mit aktiver Erkennung und Produktabgleich",
+      "example_product_input": "zwei Pepsi",
+      "example_product_result": "Ein exakt passendes Pepsi-Produkt: Dieses Produkt hinzufügen oder um 2 erhöhen. Seine feste Packungsgröße bleibt erhalten.",
+      "example_free_input": "zwei Gurken",
+      "example_free_result": "Kein exakt passendes Produkt oder mehrere Treffer: ein freier Artikel „Gurken“ mit Anzahl 2.",
+      "example_unit_input": "fünfhundert Gramm Reis",
+      "example_unit_result": "Ein freier Artikel „Reis“ mit Anzahl 1 und Mengenbeschreibung 500 g, auch wenn ein Reis-Produkt existiert.",
+      "custom_rules": "Eigene Regeln",
+      "number_rules": "Mitgelieferte Zahlwörter ansehen",
+      "number_range": "{language}: Zahlen {min}–{max} ({count} Ausdrücke)",
+      "number_ranges": "Mitgeliefert: {ranges}",
+      "unit_rules": "Mitgelieferte Einheiten",
+      "rules_language": "Sprache der Regeln",
+      "rules_language_help": "Diese Auswahl zeigt nur die mitgelieferten Regeln. Die aktivierten Erkennungssprachen werden dadurch nicht geändert.",
+      "rules_search": "Zahlwörter oder Zahlen suchen",
+      "rules_search_button": "Suchen",
+      "rules_more": "Weitere laden",
+      "rules_count": "Angezeigt: {count} von {total}",
+      "rules_empty": "Keine passenden Regeln.",
+      "rule_number": "Zahl",
+      "rule_unit": "Kürzel",
+      "rule_phrase": "Erkannter Ausdruck",
+      "test_title": "Erkennung testen",
+      "test_help": "Verwendet die aktuellen Einstellungen, einschließlich ungespeicherter Änderungen in allen Tabs. Es werden keine Artikel gespeichert, keine Einstellungen geändert und keine Daten von Amazon gelesen oder dorthin gesendet.",
+      "test_input": "Beispieltext",
+      "test_number_example": "zwei Gurken",
+      "test_name": "Artikelname",
+      "test_quantity": "Zu übernehmende Anzahl",
+      "test_result_quantity": "Anzahl danach",
+      "test_description": "Mengenbeschreibung",
+      "test_action": "Vorschau der Aktion",
+      "test_product": "Passendes Produkt",
+      "test_disabled": "Der Produktabgleich ist ausgeschaltet: Der Eintrag bleibt ein freier Einkaufsartikel.",
+      "test_unit": "Eine Maßeinheit wurde erkannt: Der Eintrag bleibt frei und es wird keine Packungsanzahl berechnet.",
+      "test_no_match": "Kein Produkt mit exakt passendem Namen gefunden: Der Eintrag bleibt ein freier Einkaufsartikel.",
+      "test_multiple_products": "Mehrere Produkte haben denselben Namen ({count}): Der Eintrag bleibt ein freier Einkaufsartikel.",
+      "test_multiple_items": "Mehrere passende Einkaufseinträge sind vorhanden: Eine eindeutige Produktzuordnung ist nicht möglich, daher wird ein freier Artikel verwendet.",
+      "test_unique_product": "Genau ein passendes Produkt gefunden. Seine gespeicherte Packungsgröße bleibt unverändert.",
+      "test_target_missing": "Zum Hinzufügen oder Erhöhen von Einkaufsartikeln ist eine Zielliste erforderlich. Namen und Produkte lassen sich auch ohne Zielliste erkennen und testen.",
+      "test_product_add": "Produkt hinzufügen",
+      "test_product_increase": "Produktmenge erhöhen",
+      "test_free_add": "Freien Artikel hinzufügen",
+      "test_free_increase": "Anzahl eines freien Artikels erhöhen",
+      "test": "Test",
+      "test_active": "Aktiv",
+      "test_inactive": "Aus",
+      "test_units_waiting": "Ausgewählt, aber ohne Mengenerkennung inaktiv",
+      "test_no_languages": "Keine Erkennungssprache ausgewählt",
+      "test_no_target": "Keine Zielliste ausgewählt",
+      "test_target_unavailable": "Ausgewählte Zielliste nicht verfügbar",
+      "test_unsaved_tabs": "Verwendet ungespeicherte Änderungen aus: {tabs}. Dieser Test speichert diese Einstellungen nicht.",
+      "test_saved_settings": "Verwendet die gespeicherten Einstellungen aus allen drei Konfigurationstabs.",
+      "test_input_disabled": "Der Alexa-Eingang ist ausgeschaltet. Der Test funktioniert weiterhin; echte Alexa-Einträge werden nicht übernommen.",
+      "test_numbers_disabled": "Die Mengenerkennung ist aus. Führende Zahlwörter bleiben im Artikelnamen und die Anzahl ist 1.",
+      "test_units_dependency": "Die Einheitenerkennung ist inaktiv, weil die Mengenerkennung ausgeschaltet ist. Für eine Menge wie 500 g müssen beide Optionen aktiv sein.",
+      "test_target_required": "Vor dem Hinzufügen oder Erhöhen eine Zielliste auswählen",
+      "test_action_unknown": "Keine Zielaktion ermittelbar",
+      "test_inactive_options": "In diesem Test inaktiv: {features}.",
+      "test_products_short": "Produktabgleich",
+      "test_target_unavailable_help": "Die ausgewählte Zielliste ist nicht verfügbar. Wähle im Tab Verbindung eine aktive lokale Einkaufsliste."
     }
   },
   "exceptions": {
@@ -3363,6 +3520,69 @@
     },
     "actions_shopping_target_required": {
       "message": "Wähle eine aktive lokale Einkaufsliste als Ziel."
+    },
+    "alexa_source_required": {
+      "message": "Wähle eine Alexa-Liste."
+    },
+    "alexa_source_invalid": {
+      "message": "Wähle eine vorhandene To-do-Liste aus Alexa Devices."
+    },
+    "alexa_source_unavailable": {
+      "message": "Die Alexa-Liste ist derzeit nicht verfügbar. Es wurde nichts übernommen oder entfernt."
+    },
+    "alexa_target_required": {
+      "message": "Wähle eine feste Einkaufsliste als Ziel."
+    },
+    "alexa_target_invalid": {
+      "message": "Wähle eine aktivierte lokale Einkaufsliste."
+    },
+    "alexa_settings_invalid": {
+      "message": "Die Alexa-Einstellungen sind ungültig. Prüfe die Eingaben."
+    },
+    "alexa_invalid_response": {
+      "message": "Die Alexa-Liste konnte nicht vollständig gelesen werden. Es wurden keine Quelleinträge geändert."
+    },
+    "alexa_item_invalid": {
+      "message": "Ein Alexa-Eintrag enthält ungültige oder zu lange Daten."
+    },
+    "alexa_processing_failed": {
+      "message": "Der Alexa-Eintrag konnte nicht verarbeitet werden."
+    },
+    "alexa_cleanup_failed": {
+      "message": "Erfolgreich übernommen; die Alexa-Bereinigung steht noch aus."
+    },
+    "alexa_cleanup_changed": {
+      "message": "Der Alexa-Eintrag wurde nach der Übernahme geändert. Die Bereinigung wurde zum Schutz dieser Änderung angehalten."
+    },
+    "alexa_settings_missing": {
+      "message": "Speichere zuerst eine gültige Alexa-Verbindung."
+    },
+    "alexa_invalid_source": {
+      "message": "Die Alexa-Quelle ist ungültig."
+    },
+    "alexa_invalid_cleanup": {
+      "message": "Wähle Behalten, Abhaken oder Löschen für die Alexa-Einträge."
+    },
+    "alexa_invalid_languages": {
+      "message": "Wähle mindestens eine unterstützte Sprache für die Zahlwort-Erkennung."
+    },
+    "alexa_invalid_number_mapping": {
+      "message": "Ungültige Zahlwort-Zuordnung in Zeile {line}. Verwende Zahl=Ausdruck."
+    },
+    "alexa_invalid_unit_mapping": {
+      "message": "Ungültige Einheiten-Zuordnung in Zeile {line}. Verwende Kürzel=Ausdruck."
+    },
+    "alexa_conflicting_number_mapping": {
+      "message": "Widersprüchliche Zahlwort-Zuordnung in Zeile {line}: Derselbe Ausdruck ist verschiedenen Zahlen zugeordnet."
+    },
+    "alexa_conflicting_unit_mapping": {
+      "message": "Widersprüchliche Einheiten-Zuordnung in Zeile {line}: Derselbe Ausdruck ist verschiedenen Kürzeln zugeordnet."
+    },
+    "alexa_mapping_too_long": {
+      "message": "Die Zuordnungsliste „{field}“ ist zu lang."
+    },
+    "alexa_invalid_exceptions": {
+      "message": "Die Ausnahmeliste ist ungültig oder enthält zu lange Artikelnamen."
     }
   }
 }

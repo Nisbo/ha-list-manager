@@ -9,6 +9,7 @@ from homeassistant.config_entries import ConfigEntry
 from .database import HaListManagerDatabase
 
 if TYPE_CHECKING:
+    from .alexa import AlexaInboxManager
     from .entity_history import EntityHistoryManager
     from .external_lists import ExternalListManager
     from .legacy_import_manager import LegacyImportManager
@@ -24,6 +25,7 @@ class HaListManagerRuntime:
 
     database: HaListManagerDatabase
     config_entry: ConfigEntry
+    alexa: "AlexaInboxManager | None" = None
     scanner: "ScannerManager | None" = None
     notifications: "NotificationManager | None" = None
     scripts: "ListScriptManager | None" = None

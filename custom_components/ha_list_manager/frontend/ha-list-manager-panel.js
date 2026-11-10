@@ -72,7 +72,7 @@ function haListManagerPanelTextRequest(hass, message) {
   return hass.callWS(message.type?.startsWith("ha_list_manager/") ? { ...message, language: haListManagerPanelTextLanguage(hass) } : message);
 }
 
-const PANEL_VERSION = "1.0.0b9";
+const PANEL_VERSION = "1.0.0b10";
 const GROUP_PICKER_RESULT_LIMIT = 100;
 const API = "ha_list_manager";
 const ITEMS_EVENT = "ha_list_manager_items_changed";
@@ -89,6 +89,7 @@ const SECTIONS = (hass = null) => ([
   ["entity_history", haListManagerPanelText("ui.entity_inventory", {}, hass), "mdi:database-clock-outline"],
   ["history", haListManagerPanelText("ui.scanner", {}, hass), "mdi:barcode-scan"],
   ["notifications", haListManagerPanelText("ui.notifications", {}, hass), "mdi:bell-outline"],
+  ["alexa", haListManagerPanelText("alexa.title", {}, hass), "mdi:microphone-message"],
   ["settings", haListManagerPanelText("ui.settings", {}, hass), "mdi:cog-outline"],
   ["backup", haListManagerPanelText("backup.title", {}, hass), "mdi:database-export-outline"],
   ["statistics", haListManagerPanelText("ui.statistics", {}, hass), "mdi:chart-box-outline"],
@@ -242,6 +243,15 @@ class HaListManagerPanel extends HTMLElement {
     this._notificationAssignments = [];
     this._notificationEntityPlatforms = {};
     this._notificationStatus = "";
+    this._alexaData = null;
+    this._alexaDraft = null;
+    this._alexaLoading = false;
+    this._alexaBusy = false;
+    this._alexaFeedback = null;
+    this._alexaPreview = null;
+    this._alexaPreviewConfirmed = false;
+    this._alexaSubscriptionRequested = false;
+    this._unsubscribeAlexa = null;
     this._notificationTab = "profiles";
     this._expandedNotificationLists = new Set();
     this._expandedNotificationProfiles = new Set();
@@ -264,6 +274,7 @@ class HaListManagerPanel extends HTMLElement {
       this._ensureLovelaceSubscription();
       this._ensureItemsSubscription();
       this._ensureScannerSubscription();
+      this._ensureAlexaSubscription();
     }
 
     if (translationsChanged) this._render();
@@ -274,6 +285,7 @@ class HaListManagerPanel extends HTMLElement {
     const changed = this._applyRouteSection();
     if (changed && this.isConnected) {
       if (this._activeSection === "products" && !this._productsLoaded) this._loadProducts();
+      else if (this._activeSection === "alexa") this._loadAlexa();
       else this._render();
     }
   }
@@ -286,6 +298,7 @@ class HaListManagerPanel extends HTMLElement {
     this._ensureLovelaceSubscription();
     this._ensureItemsSubscription();
     this._ensureScannerSubscription();
+    this._ensureAlexaSubscription();
     const pendingDialog = this._pendingScanDialog();
     if (pendingDialog && !this._viewedPendingScanId) {
       pendingDialog.scan_sync_error = true;
@@ -302,6 +315,10 @@ class HaListManagerPanel extends HTMLElement {
   }
 
   disconnectedCallback() {
+    this._unsubscribeAlexa?.();
+    this._unsubscribeAlexa = null;
+    this._alexaSubscriptionRequested = false;
+    this._alexaSubscriptionToken = null;
     this._stopPendingScanPresence();
     this._unsubscribeScanner?.();
     this._unsubscribeScanner = null;
@@ -327,6 +344,21 @@ class HaListManagerPanel extends HTMLElement {
     if (this._bringRefreshTimer) clearInterval(this._bringRefreshTimer);
     this._bringRefreshTimer = null;
     this._setPageScrollLocked(false);
+  }
+
+  async _ensureAlexaSubscription() {
+    if (!this._hass?.connection?.subscribeEvents || this._alexaSubscriptionRequested) return;
+    this._alexaSubscriptionRequested = true;
+    const token = this._alexaSubscriptionToken = {};
+    try {
+      const unsubscribe = await this._hass.connection.subscribeEvents(() => {
+        if (this.isConnected && this._alexaSubscriptionToken === token && this._activeSection === "alexa") this._loadAlexa();
+      }, "ha_list_manager_alexa_changed");
+      if (this.isConnected && this._alexaSubscriptionToken === token) this._unsubscribeAlexa = unsubscribe;
+      else unsubscribe();
+    } catch (_error) {
+      if (this._alexaSubscriptionToken === token) this._alexaSubscriptionRequested = false;
+    }
   }
 
   async _ensureItemsSubscription() {
@@ -591,6 +623,7 @@ class HaListManagerPanel extends HTMLElement {
       if (this._loaded && this._activeSection === "products" && !this._productsLoaded) this._loadProducts();
       if (this._loaded && this._activeSection === "history" && !this._scanHistoryLoaded) this._loadScanHistory();
       if (this._loaded && this._activeSection === "backup") this._loadDataBackupInfo();
+      if (this._loaded && this._activeSection === "alexa") this._loadAlexa();
     }
   }
 
@@ -1038,6 +1071,10 @@ class HaListManagerPanel extends HTMLElement {
     const language = String(this._hass?.language || haListManagerPanelTextLocale(this._hass));
     const languageChanged = this._renderedLanguage !== language;
     this._renderedLanguage = language;
+    if (!languageChanged && this._activeSection === "alexa" && this.shadowRoot.querySelector("[data-alexa-view]")) {
+      this._updateAlexaView();
+      return;
+    }
     if (!languageChanged && this._activeSection === "backup" && this._dataManagementTab === "import" && this.shadowRoot.querySelector("[data-legacy-import-view]")) {
       this._updateLegacyImport();
       return;
@@ -1104,6 +1141,7 @@ class HaListManagerPanel extends HTMLElement {
     if (this._activeSection === "entity_history") return this._renderEntityHistory();
     if (this._activeSection === "history") return this._renderScanHistory();
     if (this._activeSection === "notifications") return this._renderNotifications();
+    if (this._activeSection === "alexa") return this._renderAlexa();
     if (this._activeSection === "settings") return this._renderSettings();
     if (this._activeSection === "backup") return this._renderDataManagement();
     if (this._activeSection === "statistics") return this._renderStatistics();
@@ -1158,7 +1196,7 @@ class HaListManagerPanel extends HTMLElement {
     }
     const tabNames = { global: haListManagerPanelText("ui.global", {}, this._hass), shopping: haListManagerPanelText("ui.shopping_list", {}, this._hass), inventory: haListManagerPanelText("ui.inventory", {}, this._hass), todo: haListManagerPanelText("ui.todo", {}, this._hass), specific: haListManagerPanelText("ui.specific", {}, this._hass), dynamic: haListManagerPanelText("ui.dynamic", {}, this._hass), queue: haListManagerPanelText("ui.scan_queue", {}, this._hass), history: haListManagerPanelText("ui.history", {}, this._hass), devices: haListManagerPanelText("ui.devices", {}, this._hass), simulation: haListManagerPanelText("scanner.simulation", {}, this._hass), profiles: haListManagerPanelText("ui.delivery_targets", {}, this._hass), assignments: haListManagerPanelText("ui.assign_lists", {}, this._hass) };
     const sections = {
-      lists: [haListManagerPanelText("ui.lists", {}, this._hass), "mdi:format-list-bulleted"], products: [haListManagerPanelText("ui.products", {}, this._hass), "mdi:barcode-scan"], categories: [haListManagerPanelText("ui.categories", {}, this._hass), "mdi:shape-outline"], labels: [haListManagerPanelText("ui.labels", {}, this._hass), "mdi:label-multiple-outline"], chips: [haListManagerPanelText("ui.chips_and_templates", {}, this._hass), "mdi:gesture-tap-button"], dishes: [haListManagerPanelText("recipes.dishes", {}, this._hass), "mdi:food-variant"], inventory: [haListManagerPanelText("ui.inventory", {}, this._hass), "mdi:package-variant-closed"], entity_history: [haListManagerPanelText("ui.entity_inventory", {}, this._hass), "mdi:database-clock-outline"], history: [haListManagerPanelText("ui.scanner", {}, this._hass), "mdi:barcode-scan"], notifications: [haListManagerPanelText("ui.notifications", {}, this._hass), "mdi:bell-outline"], settings: [haListManagerPanelText("ui.settings", {}, this._hass), "mdi:cog-outline"], backup: [haListManagerPanelText("backup.title", {}, this._hass), "mdi:database-export-outline"], statistics: [haListManagerPanelText("ui.statistics", {}, this._hass), "mdi:chart-box-outline"],
+      lists: [haListManagerPanelText("ui.lists", {}, this._hass), "mdi:format-list-bulleted"], products: [haListManagerPanelText("ui.products", {}, this._hass), "mdi:barcode-scan"], categories: [haListManagerPanelText("ui.categories", {}, this._hass), "mdi:shape-outline"], labels: [haListManagerPanelText("ui.labels", {}, this._hass), "mdi:label-multiple-outline"], chips: [haListManagerPanelText("ui.chips_and_templates", {}, this._hass), "mdi:gesture-tap-button"], dishes: [haListManagerPanelText("recipes.dishes", {}, this._hass), "mdi:food-variant"], inventory: [haListManagerPanelText("ui.inventory", {}, this._hass), "mdi:package-variant-closed"], entity_history: [haListManagerPanelText("ui.entity_inventory", {}, this._hass), "mdi:database-clock-outline"], history: [haListManagerPanelText("ui.scanner", {}, this._hass), "mdi:barcode-scan"], notifications: [haListManagerPanelText("ui.notifications", {}, this._hass), "mdi:bell-outline"], alexa: [haListManagerPanelText("alexa.title", {}, this._hass), "mdi:microphone-message"], settings: [haListManagerPanelText("ui.settings", {}, this._hass), "mdi:cog-outline"], backup: [haListManagerPanelText("backup.title", {}, this._hass), "mdi:database-export-outline"], statistics: [haListManagerPanelText("ui.statistics", {}, this._hass), "mdi:chart-box-outline"],
     };
     const [title, icon] = sections[section] || [section, "mdi:bookmark-outline"];
     return { title, subtitle: favorite.tab ? tabNames[favorite.tab] || favorite.tab : haListManagerPanelText("ui.backend_page", {}, this._hass), icon };
@@ -2329,13 +2367,560 @@ class HaListManagerPanel extends HTMLElement {
     return `<section class="content-header with-action"><div class="heading-wrap"><ha-icon icon="mdi:barcode-scan"></ha-icon><div><h2>${haListManagerPanelText("ui.scanner", {}, this._hass)}</h2><p>${haListManagerPanelText("help.scanner_overview", {}, this._hass)}</p></div></div>${refresh}</section>${this._inlineError()}${this._pendingScanNotice ? `<p class="pending-scan-notice" role="status">${this._escape(this._pendingScanNotice)}</p>` : ""}${tabs}${content}`;
   }
 
+  _alexaDefaults() {
+    return { enabled: false, source_entity_id: null, target_list_id: null, recognize_numbers: false, recognize_units: false, match_products: false, languages: [], number_mappings: "", unit_mappings: "", exceptions: "", cleanup_action: "keep" };
+  }
+
+  _alexaTabFields(tab) {
+    return { connection: ["enabled", "source_entity_id", "target_list_id", "cleanup_action"], quantities: ["recognize_numbers", "languages", "number_mappings", "exceptions", "match_products"], units: ["recognize_units", "unit_mappings"] }[tab] || [];
+  }
+
+  _alexaLanguageName(code) {
+    try { return new Intl.DisplayNames([this._hass?.language || "en"], { type: "language" }).of(code) || code; }
+    catch (_) { return code; }
+  }
+
+  _alexaLanguagesMarkup() {
+    return (this._alexaData?.languages || []).map(({ code }) => `<div class="setting-row checkbox-only"><ha-checkbox data-alexa-language="${this._escape(code)}" aria-label="${this._escape(this._alexaLanguageName(code))}"></ha-checkbox><span>${this._escape(this._alexaLanguageName(code))}</span></div>`).join("");
+  }
+
+  _alexaNumberRange(code) {
+    const language = this._alexaData?.languages?.find(entry => entry.code === code);
+    if (language?.number_min == null || language?.number_max == null) return "";
+    return haListManagerPanelText("alexa.number_range", { language: this._alexaLanguageName(code), min: language.number_min, max: language.number_max, count: language.number_count }, this._hass);
+  }
+
+  _alexaNumberRanges() {
+    const ranges = (this._alexaData?.languages || []).map(({ code }) => this._alexaNumberRange(code)).filter(Boolean);
+    return ranges.length ? haListManagerPanelText("alexa.number_ranges", { ranges: ranges.join(" · ") }, this._hass) : "";
+  }
+
+  _alexaRuleState(kind) {
+    this._alexaRules ||= {};
+    const languages = this._alexaData?.languages || [];
+    const preferred = this._alexaDraft?.languages?.find(code => languages.some(language => language.code === code));
+    const state = this._alexaRules[kind] ||= { language: preferred || languages[0]?.code || "", query: "", items: [], total: 0, loading: false, loaded: false, open: false };
+    if (!languages.some(language => language.code === state.language)) {
+      state.language = preferred || languages[0]?.code || "";
+      state.items = [];
+      state.total = 0;
+      state.loaded = false;
+      state.loading = false;
+      state.error = null;
+      state.request = null;
+    }
+    return state;
+  }
+
+  _renderAlexaRuleResults(kind) {
+    const t = (key, values = {}) => haListManagerPanelText(`alexa.${key}`, values, this._hass);
+    const state = this._alexaRuleState(kind);
+    const entries = kind === "units" ? [...state.items.reduce((groups, item) => { const aliases = groups.get(item.value) || []; aliases.push(item.phrase); groups.set(item.value, aliases); return groups; }, new Map())].map(([value, aliases]) => ({ value, phrase: aliases.join(", ") })) : state.items;
+    const rows = entries.map(item => `<tr><td>${this._escape(String(item.value))}</td><td>${this._escape(item.phrase)}</td></tr>`).join("");
+    return `${state.error ? `<p class="inline-error" role="alert">${this._escape(state.error)}</p>` : ""}<table class="alexa-rule-table"><thead><tr><th>${t(kind === "numbers" ? "rule_number" : "rule_unit")}</th><th>${t("rule_phrase")}</th></tr></thead><tbody>${rows}</tbody></table><p class="field-help" role="status">${state.loading ? haListManagerPanelText("history.loading", {}, this._hass) : state.loaded ? t("rules_count", { count: state.items.length, total: state.total }) : ""}</p>${state.loaded && !state.items.length ? `<p class="field-help">${t("rules_empty")}</p>` : ""}`;
+  }
+
+  _renderAlexaRuleViewer(kind) {
+    const t = key => haListManagerPanelText(`alexa.${key}`, {}, this._hass);
+    const state = this._alexaRuleState(kind);
+    const languages = this._alexaRuleLanguageOptions(state.language);
+    return `<label class="field"><span>${t("rules_language")}</span><select data-alexa-rule-language="${kind}">${languages}</select><small>${t("rules_language_help")}</small></label>${kind === "numbers" ? `<p class="field-help" data-alexa-rule-range>${this._escape(this._alexaNumberRange(state.language))}</p><div class="alexa-rule-search"><label class="field"><span>${t("rules_search")}</span><input type="search" data-alexa-rule-query="numbers" value="${this._escape(state.query)}"></label><button class="ha-button" type="button" data-alexa-rule-search="numbers"><ha-icon icon="mdi:magnify"></ha-icon>${t("rules_search_button")}</button></div>` : ""}<div class="alexa-rule-results" data-alexa-rule-results="${kind}">${this._renderAlexaRuleResults(kind)}</div><button class="ha-button" type="button" data-alexa-rule-more="${kind}" ${state.loading || !state.loaded || state.items.length >= state.total ? "hidden" : ""}><ha-icon icon="mdi:chevron-down"></ha-icon>${t("rules_more")}</button>`;
+  }
+
+  _alexaRuleLanguageOptions(selected) {
+    return (this._alexaData?.languages || []).map(({ code }) => `<option value="${this._escape(code)}"${selected === code ? " selected" : ""}>${this._escape(this._alexaLanguageName(code))}</option>`).join("");
+  }
+
+  _renderAlexaRulesDialog() {
+    if (!this._alexaRules?.numbers?.open) return "";
+    const title = haListManagerPanelText("alexa.number_rules", {}, this._hass);
+    return `<div class="dialog-backdrop" data-alexa-rules-backdrop><section class="dialog alexa-rules-dialog" role="dialog" aria-modal="true" aria-labelledby="alexa-rules-title"><header class="dialog-title"><h2 id="alexa-rules-title">${title}</h2><button class="icon-button" type="button" data-alexa-rules-close aria-label="${haListManagerPanelText("ui.close", {}, this._hass)}"><ha-icon icon="mdi:close"></ha-icon></button></header>${this._renderAlexaRuleViewer("numbers")}<div class="dialog-actions"><button class="ha-button" type="button" data-alexa-rules-close>${haListManagerPanelText("ui.close", {}, this._hass)}</button></div></section></div>`;
+  }
+
+  _updateAlexaRuleViewer(kind) {
+    const root = this.shadowRoot;
+    const state = this._alexaRuleState(kind);
+    const select = root.querySelector(`[data-alexa-rule-language="${kind}"]`);
+    if (!select) return;
+    const markup = this._alexaRuleLanguageOptions();
+    if (select._alexaMarkup !== markup) { select.innerHTML = markup; select._alexaMarkup = markup; }
+    if (select.value !== state.language) select.value = state.language;
+    if (kind === "numbers") {
+      const range = root.querySelector("[data-alexa-rule-range]");
+      if (range) range.textContent = this._alexaNumberRange(state.language);
+    }
+    const results = root.querySelector(`[data-alexa-rule-results="${kind}"]`);
+    const resultMarkup = this._renderAlexaRuleResults(kind);
+    if (results && results._alexaMarkup !== resultMarkup) {
+      const scrollTop = results.scrollTop;
+      results.innerHTML = resultMarkup;
+      results._alexaMarkup = resultMarkup;
+      results.scrollTop = scrollTop;
+    }
+    const more = root.querySelector(`[data-alexa-rule-more="${kind}"]`);
+    if (more) { more.hidden = !state.loaded || state.items.length >= state.total; more.disabled = state.loading; }
+    const search = root.querySelector(`[data-alexa-rule-search="${kind}"]`);
+    if (search) search.disabled = state.loading;
+  }
+
+  async _loadAlexaRules(kind, append = false) {
+    const state = this._alexaRuleState(kind);
+    if (!state.language) return;
+    const request = state.request = {};
+    const query = state.query;
+    const offset = append ? state.items.length : 0;
+    if (!append) { state.items = []; state.loaded = false; }
+    state.loading = true;
+    state.error = null;
+    this._updateAlexaRuleViewer(kind);
+    try {
+      const result = await haListManagerPanelTextRequest(this._hass, { type: `${API}/alexa/rules`, language_code: state.language, kind, query, offset, limit: 50 });
+      if (state.request !== request) return;
+      state.items = append ? [...state.items, ...result.items] : result.items;
+      state.total = result.total;
+      state.loadedQuery = query;
+      state.loaded = true;
+    } catch (error) { if (state.request === request) state.error = this._formatError(error); }
+    finally { if (state.request === request) { state.loading = false; this._updateAlexaRuleViewer(kind); } }
+  }
+
+  _bindAlexaRuleViewer(kind) {
+    const root = this.shadowRoot;
+    const state = this._alexaRuleState(kind);
+    const language = root.querySelector(`[data-alexa-rule-language="${kind}"]`);
+    if (language) {
+      language._alexaMarkup = this._alexaRuleLanguageOptions();
+      language.onchange = () => { state.language = language.value; this._loadAlexaRules(kind); };
+    }
+    const query = root.querySelector(`[data-alexa-rule-query="${kind}"]`);
+    if (query) {
+      query.oninput = () => { state.query = query.value; };
+      query.onkeydown = event => { if (event.key === "Enter") { event.preventDefault(); this._loadAlexaRules(kind); } };
+    }
+    const search = root.querySelector(`[data-alexa-rule-search="${kind}"]`);
+    if (search) search.onclick = () => this._loadAlexaRules(kind);
+    const more = root.querySelector(`[data-alexa-rule-more="${kind}"]`);
+    if (more) more.onclick = () => { if (!state.loading) this._loadAlexaRules(kind, state.query === state.loadedQuery); };
+  }
+
+  _openAlexaRules() {
+    const state = this._alexaRuleState("numbers");
+    state.open = true;
+    this._alexaRulesReturnFocus = this.shadowRoot.activeElement;
+    const host = this.shadowRoot.querySelector("[data-alexa-rules-host]");
+    if (!host) return;
+    host.innerHTML = this._renderAlexaRulesDialog();
+    this._bindAlexaRulesDialog();
+    host.querySelector('[data-alexa-rule-query="numbers"]')?.focus?.({ preventScroll: true });
+    if (!state.loaded) this._loadAlexaRules("numbers");
+  }
+
+  _bindAlexaRulesDialog() {
+    const state = this._alexaRuleState("numbers");
+    const host = this.shadowRoot.querySelector("[data-alexa-rules-host]");
+    if (!state.open || !host) return;
+    this._setPageScrollLocked(true);
+    this._bindAlexaRuleViewer("numbers");
+    const close = () => {
+      state.open = false;
+      state.request = null;
+      state.loading = false;
+      host.innerHTML = "";
+      this._setPageScrollLocked(false);
+      this._alexaRulesReturnFocus?.focus?.({ preventScroll: true });
+    };
+    host.querySelectorAll("[data-alexa-rules-close]").forEach(button => { button.onclick = close; });
+    const backdrop = host.querySelector("[data-alexa-rules-backdrop]");
+    if (backdrop) backdrop.onclick = event => { if (event.target === backdrop) close(); };
+    host.onkeydown = event => { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); close(); } };
+  }
+
+  _renderAlexaTestSummary() {
+    const t = (key, values = {}) => haListManagerPanelText(`alexa.${key}`, values, this._hass);
+    const draft = this._alexaDraft || this._alexaDefaults();
+    const active = value => t(value ? "test_active" : "test_inactive");
+    const target = this._alexaData?.targets?.find(entry => entry.id === draft.target_list_id);
+    const dirtyTabs = ["connection", "quantities", "units"].filter(tab => this._alexaDirty(tab)).map(tab => t(tab));
+    const languages = draft.languages.map(code => this._alexaLanguageName(code)).join(", ");
+    const inactive = [!draft.recognize_numbers && t("quantities"), !(draft.recognize_numbers && draft.recognize_units) && t("units"), !draft.match_products && t("test_products_short")].filter(Boolean);
+    return `<dl class="alexa-status-grid"><div><dt>${t("recognize_numbers")}</dt><dd>${active(draft.recognize_numbers)}</dd></div><div><dt>${t("recognize_units")}</dt><dd>${draft.recognize_units && !draft.recognize_numbers ? t("test_units_waiting") : active(draft.recognize_numbers && draft.recognize_units)}</dd></div><div><dt>${t("match_products")}</dt><dd>${active(draft.match_products)}</dd></div><div><dt>${t("languages")}</dt><dd>${this._escape(languages || t("test_no_languages"))}</dd></div><div><dt>${t("target")}</dt><dd>${this._escape(target?.name || t(draft.target_list_id ? "test_target_unavailable" : "test_no_target"))}</dd></div></dl><p class="field-help">${dirtyTabs.length ? t("test_unsaved_tabs", { tabs: this._escape(dirtyTabs.join(", ")) }) : t("test_saved_settings")}</p>${inactive.length ? `<p class="alexa-warning">${t("test_inactive_options", { features: this._escape(inactive.join(", ")) })}</p>` : ""}${!draft.recognize_numbers ? `<p class="field-help">${t("test_numbers_disabled")}</p>` : ""}${draft.recognize_units && !draft.recognize_numbers ? `<p class="field-help">${t("test_units_dependency")}</p>` : ""}${!draft.enabled ? `<p class="field-help">${t("test_input_disabled")}</p>` : ""}${!target ? `<p class="alexa-warning">${t(draft.target_list_id ? "test_target_unavailable_help" : "test_target_missing")}</p>` : ""}`;
+  }
+
+  _renderAlexaTest() {
+    const t = key => haListManagerPanelText(`alexa.${key}`, {}, this._hass);
+    const state = this._alexaTest || {};
+    return `<p class="field-help">${t("test_help")}</p><div data-alexa-test-summary>${this._renderAlexaTestSummary()}</div><div class="alexa-test-input-row"><label class="field"><span>${t("test_input")}</span><input type="text" maxlength="2000" data-alexa-test-input value="${this._escape(state.text || "")}" placeholder="${this._escape(t("test_number_example"))}"></label><button class="ha-button" type="button" data-alexa-test><ha-icon icon="mdi:test-tube"></ha-icon>${haListManagerPanelText("ui.test", {}, this._hass)}</button></div><div data-alexa-test-result>${this._renderAlexaTestResult()}</div>`;
+  }
+
+  _renderAlexaTestResult() {
+    const t = (key, values = {}) => haListManagerPanelText(`alexa.${key}`, values, this._hass);
+    const state = this._alexaTest || {};
+    if (state.error) return `<p class="inline-error" role="alert">${this._escape(state.error)}</p>`;
+    if (state.loading) return `<p class="field-help" role="status">${haListManagerPanelText("history.loading", {}, this._hass)}</p>`;
+    if (!state.result) return "";
+    const { parsed, resolution } = state.result;
+    const reasons = { disabled: "test_disabled", unit: "test_unit", no_match: "test_no_match", multiple_products: "test_multiple_products", multiple_items: "test_multiple_items", unique_product: "test_unique_product", target_missing: "test_target_missing" };
+    const actions = { product_add: "test_product_add", product_increase: "test_product_increase", free_add: "test_free_add", free_increase: "test_free_increase", target_required: "test_target_required" };
+    const missingTarget = resolution.target_missing || resolution.action === "target_required";
+    return `<dl class="alexa-status-grid" role="status"><div><dt>${t("test_name")}</dt><dd>${this._escape(parsed.name)}</dd></div><div><dt>${t("test_quantity")}</dt><dd>${this._escape(String(parsed.quantity))}</dd></div><div><dt>${t("test_description")}</dt><dd>${this._escape(parsed.description || "—")}</dd></div><div><dt>${t("test_action")}</dt><dd>${t(missingTarget ? "test_target_required" : actions[resolution.action] || "test_action_unknown")}</dd></div>${!missingTarget && resolution.action?.endsWith("_increase") && resolution.result_quantity != null ? `<div><dt>${t("test_result_quantity")}</dt><dd>${this._escape(String(resolution.result_quantity))}</dd></div>` : ""}${resolution.product_name ? `<div><dt>${t("test_product")}</dt><dd>${this._escape(resolution.product_name)}</dd></div>` : ""}</dl><p class="field-help">${t(reasons[resolution.reason] || "test_no_match", { count: resolution.match_count || 0 })}</p>`;
+  }
+
+  _updateAlexaTest() {
+    const state = this._alexaTest || {};
+    const button = this.shadowRoot.querySelector("[data-alexa-test]");
+    if (button) button.disabled = Boolean(state.loading || !state.text?.trim());
+    const summary = this.shadowRoot.querySelector("[data-alexa-test-summary]");
+    if (summary) summary.innerHTML = this._renderAlexaTestSummary();
+    const result = this.shadowRoot.querySelector("[data-alexa-test-result]");
+    if (result) result.innerHTML = this._renderAlexaTestResult();
+  }
+
+  _invalidateAlexaTest() {
+    if (this._alexaTest) { this._alexaTest.request = null; this._alexaTest.result = null; this._alexaTest.error = null; this._alexaTest.loading = false; }
+    this._updateAlexaTest();
+  }
+
+  async _testAlexa() {
+    const state = this._alexaTest;
+    if (!state?.text?.trim() || state.loading) return;
+    const request = state.request = {};
+    const settings = { ...this._alexaDraft, languages: [...this._alexaDraft.languages] };
+    state.loading = true;
+    state.error = null;
+    this._updateAlexaTest();
+    try {
+      const result = await haListManagerPanelTextRequest(this._hass, { type: `${API}/alexa/test`, settings, text: state.text });
+      if (state.request === request) state.result = result;
+    } catch (error) { if (state.request === request) state.error = this._formatError(error); }
+    finally { if (state.request === request) { state.loading = false; this._updateAlexaTest(); } }
+  }
+
+  _alexaCurrentTab() {
+    return ["connection", "quantities", "units", "test"].includes(this._alexaTab) ? this._alexaTab : "connection";
+  }
+
+  _alexaDirty(tab) {
+    const baseline = { ...this._alexaDefaults(), ...this._alexaData?.settings };
+    const fields = tab ? this._alexaTabFields(tab) : Object.keys(baseline);
+    return Boolean(this._alexaDraft && fields.some(field => JSON.stringify(this._alexaDraft[field]) !== JSON.stringify(baseline[field])));
+  }
+
+  _receiveAlexaData(result, resetDraft = false, savedFields = []) {
+    if (!result || typeof result !== "object") return;
+    const previousDraft = JSON.stringify(this._alexaDraft);
+    const baseline = { ...this._alexaDefaults(), ...this._alexaData?.settings };
+    const retained = !resetDraft && this._alexaDraft ? Object.fromEntries(Object.entries(this._alexaDraft).filter(([field, value]) => !savedFields.includes(field) && JSON.stringify(value) !== JSON.stringify(baseline[field]))) : {};
+    const languages = result.settings?.languages?.length ? result.settings.languages : result.languages?.[0]?.code ? [result.languages[0].code] : [];
+    this._alexaData = { ...result, settings: { ...this._alexaDefaults(), ...result.settings, languages } };
+    this._alexaDraft = { ...this._alexaData.settings, ...retained };
+    this._alexaDraft.languages = [...this._alexaDraft.languages];
+    if (previousDraft !== JSON.stringify(this._alexaDraft)) this._invalidateAlexaTest();
+  }
+
+  async _loadAlexa(resetDraft = false) {
+    if (!this._hass || this._alexaLoading || this._alexaBusy) return;
+    this._alexaLoading = true;
+    this._render();
+    try {
+      this._receiveAlexaData(await haListManagerPanelTextRequest(this._hass, { type: `${API}/alexa/get` }), resetDraft);
+    } catch (error) {
+      this._alexaFeedback = { target: "connection", tone: "error", text: this._formatError(error) };
+    } finally {
+      this._alexaLoading = false;
+      this._render();
+    }
+  }
+
+  _alexaFeedbackMarkup() {
+    const notice = this._alexaFeedback;
+    if (!notice?.text) return "";
+    return `<div class="alexa-feedback ${notice.tone === "error" ? "error" : "success"}" role="${notice.tone === "error" ? "alert" : "status"}"><ha-icon icon="mdi:${notice.tone === "error" ? "alert-circle-outline" : "check-circle-outline"}"></ha-icon><span>${this._escape(notice.text)}</span></div>`;
+  }
+
+  _alexaOptionsMarkup(kind) {
+    const t = key => haListManagerPanelText(`alexa.${key}`, {}, this._hass);
+    const field = kind === "source" ? "source_entity_id" : "target_list_id";
+    const selected = this._alexaDraft?.[field] || "";
+    const entries = kind === "source" ? this._alexaData?.sources || [] : this._alexaData?.targets || [];
+    const value = item => kind === "source" ? item.entity_id : item.id;
+    let html = `<option value="">${t(kind === "source" ? "choose_source" : "choose_target")}</option>`;
+    if (selected && !entries.some(item => value(item) === selected)) html += `<option value="${this._escape(selected)}" selected>${this._escape(selected)} · ${t("unavailable")}</option>`;
+    return html + entries.map(item => `<option value="${this._escape(value(item))}" ${value(item) === selected ? "selected" : ""}>${this._escape(item.name || value(item))}${item.available === false ? ` · ${t("unavailable")}` : ""}</option>`).join("");
+  }
+
+  _renderAlexaStatus() {
+    const t = (key, values = {}) => haListManagerPanelText(`alexa.${key}`, values, this._hass);
+    const status = this._alexaData?.status || {};
+    const enabled = this._alexaData?.settings?.enabled;
+    const ready = Boolean(enabled && status.source_available && status.target_available);
+    const state = !enabled ? t("disabled") : ready ? t("ready") : t("waiting");
+    const recent = this._alexaData?.receipts || [];
+    const rows = recent.slice(0, 20).map(receipt => {
+      const pending = ["pending", "error"].includes(receipt.cleanup_status);
+      const title = receipt.name || receipt.original_name || "";
+      const date = receipt.created_at;
+      return `<article class="alexa-receipt"><ha-icon icon="mdi:${pending ? "clock-alert-outline" : "check-circle-outline"}"></ha-icon><div><strong>${this._escape(title)}</strong><small>${this._escape(date ? this._formatDue(date) : "")}${receipt.quantity ? ` · ${this._escape(String(receipt.quantity))}×` : ""}${receipt.description ? ` · ${this._escape(receipt.description)}` : ""}</small>${pending ? `<span class="alexa-warning">${t("cleanup_pending")}</span>` : ""}${receipt.last_error ? `<span class="alexa-warning">${this._escape(receipt.last_error)}</span>` : ""}</div></article>`;
+    }).join("");
+    return `<div class="alexa-connection-status ${ready ? "ready" : ""}" role="status"><ha-icon icon="mdi:${ready ? "check-network-outline" : enabled ? "clock-alert-outline" : "pause-circle-outline"}"></ha-icon><strong>${state}</strong></div><dl class="alexa-status-grid"><div><dt>${t("last_checked")}</dt><dd>${status.last_checked ? this._escape(this._formatDue(status.last_checked)) : t("not_yet")}</dd></div><div><dt>${t("last_success")}</dt><dd>${status.last_success ? this._escape(this._formatDue(status.last_success)) : t("not_yet")}</dd></div><div><dt>${t("imported_total")}</dt><dd>${this._escape(String(status.imported_total || 0))}</dd></div><div><dt>${t("pending_cleanup")}</dt><dd>${this._escape(String(status.pending_cleanup || 0))}</dd></div></dl>${status.last_error ? `<p class="alexa-feedback error" role="alert"><ha-icon icon="mdi:alert-circle-outline"></ha-icon><span>${this._escape(status.last_error)}</span></p>` : ""}<p class="field-help">${t("push_help")}</p><details class="alexa-recent"><summary>${t("recent")}</summary>${rows || `<p class="field-help">${t("no_recent")}</p>`}</details>`;
+  }
+
+  _renderAlexaPreview() {
+    const t = (key, values = {}) => haListManagerPanelText(`alexa.${key}`, values, this._hass);
+    if (!this._alexaPreview) return "";
+    const entries = this._alexaPreview.items || [];
+    const eligible = entries.filter(item => !item.already_processed && !item.error);
+    const rows = entries.map(item => `<article class="alexa-preview-row"><div><strong>${this._escape(item.original_name || item.name)}</strong><small>${this._escape(item.name || "")} · ${this._escape(String(item.quantity || 1))}×${item.description ? ` · ${this._escape(item.description)}` : ""}</small>${item.error ? `<span class="alexa-warning">${this._escape(item.error)}</span>` : item.already_processed ? `<span class="field-help">${t("already_processed")}</span>` : ""}</div></article>`).join("");
+    return `<div class="alexa-import-preview"><h4>${t("preview_title")}</h4><p class="field-help">${t("preview_help")}</p><div class="alexa-preview-rows">${rows || `<p>${t("no_open_entries")}</p>`}</div>${eligible.length ? `<div class="setting-row checkbox-only alexa-confirm"><ha-checkbox data-alexa-import-confirm aria-label="${this._escape(t("confirm_existing", { count: eligible.length }))}"></ha-checkbox><span>${t("confirm_existing", { count: eligible.length })}</span></div><button class="ha-button primary" type="button" data-alexa-import ${!this._alexaPreviewConfirmed || this._alexaBusy ? "disabled" : ""}><ha-icon icon="mdi:download-outline"></ha-icon>${t("import_existing")}</button>` : ""}<button class="ha-button" type="button" data-alexa-close-preview>${haListManagerPanelText("ui.close", {}, this._hass)}</button></div>`;
+  }
+
+  _renderAlexa() {
+    const t = key => haListManagerPanelText(`alexa.${key}`, {}, this._hass);
+    const draft = this._alexaDraft || this._alexaDefaults();
+    const activeTab = this._alexaCurrentTab();
+    const toggle = (field, label, help) => `<div class="setting-row checkbox-only"><ha-checkbox data-alexa-field="${field}" aria-label="${this._escape(t(label))}"></ha-checkbox><span><strong>${t(label)}</strong>${help ? `<small>${t(help)}</small>` : ""}</span></div>`;
+    const text = (field, label, help, placeholder) => `<label class="field"><span>${t(label)}</span><textarea data-alexa-field="${field}" rows="5" spellcheck="false" placeholder="${this._escape(placeholder)}">${this._escape(draft[field] || "")}</textarea><small>${t(help)}</small></label>`;
+    const save = tab => `<div class="settings-inline-actions"><button class="ha-button primary" type="button" data-alexa-save="${tab}"><ha-icon icon="mdi:content-save-outline"></ha-icon>${haListManagerPanelText("ui.save_settings", {}, this._hass)}</button><span class="field-help" data-alexa-unsaved="${tab}" ${this._alexaDirty(tab) ? "" : "hidden"}>${t("unsaved")}</span></div><div data-alexa-feedback="${tab}">${this._alexaFeedback?.target === tab ? this._alexaFeedbackMarkup() : ""}</div>`;
+    const tabs = [["connection", "mdi:link-variant"], ["quantities", "mdi:format-list-numbered"], ["units", "mdi:scale-balance"], ["test", "mdi:test-tube"]].map(([tab, icon]) => `<button type="button" class="${activeTab === tab ? "active" : ""}" data-alexa-tab="${tab}" role="tab" aria-selected="${activeTab === tab}"><ha-icon icon="${icon}"></ha-icon>${t(tab)}</button>`).join("");
+    return `${this._heading("mdi:microphone-message", t("title"), t("intro"))}<section data-alexa-view>
+      <div class="scan-history-tabs alexa-tabs" role="tablist" aria-label="${this._escape(t("title"))}">${tabs}</div>
+      <section data-alexa-tab-panel="connection" role="tabpanel" ${activeTab === "connection" ? "" : "hidden"}>
+      <ha-card class="settings-card alexa-card"><h3><ha-icon icon="mdi:link-variant"></ha-icon>${t("connection")}</h3><p class="field-help">${t("connection_help")}</p>
+        ${toggle("enabled", "enabled", "enabled_help")}
+        <div class="field-grid alexa-grid"><label class="field"><span>${t("source")}</span><select data-alexa-field="source_entity_id">${this._alexaOptionsMarkup("source")}</select></label><label class="field"><span>${t("target")}</span><select data-alexa-field="target_list_id">${this._alexaOptionsMarkup("target")}</select></label></div>
+        <p class="field-help" data-alexa-no-sources ${this._alexaData?.sources?.length ? "hidden" : ""}>${t("no_sources")}</p><p class="field-help" data-alexa-no-targets ${this._alexaData?.targets?.length ? "hidden" : ""}>${t("no_targets")}</p>
+        <label class="field"><span>${t("cleanup")}</span><select data-alexa-field="cleanup_action"><option value="keep" ${draft.cleanup_action === "keep" ? "selected" : ""}>${t("keep")}</option><option value="complete" ${draft.cleanup_action === "complete" ? "selected" : ""}>${t("complete")}</option><option value="delete" ${draft.cleanup_action === "delete" ? "selected" : ""}>${t("delete")}</option></select><small>${t("cleanup_help")}</small></label><p class="field-help" data-alexa-delete-help ${draft.cleanup_action === "delete" ? "" : "hidden"}>${t("delete_help")}</p>
+        ${save("connection")}
+      </ha-card>
+      <ha-card class="settings-card alexa-card"><h3><ha-icon icon="mdi:tray-arrow-down"></ha-icon>${t("processing")}</h3>
+        <p class="field-help">${t("existing_help")}</p><div class="settings-inline-actions"><button class="ha-button" type="button" data-alexa-preview><ha-icon icon="mdi:clipboard-text-search-outline"></ha-icon>${t("preview_existing")}</button><button class="ha-button" type="button" data-alexa-retry><ha-icon icon="mdi:refresh"></ha-icon>${t("retry_cleanup")}</button></div><p class="field-help" data-alexa-save-before-import ${this._alexaDirty() ? "" : "hidden"}>${t("save_before_import")}</p><div data-alexa-preview-host>${this._renderAlexaPreview()}</div><div data-alexa-process-feedback></div>
+      </ha-card>
+      <ha-card class="settings-card alexa-card"><h3><ha-icon icon="mdi:list-status"></ha-icon>${t("status")}</h3><div data-alexa-status>${this._renderAlexaStatus()}</div></ha-card>
+      </section>
+      <section data-alexa-tab-panel="quantities" role="tabpanel" ${activeTab === "quantities" ? "" : "hidden"}>
+      <ha-card class="settings-card alexa-card"><h3><ha-icon icon="mdi:format-list-numbered"></ha-icon>${t("quantities")}</h3><p class="field-help">${t("free_items")}</p>
+        ${toggle("recognize_numbers", "recognize_numbers", "numbers_help")}
+        <div data-alexa-number-options><div class="field"><span>${t("languages")}</span><div data-alexa-language-options>${this._alexaLanguagesMarkup()}</div><small>${t("languages_help")}</small></div><button class="ha-button" type="button" data-alexa-number-rules><ha-icon icon="mdi:format-list-numbered"></ha-icon>${t("number_rules")}</button><p class="field-help" data-alexa-language-ranges>${this._escape(this._alexaNumberRanges())}</p><h4>${t("custom_rules")}</h4>${text("number_mappings", "number_mappings", "number_mapping_help", t("number_example"))}</div>
+        ${text("exceptions", "exceptions", "exceptions_help", t("exceptions_example"))}
+        ${toggle("match_products", "match_products", "match_products_help")}
+        <table class="alexa-rule-table alexa-examples"><thead><tr><th>${t("example_input")}</th><th>${t("example_result")}</th></tr></thead><tbody><tr><td>${t("example_product_input")}</td><td>${t("example_product_result")}</td></tr><tr><td>${t("example_free_input")}</td><td>${t("example_free_result")}</td></tr><tr><td>${t("example_unit_input")}</td><td>${t("example_unit_result")}</td></tr></tbody></table>
+        <details class="alexa-speaking-help"><summary>${t("speaking_title")}</summary><p class="field-help">${t("speaking_help")}</p><p class="field-help">${t("plural_help")}</p></details>
+        ${save("quantities")}
+      </ha-card>
+      </section>
+      <section data-alexa-tab-panel="units" role="tabpanel" ${activeTab === "units" ? "" : "hidden"}>
+      <ha-card class="settings-card alexa-card"><h3><ha-icon icon="mdi:scale-balance"></ha-icon>${t("units")}</h3>
+        <p class="field-help" data-alexa-units-dependency ${draft.recognize_numbers ? "hidden" : ""}>${t("units_dependency")}</p>
+        ${toggle("recognize_units", "recognize_units", "units_help")}
+        <details class="alexa-speaking-help" open><summary>${t("unit_rules")}</summary>${this._renderAlexaRuleViewer("units")}</details>
+        <div data-alexa-unit-options><h4>${t("custom_rules")}</h4>${text("unit_mappings", "unit_mappings", "unit_mapping_help", t("unit_example"))}</div>
+        <p class="field-help">${t("units_example")}</p>
+        ${save("units")}
+      </ha-card>
+      </section>
+      <section data-alexa-tab-panel="test" role="tabpanel" ${activeTab === "test" ? "" : "hidden"}>
+        <ha-card class="settings-card alexa-card"><h3><ha-icon icon="mdi:test-tube"></ha-icon>${t("test_title")}</h3>${this._renderAlexaTest()}</ha-card>
+      </section>
+      <div data-alexa-rules-host>${this._renderAlexaRulesDialog()}</div>
+    </section>`;
+  }
+
+  _updateAlexaControls() {
+    const root = this.shadowRoot;
+    const draft = this._alexaDraft || this._alexaDefaults();
+    const busy = this._alexaBusy || this._alexaLoading && !this._alexaData;
+    const numbersEnabled = Boolean(draft.recognize_numbers);
+    const activeTab = this._alexaCurrentTab();
+    root.querySelectorAll("[data-alexa-tab]").forEach(button => {
+      const active = button.dataset.alexaTab === activeTab;
+      button.classList.toggle("active", active);
+      button.setAttribute("aria-selected", String(active));
+      button.disabled = busy;
+    });
+    root.querySelectorAll("[data-alexa-tab-panel]").forEach(panel => { panel.hidden = panel.dataset.alexaTabPanel !== activeTab; });
+    root.querySelectorAll("[data-alexa-field]").forEach(input => {
+      const field = input.dataset.alexaField;
+      input.disabled = busy || field === "recognize_units" && !numbersEnabled;
+      if (input.localName === "ha-checkbox") input.checked = Boolean(draft[field]);
+      else if (input.value !== (draft[field] || "")) input.value = draft[field] || "";
+    });
+    root.querySelectorAll("[data-alexa-language]").forEach(input => { input.checked = draft.languages.includes(input.dataset.alexaLanguage); input.disabled = busy || !draft.recognize_numbers; });
+    root.querySelectorAll("[data-alexa-number-options] textarea").forEach(input => { input.disabled = busy || !draft.recognize_numbers; });
+    root.querySelectorAll("[data-alexa-unit-options] textarea").forEach(input => { input.disabled = busy || !numbersEnabled || !draft.recognize_units; });
+    root.querySelectorAll("[data-alexa-unsaved]").forEach(element => { element.hidden = !this._alexaDirty(element.dataset.alexaUnsaved); });
+    for (const [selector, hidden] of [["[data-alexa-delete-help]", draft.cleanup_action !== "delete"], ["[data-alexa-units-dependency]", numbersEnabled], ["[data-alexa-save-before-import]", !this._alexaDirty()]]) {
+      const element = root.querySelector(selector); if (element) element.hidden = hidden;
+    }
+    const unavailable = !this._alexaData?.settings?.enabled || !this._alexaData?.status?.source_available || !this._alexaData?.status?.target_available;
+    root.querySelectorAll("[data-alexa-save]").forEach(button => { button.disabled = busy || this._alexaLoading; });
+    for (const selector of ["[data-alexa-preview]", "[data-alexa-retry]"]) { const button = root.querySelector(selector); if (button) button.disabled = busy || this._alexaDirty() || unavailable; }
+    const importButton = root.querySelector("[data-alexa-import]");
+    if (importButton) importButton.disabled = busy || this._alexaDirty() || unavailable || !this._alexaPreviewConfirmed;
+  }
+
+  _updateAlexaView() {
+    const root = this.shadowRoot;
+    const favorite = root.querySelector("[data-toggle-page-favorite]");
+    if (favorite) {
+      const target = this._currentFavoriteTarget();
+      const active = this._favorites.some(entry => this._favoriteMatches(entry, target));
+      const label = haListManagerPanelText(active ? "ui.remove_favorite" : "ui.add_favorite", {}, this._hass);
+      favorite.classList.toggle("active", active);
+      favorite.disabled = this._favoriteBusy;
+      favorite.title = label;
+      favorite.setAttribute("aria-label", label);
+      favorite.querySelector("ha-icon")?.setAttribute("icon", active ? "mdi:star" : "mdi:star-outline");
+    }
+    const status = root.querySelector("[data-alexa-status]");
+    if (status) {
+      const recentOpen = status.querySelector(".alexa-recent")?.open;
+      status.innerHTML = this._renderAlexaStatus();
+      if (recentOpen) status.querySelector(".alexa-recent").open = true;
+    }
+    root.querySelectorAll("[data-alexa-feedback]").forEach(feedback => { feedback.innerHTML = this._alexaFeedback?.target === feedback.dataset.alexaFeedback ? this._alexaFeedbackMarkup() : ""; });
+    const processFeedback = root.querySelector("[data-alexa-process-feedback]");
+    if (processFeedback) processFeedback.innerHTML = this._alexaFeedback?.target === "process" ? this._alexaFeedbackMarkup() : "";
+    for (const kind of ["source", "target"]) {
+      const select = root.querySelector(`[data-alexa-field="${kind === "source" ? "source_entity_id" : "target_list_id"}"]`);
+      const markup = this._alexaOptionsMarkup(kind);
+      if (select && root.activeElement !== select && select._alexaOptions !== markup) { select.innerHTML = markup; select._alexaOptions = markup; }
+    }
+    for (const [selector, hidden] of [["[data-alexa-no-sources]", Boolean(this._alexaData?.sources?.length)], ["[data-alexa-no-targets]", Boolean(this._alexaData?.targets?.length)]]) { const element = root.querySelector(selector); if (element) element.hidden = hidden; }
+    const preview = root.querySelector("[data-alexa-preview-host]");
+    const markup = this._renderAlexaPreview();
+    if (preview && preview._alexaMarkup !== markup) { preview.innerHTML = markup; preview._alexaMarkup = markup; this._bindAlexaPreview(); }
+    const languages = root.querySelector("[data-alexa-language-options]");
+    const languageMarkup = this._alexaLanguagesMarkup();
+    if (languages && languages._alexaMarkup !== languageMarkup) { languages.innerHTML = languageMarkup; languages._alexaMarkup = languageMarkup; this._bindAlexaLanguages(); }
+    const ranges = root.querySelector("[data-alexa-language-ranges]");
+    if (ranges) ranges.textContent = this._alexaNumberRanges();
+    this._updateAlexaRuleViewer("units");
+    if (this._alexaRules?.numbers?.open) this._updateAlexaRuleViewer("numbers");
+    this._updateAlexaTest();
+    this._updateAlexaControls();
+    const units = this._alexaRuleState("units");
+    if (this._alexaCurrentTab() === "units" && units.language && !units.loaded && !units.loading) this._loadAlexaRules("units");
+  }
+
+  _clearAlexaPreview() {
+    this._alexaPreview = null;
+    this._alexaPreviewConfirmed = false;
+    const host = this.shadowRoot.querySelector("[data-alexa-preview-host]");
+    if (host) { host.innerHTML = ""; host._alexaMarkup = ""; }
+    this._invalidateAlexaTest();
+  }
+
+  _bindAlexaPreview() {
+    const root = this.shadowRoot;
+    const confirmation = root.querySelector("[data-alexa-import-confirm]");
+    if (confirmation) {
+      confirmation.checked = this._alexaPreviewConfirmed;
+      confirmation.onchange = () => { this._alexaPreviewConfirmed = confirmation.checked; this._updateAlexaControls(); };
+    }
+    const apply = root.querySelector("[data-alexa-import]");
+    if (apply) apply.onclick = () => this._processAlexa(true);
+    const close = root.querySelector("[data-alexa-close-preview]");
+    if (close) close.onclick = () => { this._alexaPreview = null; this._alexaPreviewConfirmed = false; this._updateAlexaView(); };
+  }
+
+  _bindAlexaEvents() {
+    const root = this.shadowRoot;
+    root.querySelectorAll("[data-alexa-field]").forEach(input => {
+      const update = () => {
+        const field = input.dataset.alexaField;
+        if (!this._alexaDraft) this._alexaDraft = this._alexaDefaults();
+        this._alexaDraft[field] = input.localName === "ha-checkbox" ? input.checked : input.value || (["source_entity_id", "target_list_id"].includes(field) ? null : "");
+        this._clearAlexaPreview();
+        this._updateAlexaControls();
+      };
+      if (input.localName === "textarea") input.oninput = update;
+      else input.onchange = update;
+    });
+    this._bindAlexaLanguages();
+    root.querySelectorAll("[data-alexa-tab]").forEach(button => { button.onclick = () => { if (this._alexaBusy) return; this._alexaTab = button.dataset.alexaTab; this._updateAlexaView(); }; });
+    root.querySelectorAll("[data-alexa-save]").forEach(button => { button.onclick = () => this._saveAlexa(button.dataset.alexaSave); });
+    const preview = root.querySelector("[data-alexa-preview]"); if (preview) preview.onclick = () => this._previewAlexa();
+    const retry = root.querySelector("[data-alexa-retry]"); if (retry) retry.onclick = () => this._processAlexa(false);
+    const numberRules = root.querySelector("[data-alexa-number-rules]"); if (numberRules) numberRules.onclick = () => this._openAlexaRules();
+    this._bindAlexaRuleViewer("units");
+    this._bindAlexaRulesDialog();
+    const testState = this._alexaTest ||= { text: "", loading: false };
+    const testInput = root.querySelector("[data-alexa-test-input]");
+    if (testInput) testInput.oninput = () => { testState.text = testInput.value; this._invalidateAlexaTest(); };
+    const testButton = root.querySelector("[data-alexa-test]");
+    if (testButton) testButton.onclick = () => this._testAlexa();
+    this._bindAlexaPreview();
+    this._updateAlexaTest();
+    this._updateAlexaControls();
+  }
+
+  _bindAlexaLanguages() {
+    const host = this.shadowRoot.querySelector("[data-alexa-language-options]");
+    if (host) host._alexaMarkup = this._alexaLanguagesMarkup();
+    this.shadowRoot.querySelectorAll("[data-alexa-language]").forEach(input => {
+      input.onchange = () => {
+        const languages = new Set(this._alexaDraft.languages);
+        if (input.checked) languages.add(input.dataset.alexaLanguage); else languages.delete(input.dataset.alexaLanguage);
+        this._alexaDraft.languages = [...languages];
+        this._clearAlexaPreview();
+        this._updateAlexaControls();
+      };
+    });
+  }
+
+  async _saveAlexa(tab = this._alexaCurrentTab()) {
+    if (this._alexaBusy || this._alexaLoading || !this._alexaDraft) return;
+    const fields = this._alexaTabFields(tab);
+    if (!fields.length) return;
+    const settings = { ...this._alexaDefaults(), ...this._alexaData?.settings, ...Object.fromEntries(fields.map(field => [field, this._alexaDraft[field]])) };
+    settings.languages = [...settings.languages];
+    this._alexaBusy = true;
+    this._alexaFeedback = null;
+    this._updateAlexaView();
+    try {
+      const result = await haListManagerPanelTextRequest(this._hass, { type: `${API}/alexa/set`, settings });
+      this._receiveAlexaData(result, false, fields);
+      this._alexaPreview = null;
+      this._alexaPreviewConfirmed = false;
+      this._alexaFeedback = { target: tab, tone: "success", text: haListManagerPanelText("alexa.saved", {}, this._hass) };
+    } catch (error) { this._alexaFeedback = { target: tab, tone: "error", text: this._formatError(error) }; }
+    finally { this._alexaBusy = false; this._updateAlexaView(); }
+  }
+
+  async _previewAlexa() {
+    if (this._alexaBusy || this._alexaDirty()) return;
+    this._alexaBusy = true;
+    this._alexaFeedback = null;
+    this._alexaPreviewConfirmed = false;
+    this._updateAlexaView();
+    try { this._alexaPreview = await haListManagerPanelTextRequest(this._hass, { type: `${API}/alexa/preview` }); }
+    catch (error) { this._alexaFeedback = { target: "process", tone: "error", text: this._formatError(error) }; }
+    finally { this._alexaBusy = false; this._updateAlexaView(); }
+  }
+
+  async _processAlexa(includeExisting) {
+    if (this._alexaBusy || this._alexaDirty() || includeExisting && !this._alexaPreviewConfirmed) return;
+    this._alexaBusy = true;
+    this._alexaFeedback = null;
+    this._updateAlexaView();
+    try {
+      const result = await haListManagerPanelTextRequest(this._hass, { type: `${API}/alexa/process`, include_existing: Boolean(includeExisting) });
+      this._receiveAlexaData(result);
+      this._alexaPreview = null;
+      this._alexaPreviewConfirmed = false;
+      this._alexaFeedback = result.status?.last_error
+        ? { target: "process", tone: "error", text: result.status.last_error }
+        : { target: "process", tone: "success", text: haListManagerPanelText("alexa.processed", {}, this._hass) };
+    } catch (error) { this._alexaFeedback = { target: "process", tone: "error", text: this._formatError(error) }; }
+    finally { this._alexaBusy = false; this._updateAlexaView(); }
+  }
+
   _renderSettings() {
     return `${this._heading("mdi:cog-outline", haListManagerPanelText("ui.settings", {}, this._hass), haListManagerPanelText("help.backend_defaults", {}, this._hass))}${this._inlineError()}
       <ha-card class="settings-card">
         <h3>${haListManagerPanelText("ui.product_name_after_lookup", {}, this._hass)}</h3>
         <p class="field-help">${haListManagerPanelText("help.default_product_name_details", {}, this._hass)}</p>
-        <label class="setting-row"><ha-checkbox data-setting-brand></ha-checkbox><span><strong>${haListManagerPanelText("products.append_brand", {}, this._hass)}</strong><small>${haListManagerPanelText("help.append_brand_if_missing", {}, this._hass)}</small></span></label>
-        <label class="setting-row"><ha-checkbox data-setting-quantity></ha-checkbox><span><strong>${haListManagerPanelText("ui.append_package_quantity", {}, this._hass)}</strong><small>${haListManagerPanelText("ui.product_name_example", {}, this._hass)}</small></span></label>
+        <div class="setting-row checkbox-only"><ha-checkbox data-setting-brand aria-label="${haListManagerPanelText("products.append_brand", {}, this._hass)}"></ha-checkbox><span><strong>${haListManagerPanelText("products.append_brand", {}, this._hass)}</strong><small>${haListManagerPanelText("help.append_brand_if_missing", {}, this._hass)}</small></span></div>
+        <div class="setting-row checkbox-only"><ha-checkbox data-setting-quantity aria-label="${haListManagerPanelText("ui.append_package_quantity", {}, this._hass)}"></ha-checkbox><span><strong>${haListManagerPanelText("ui.append_package_quantity", {}, this._hass)}</strong><small>${haListManagerPanelText("ui.product_name_example", {}, this._hass)}</small></span></div>
       </ha-card>
       <ha-card class="settings-card scanner-defaults"><h3>${haListManagerPanelText("ui.default_scanner_target", {}, this._hass)}</h3><p class="field-help">${haListManagerPanelText("help.default_inventory_target", {}, this._hass)}</p><div class="field-grid scanner-default-grid"><ha-select data-setting-scanner-list></ha-select><ha-select data-setting-scanner-action></ha-select></div></ha-card>
       <ha-card class="settings-card"><h3>${haListManagerPanelText("ui.tandoor_recipe_source", {}, this._hass)}</h3><p class="field-help">${haListManagerPanelText("help.tandoor_credentials", {}, this._hass)}</p><label class="field"><span>${haListManagerPanelText("recipes.tandoor_url", {}, this._hass)}</span><input type="url" data-setting-tandoor-url value="${this._escape(this._settings.tandoor_url || "")}" placeholder="https://rezepte.example.local" autocomplete="url"></label><label class="field"><span>${haListManagerPanelText("ui.api_token", {}, this._hass)}</span><input type="password" data-setting-tandoor-token value="" placeholder="${this._settings.tandoor_token_configured ? haListManagerPanelText("ui.token_saved_placeholder", {}, this._hass) : haListManagerPanelText("ui.tandoor_api_token", {}, this._hass)}" autocomplete="new-password"></label><div class="settings-inline-actions"><button class="ha-button" type="button" data-test-tandoor ${this._busy ? "disabled" : ""}><ha-icon icon="mdi:connection"></ha-icon>${haListManagerPanelText("ui.test_connection", {}, this._hass)}</button><a class="ha-button" href="https://github.com/TandoorRecipes/recipes" target="_blank" rel="noopener noreferrer"><ha-icon icon="mdi:open-in-new"></ha-icon>${haListManagerPanelText("ui.tandoor_recipe_source", {}, this._hass)}</a>${this._tandoorTestStatus ? `<span class="field-help settings-test-status">${this._escape(this._tandoorTestStatus)}</span>` : ""}</div></ha-card>
@@ -3039,6 +3624,7 @@ class HaListManagerPanel extends HTMLElement {
   }
 
   _bindEvents() {
+    this._bindAlexaEvents();
     this.shadowRoot.querySelectorAll("[data-list-script]").forEach(button => button.addEventListener("click", () => this._openListScript(button.dataset.listScript)));
     if (this._dialog?.kind === "list-script") {
       const dialog = this._dialog;
@@ -3107,6 +3693,7 @@ class HaListManagerPanel extends HTMLElement {
         if (!this._settingsLoaded) this._loadSettings();
         else this._render();
       }
+      else if (this._activeSection === "alexa") this._loadAlexa();
       else if (this._activeSection === "backup") this._loadDataBackupInfo();
       else this._render();
     }));
@@ -7642,8 +8229,11 @@ class HaListManagerPanel extends HTMLElement {
     .entity-history-row[hidden],.entity-history-list[hidden],[data-entity-history-empty][hidden]{display:none}.entity-sample-visibility{display:flex;align-items:center;gap:8px;margin:14px 0}.entity-sample-visibility input{width:18px;height:18px}.entity-sample-hidden{display:inline-flex;align-items:center;gap:5px;color:var(--warning-color,#ffb300);font-size:12px}.entity-sample-hidden ha-icon{--mdc-icon-size:17px}.sample-hidden{border-left:3px solid var(--warning-color,#ffb300);padding-left:9px}.entity-history-intro{margin-bottom:14px;border-left:4px solid var(--primary-color)}.entity-history-intro p{margin-top:5px;color:var(--secondary-text-color);line-height:1.5}.entity-history-recording-option{display:flex;align-items:flex-start;gap:10px;margin-top:14px;line-height:1.45}.entity-history-recording-option input{width:18px;height:18px;flex:0 0 18px;margin-top:2px}.entity-history-recording-option span{min-width:0}.entity-history-recording-option small{display:block;margin-top:4px;color:var(--secondary-text-color)}.entity-history-add>.entity-history-recording-option{grid-column:1/-1;margin-top:0}.entity-history-add{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:end;gap:12px;margin-bottom:14px}.entity-import-id{overflow-wrap:anywhere}.entity-import-status{margin:14px 0;padding:10px 12px;border-left:4px solid var(--primary-color);background:color-mix(in srgb,var(--primary-color) 10%,transparent);line-height:1.5}.entity-history-import-sources{display:flex;flex-wrap:wrap;gap:10px 22px;margin:14px 0}.entity-history-import-sources label{display:flex;align-items:center;gap:8px}.entity-history-import-sources input{width:18px;height:18px}.entity-history-list{padding:0;overflow:hidden}.dialog.entity-samples-dialog{display:flex;flex-direction:column;width:min(850px,calc(100vw - 40px))}.entity-samples-dialog>*{flex-shrink:0}.entity-samples-dialog .field-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.entity-sample-filters{margin:12px 0}.entity-sample-filters summary{cursor:pointer;color:var(--primary-color)}.entity-sample-filters[open] summary{margin-bottom:12px}@media(max-width:600px){.entity-samples-dialog .field-grid{grid-template-columns:1fr}.entity-samples-dialog .dialog-actions .ha-button{flex:1 1 auto;min-height:44px;height:auto;padding:10px 14px}}.entity-samples-list{flex:1 1 auto;min-height:0;max-height:45vh;overflow:auto;overscroll-behavior:contain;margin:16px 0}.entity-sample-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 4px;border-bottom:1px solid var(--divider-color)}.entity-sample-row>div{display:flex;min-width:0;flex-direction:column;gap:4px}.entity-sample-row strong{overflow-wrap:anywhere}.entity-sample-row small{color:var(--secondary-text-color)}.entity-sample-status{padding:12px;color:var(--success-color,#43a047)}.entity-sample-attributes{margin:14px 0}.entity-sample-attributes summary{cursor:pointer;color:var(--primary-color)}.entity-sample-attributes pre{white-space:pre-wrap;overflow-wrap:anywhere}.entity-sample-attributes textarea{width:100%;box-sizing:border-box;font:inherit}.entity-history-row{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:13px;min-height:86px;padding:10px 16px;border-bottom:1px solid var(--divider-color)}.entity-history-row:last-child{border-bottom:0}.entity-history-icon{display:grid;place-items:center;width:44px;height:44px;border-radius:50%;color:var(--primary-color);background:color-mix(in srgb,var(--primary-color) 13%,transparent)}.entity-history-details{display:flex;min-width:0;flex-direction:column;gap:3px}.entity-history-details code,.entity-history-details small{overflow:hidden;color:var(--secondary-text-color);text-overflow:ellipsis;white-space:nowrap}.entity-history-actions{display:flex;align-items:center;gap:4px}
     .bring-sync-card{margin-bottom:16px;padding:16px 18px}.bring-sync-card.error{border-left:4px solid var(--error-color)}.bring-sync-card.syncing{border-left:4px solid var(--primary-color)}.bring-sync-header,.bring-sync-header>div{display:flex;align-items:center;gap:12px}.bring-sync-header{justify-content:space-between}.bring-sync-header>div>ha-icon{--mdc-icon-size:28px;color:var(--success-color,#43a047)}.bring-sync-card.error .bring-sync-header>div>ha-icon{color:var(--error-color)}.bring-sync-card.syncing .bring-sync-header>div>ha-icon,.bring-sync-card.never .bring-sync-header>div>ha-icon{color:var(--primary-color)}.bring-sync-header span{display:flex;flex-direction:column;gap:3px}.bring-sync-header small,.bring-sync-details small{color:var(--secondary-text-color);font-size:13px}.bring-sync-details{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:13px 24px;margin-top:16px;padding-top:15px;border-top:1px solid var(--divider-color)}.bring-sync-details>span{display:flex;flex-direction:column;gap:4px;min-width:0}.bring-sync-details strong{overflow-wrap:anywhere;font-size:14px}.bring-sync-error{display:flex;align-items:flex-start;gap:8px;margin-top:14px;padding:11px 12px;border-radius:8px;color:var(--error-color);background:color-mix(in srgb,var(--error-color) 10%,transparent);line-height:1.4}.bring-sync-error ha-icon{flex:0 0 auto;--mdc-icon-size:20px}
     @media(max-width:760px){.inventory-detail-stats{grid-template-columns:repeat(2,minmax(100px,1fr))}.inventory-detail-grid,.list-scope-grid{grid-template-columns:1fr}.simulation-grid{grid-template-columns:1fr 1fr}.page{padding:16px}.page-header{align-items:flex-start}h1{font-size:23px}.layout{display:block}nav{flex-direction:row;overflow-x:auto;margin-bottom:20px;padding:6px}nav::after{content:"";flex:0 0 calc(50vw - 48px)}.nav-item{width:auto;flex:0 0 auto;padding:0 12px}.overview-grid{grid-template-columns:1fr}.bring-sync-header{align-items:flex-start;flex-direction:column}.bring-sync-details{grid-template-columns:1fr}.release-stage{font-size:12px}.content-header.with-action{align-items:flex-start}.category-order-controls{grid-template-columns:1fr}}
-    .lookup-status{display:block;margin-top:7px;font-size:13px;line-height:1.3}.lookup-status.success{color:var(--success-color,#43a047)}.lookup-status.warning{color:var(--warning-color,#f0a000)}.lookup-status.error{color:var(--error-color)}.product-dialog-top{display:grid;grid-template-columns:minmax(0,1fr) 130px;gap:18px;align-items:start}.product-preview{position:relative;display:grid;place-items:center;width:130px;height:150px;margin-top:16px;overflow:hidden;border:1px solid var(--divider-color);border-radius:10px;color:var(--secondary-text-color);background:var(--secondary-background-color)}.product-preview img,.contained-product-image{position:absolute;inset:0;display:block;width:100%;height:100%;object-fit:contain;object-position:center}.product-preview ha-icon{--mdc-icon-size:42px}.ha-button.compact{min-height:34px;padding:0 12px;font-size:14px}.ha-button.compact.active{color:var(--primary-color);border-color:var(--primary-color);background:color-mix(in srgb,var(--primary-color) 12%,transparent)}.field input[readonly]{color:var(--secondary-text-color)}.field input.invalid{border-color:var(--error-color)}.field-error{color:var(--error-color);font-size:13px}.product-category-assignments{display:grid;gap:10px;margin-top:18px;padding:14px;border:1px solid var(--divider-color);border-radius:10px}.product-category-assignments h4{margin:0;font-size:17px}.product-category-assignments>.field-help{margin:0}.product-category-combo-field{min-width:0;margin-top:10px}.product-category-combo-field input{width:100%}.product-category-overrides{border-top:1px solid var(--divider-color);padding-top:9px}.product-category-overrides summary{cursor:pointer;color:var(--primary-text-color);font-weight:500}.product-type-categories{display:grid;grid-template-columns:minmax(0,1fr);gap:4px;margin-top:4px}.product-list-exceptions{display:grid;gap:9px;margin-top:14px}.product-list-exception{display:grid;grid-template-columns:minmax(0,1fr) 42px;align-items:center;gap:0 8px;padding:10px;border:1px solid var(--divider-color);border-radius:8px}.product-list-exception .product-category-combo-field{grid-column:1/2}.product-list-exception .icon-button{grid-column:2;grid-row:1/3;align-self:center}.settings-card{max-width:760px}.settings-card+.settings-card{margin-top:16px}.settings-inline-actions{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-top:16px}.settings-inline-actions .ha-button{text-decoration:none}.settings-test-status{flex-basis:100%;margin-top:2px}.settings-card>h3{margin-bottom:6px}.setting-row{display:flex;align-items:flex-start;gap:12px;padding:16px 0;border-bottom:1px solid var(--divider-color);cursor:pointer}.setting-row>span{display:flex;flex-direction:column;gap:4px}.setting-row small{color:var(--secondary-text-color);line-height:1.4}.settings-actions{margin-top:18px}.product-filters{display:grid;grid-template-columns:minmax(0,1fr) minmax(190px,280px);gap:12px;align-items:start;margin-bottom:16px}.product-filters .search-field{margin-bottom:0}.picker-trigger-host{position:relative}.picker-trigger-host input{padding-right:44px!important}.picker-list-trigger{position:absolute!important;z-index:4;right:5px;top:50%;display:grid!important;place-items:center;width:34px!important;height:34px!important;min-width:34px!important;min-height:34px!important;padding:0!important;transform:translateY(-50%);border:0!important;border-radius:50%!important;color:var(--primary-color)!important;background:transparent!important;cursor:pointer}.picker-list-trigger:hover,.picker-list-trigger:focus-visible,.picker-list-trigger.active{outline:0;background:color-mix(in srgb,var(--primary-color) 16%,transparent)!important}.picker-list-trigger ha-icon{--mdc-icon-size:21px}.picker-current{box-shadow:inset 3px 0 0 var(--primary-color);background:color-mix(in srgb,var(--primary-color) 12%,var(--card-background-color))!important}.category-combo{position:relative}.category-combo>input{width:100%}.category-picker-options{position:absolute;z-index:20;top:calc(100% + 4px);left:0;right:0;max-height:260px;overflow:auto;border:1px solid var(--divider-color);border-radius:8px;background:var(--card-background-color);box-shadow:0 8px 25px rgba(0,0,0,.35);overscroll-behavior:contain}.category-picker-options button{display:grid;grid-template-columns:28px minmax(0,1fr);align-items:center;gap:8px;width:100%;padding:9px 11px;border:0;border-bottom:1px solid var(--divider-color);color:var(--primary-text-color);background:transparent;text-align:left;cursor:pointer}.category-picker-options button:hover{background:var(--secondary-background-color)}.category-picker-options button>span{display:flex;flex-direction:column;min-width:0}.category-picker-options small{color:var(--secondary-text-color)}.category-picker-options .picker-empty{padding:12px}.label-selector{display:grid;gap:8px;margin:18px 0 0;padding:0;border:0;color:var(--secondary-text-color)}.label-selector>div{display:block}.selected-labels{display:flex!important;flex-wrap:wrap;gap:7px!important}.selected-label{display:inline-flex;align-items:center;gap:6px;min-height:34px;padding:3px 8px;border:1px solid color-mix(in srgb,var(--label-color,var(--primary-color)) 58%,var(--divider-color));border-radius:18px;color:var(--primary-text-color);background:color-mix(in srgb,var(--label-color,var(--primary-color)) 24%,var(--card-background-color));cursor:pointer}.selected-label ha-icon{--mdc-icon-size:18px;color:var(--label-color,var(--primary-color))}.selected-label .remove-label{--mdc-icon-size:17px;color:var(--secondary-text-color)}.label-combo{position:relative}.label-search{display:grid!important;grid-template-columns:26px minmax(0,1fr);align-items:center;min-height:45px;padding:0 10px;border:1px solid var(--divider-color);border-radius:7px;background:var(--secondary-background-color)}.label-search ha-icon{--mdc-icon-size:21px}.label-search input{width:100%;min-height:42px!important;padding:0!important;border:0!important;outline:0;background:transparent!important;color:var(--primary-text-color)}.label-picker-options{position:absolute;z-index:21;top:calc(100% + 4px);left:0;right:0;max-height:260px;overflow:auto;border:1px solid var(--divider-color);border-radius:8px;background:var(--card-background-color);box-shadow:0 8px 25px rgba(0,0,0,.35);overscroll-behavior:contain}.label-picker-options button{display:grid;grid-template-columns:32px minmax(0,1fr);align-items:center;gap:8px;width:100%;padding:9px 11px;border:0;border-bottom:1px solid var(--divider-color);color:var(--primary-text-color);background:transparent;text-align:left;cursor:pointer}.label-picker-options button>span:last-child{display:flex;min-width:0;flex-direction:column;gap:2px}.label-picker-options button small{display:block;color:var(--secondary-text-color)}.label-picker-options button:hover{background:var(--secondary-background-color)}.label-option-icon{display:grid;place-items:center;width:28px;height:28px;border-radius:50%;color:var(--label-color,var(--primary-color));background:color-mix(in srgb,var(--label-color,var(--primary-color)) 20%,transparent)}.label-option-icon ha-icon{--mdc-icon-size:19px}.label-empty{margin:0;padding:13px;color:var(--secondary-text-color)}.label-chips{display:flex!important;flex-wrap:wrap;gap:5px;margin-top:3px}.label-chip{display:inline-flex!important;align-items:center;gap:4px;width:auto;padding:3px 7px;border-radius:999px;color:var(--primary-text-color)!important;background:color-mix(in srgb,var(--label-color,var(--primary-color)) 18%,transparent);font-size:12px!important}.label-chip ha-icon{--mdc-icon-size:15px;color:var(--label-color,var(--primary-color))}
+    .lookup-status{display:block;margin-top:7px;font-size:13px;line-height:1.3}.lookup-status.success{color:var(--success-color,#43a047)}.lookup-status.warning{color:var(--warning-color,#f0a000)}.lookup-status.error{color:var(--error-color)}.product-dialog-top{display:grid;grid-template-columns:minmax(0,1fr) 130px;gap:18px;align-items:start}.product-preview{position:relative;display:grid;place-items:center;width:130px;height:150px;margin-top:16px;overflow:hidden;border:1px solid var(--divider-color);border-radius:10px;color:var(--secondary-text-color);background:var(--secondary-background-color)}.product-preview img,.contained-product-image{position:absolute;inset:0;display:block;width:100%;height:100%;object-fit:contain;object-position:center}.product-preview ha-icon{--mdc-icon-size:42px}.ha-button.compact{min-height:34px;padding:0 12px;font-size:14px}.ha-button.compact.active{color:var(--primary-color);border-color:var(--primary-color);background:color-mix(in srgb,var(--primary-color) 12%,transparent)}.field input[readonly]{color:var(--secondary-text-color)}.field input.invalid{border-color:var(--error-color)}.field-error{color:var(--error-color);font-size:13px}.product-category-assignments{display:grid;gap:10px;margin-top:18px;padding:14px;border:1px solid var(--divider-color);border-radius:10px}.product-category-assignments h4{margin:0;font-size:17px}.product-category-assignments>.field-help{margin:0}.product-category-combo-field{min-width:0;margin-top:10px}.product-category-combo-field input{width:100%}.product-category-overrides{border-top:1px solid var(--divider-color);padding-top:9px}.product-category-overrides summary{cursor:pointer;color:var(--primary-text-color);font-weight:500}.product-type-categories{display:grid;grid-template-columns:minmax(0,1fr);gap:4px;margin-top:4px}.product-list-exceptions{display:grid;gap:9px;margin-top:14px}.product-list-exception{display:grid;grid-template-columns:minmax(0,1fr) 42px;align-items:center;gap:0 8px;padding:10px;border:1px solid var(--divider-color);border-radius:8px}.product-list-exception .product-category-combo-field{grid-column:1/2}.product-list-exception .icon-button{grid-column:2;grid-row:1/3;align-self:center}.settings-card{max-width:760px}.settings-card+.settings-card{margin-top:16px}.settings-inline-actions{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-top:16px}.settings-inline-actions .ha-button{text-decoration:none}.settings-test-status{flex-basis:100%;margin-top:2px}.settings-card>h3{margin-bottom:6px}.setting-row{display:flex;align-items:flex-start;gap:12px;padding:16px 0;border-bottom:1px solid var(--divider-color);cursor:pointer}.setting-row>span{display:flex;flex-direction:column;gap:4px}.setting-row.checkbox-only{cursor:default}.setting-row.checkbox-only ha-checkbox{cursor:pointer}.setting-row small{color:var(--secondary-text-color);line-height:1.4}.settings-actions{margin-top:18px}.product-filters{display:grid;grid-template-columns:minmax(0,1fr) minmax(190px,280px);gap:12px;align-items:start;margin-bottom:16px}.product-filters .search-field{margin-bottom:0}.picker-trigger-host{position:relative}.picker-trigger-host input{padding-right:44px!important}.picker-list-trigger{position:absolute!important;z-index:4;right:5px;top:50%;display:grid!important;place-items:center;width:34px!important;height:34px!important;min-width:34px!important;min-height:34px!important;padding:0!important;transform:translateY(-50%);border:0!important;border-radius:50%!important;color:var(--primary-color)!important;background:transparent!important;cursor:pointer}.picker-list-trigger:hover,.picker-list-trigger:focus-visible,.picker-list-trigger.active{outline:0;background:color-mix(in srgb,var(--primary-color) 16%,transparent)!important}.picker-list-trigger ha-icon{--mdc-icon-size:21px}.picker-current{box-shadow:inset 3px 0 0 var(--primary-color);background:color-mix(in srgb,var(--primary-color) 12%,var(--card-background-color))!important}.category-combo{position:relative}.category-combo>input{width:100%}.category-picker-options{position:absolute;z-index:20;top:calc(100% + 4px);left:0;right:0;max-height:260px;overflow:auto;border:1px solid var(--divider-color);border-radius:8px;background:var(--card-background-color);box-shadow:0 8px 25px rgba(0,0,0,.35);overscroll-behavior:contain}.category-picker-options button{display:grid;grid-template-columns:28px minmax(0,1fr);align-items:center;gap:8px;width:100%;padding:9px 11px;border:0;border-bottom:1px solid var(--divider-color);color:var(--primary-text-color);background:transparent;text-align:left;cursor:pointer}.category-picker-options button:hover{background:var(--secondary-background-color)}.category-picker-options button>span{display:flex;flex-direction:column;min-width:0}.category-picker-options small{color:var(--secondary-text-color)}.category-picker-options .picker-empty{padding:12px}.label-selector{display:grid;gap:8px;margin:18px 0 0;padding:0;border:0;color:var(--secondary-text-color)}.label-selector>div{display:block}.selected-labels{display:flex!important;flex-wrap:wrap;gap:7px!important}.selected-label{display:inline-flex;align-items:center;gap:6px;min-height:34px;padding:3px 8px;border:1px solid color-mix(in srgb,var(--label-color,var(--primary-color)) 58%,var(--divider-color));border-radius:18px;color:var(--primary-text-color);background:color-mix(in srgb,var(--label-color,var(--primary-color)) 24%,var(--card-background-color));cursor:pointer}.selected-label ha-icon{--mdc-icon-size:18px;color:var(--label-color,var(--primary-color))}.selected-label .remove-label{--mdc-icon-size:17px;color:var(--secondary-text-color)}.label-combo{position:relative}.label-search{display:grid!important;grid-template-columns:26px minmax(0,1fr);align-items:center;min-height:45px;padding:0 10px;border:1px solid var(--divider-color);border-radius:7px;background:var(--secondary-background-color)}.label-search ha-icon{--mdc-icon-size:21px}.label-search input{width:100%;min-height:42px!important;padding:0!important;border:0!important;outline:0;background:transparent!important;color:var(--primary-text-color)}.label-picker-options{position:absolute;z-index:21;top:calc(100% + 4px);left:0;right:0;max-height:260px;overflow:auto;border:1px solid var(--divider-color);border-radius:8px;background:var(--card-background-color);box-shadow:0 8px 25px rgba(0,0,0,.35);overscroll-behavior:contain}.label-picker-options button{display:grid;grid-template-columns:32px minmax(0,1fr);align-items:center;gap:8px;width:100%;padding:9px 11px;border:0;border-bottom:1px solid var(--divider-color);color:var(--primary-text-color);background:transparent;text-align:left;cursor:pointer}.label-picker-options button>span:last-child{display:flex;min-width:0;flex-direction:column;gap:2px}.label-picker-options button small{display:block;color:var(--secondary-text-color)}.label-picker-options button:hover{background:var(--secondary-background-color)}.label-option-icon{display:grid;place-items:center;width:28px;height:28px;border-radius:50%;color:var(--label-color,var(--primary-color));background:color-mix(in srgb,var(--label-color,var(--primary-color)) 20%,transparent)}.label-option-icon ha-icon{--mdc-icon-size:19px}.label-empty{margin:0;padding:13px;color:var(--secondary-text-color)}.label-chips{display:flex!important;flex-wrap:wrap;gap:5px;margin-top:3px}.label-chip{display:inline-flex!important;align-items:center;gap:4px;width:auto;padding:3px 7px;border-radius:999px;color:var(--primary-text-color)!important;background:color-mix(in srgb,var(--label-color,var(--primary-color)) 18%,transparent);font-size:12px!important}.label-chip ha-icon{--mdc-icon-size:15px;color:var(--label-color,var(--primary-color))}
     .notification-section{margin-top:24px}.notification-section>h3{margin-bottom:4px}.notification-section>p{margin:0 0 12px;color:var(--secondary-text-color)}.notification-profile-row{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;min-height:84px}.notification-profile-row.disabled{opacity:.62}.notification-profile-icon{display:grid;place-items:center;width:48px;height:48px;margin-left:14px;border-radius:50%;color:var(--primary-color);background:color-mix(in srgb,var(--primary-color) 13%,transparent)}.notification-profile-main{display:flex;flex-direction:column;gap:3px;padding:12px 14px}.notification-profile-main small,.notification-profile-main span{color:var(--secondary-text-color)}.notification-list-card{margin-bottom:12px;padding:15px}.notification-assignment-grid{display:grid;grid-template-columns:1fr;gap:8px;margin-top:13px}.notification-assignment-choice{padding:10px 12px;border:1px solid var(--divider-color);border-radius:8px;background:var(--secondary-background-color)}.notification-assignment-choice.disabled{opacity:.55}.notification-assignment-choice input{width:19px;height:19px}.notification-assignment-heading{display:flex;align-items:center;gap:10px;cursor:pointer}.notification-assignment-heading>span,.notification-inline-toggle>span{display:flex;flex-direction:column;min-width:0}.notification-assignment-choice small{color:var(--secondary-text-color)}.notification-assignment-settings{display:grid;gap:12px;margin:12px 0 2px 29px;padding-top:12px;border-top:1px solid var(--divider-color)}.notification-assignment-settings[hidden]{display:none}.notification-inline-toggle{display:flex;align-items:flex-start;gap:10px;cursor:pointer}.notification-automatic-grid{display:grid;grid-template-columns:minmax(220px,1fr) minmax(220px,280px);gap:12px}.notification-automatic-grid .field{margin-top:0}.notification-delay>div{display:grid;grid-template-columns:minmax(110px,140px) auto;justify-content:start;align-items:center;gap:10px}.notification-assignment-choice .notification-delay input{width:100%;height:48px;min-width:110px}.notification-delay>div>span{color:var(--secondary-text-color)}.notification-events{display:flex;flex-wrap:wrap;gap:8px 18px;margin:0;padding:11px 12px;border:1px solid var(--divider-color);border-radius:8px}.notification-events legend{padding:0 5px;color:var(--secondary-text-color)}.notification-events label{display:flex;align-items:center;gap:7px}.notification-events:disabled{opacity:.55}.notification-delay-help{line-height:1.4}.notification-status{display:flex;align-items:center;gap:9px;margin:12px 0;padding:11px 13px;border-left:4px solid var(--success-color,#43a047);border-radius:6px;background:color-mix(in srgb,var(--success-color,#43a047) 10%,transparent)}.notification-status ha-icon{color:var(--success-color,#43a047)}.notification-dialog{width:min(650px,100%)}.notification-dialog [data-notification-click-field][hidden],.notification-dialog [data-notification-format-help][hidden]{display:none}.notification-target-field{display:flex;flex-direction:column;gap:4px;margin-top:14px}.notification-target-field>small{min-height:18px;color:var(--secondary-text-color);font-size:12px;overflow-wrap:anywhere}.notification-message-fields{grid-template-columns:minmax(0,1fr) minmax(150px,210px)}.field select{box-sizing:border-box;width:100%;min-height:48px;padding:0 12px;border:1px solid var(--divider-color);border-radius:7px;color:var(--primary-text-color);background:var(--secondary-background-color);font:inherit}.field small{color:var(--secondary-text-color);line-height:1.4}
+    .alexa-tabs{flex-wrap:nowrap;overflow-x:auto}.alexa-tabs button{flex:0 0 auto;white-space:nowrap}@media(max-width:600px){.alexa-tabs button{padding:11px 8px;gap:6px}}
+    .alexa-rule-table{width:100%;border-collapse:collapse;margin:12px 0;table-layout:fixed}.alexa-rule-table th,.alexa-rule-table td{text-align:left;vertical-align:top;padding:8px;border-bottom:1px solid var(--divider-color);overflow-wrap:anywhere}.alexa-rule-table th:first-child,.alexa-rule-table td:first-child{width:28%}.alexa-rule-results{overflow:visible}.alexa-rules-dialog>.alexa-rule-results{overflow:auto;overscroll-behavior:contain}.alexa-rule-search,.alexa-test-input-row{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:end;gap:12px;margin:16px 0}.alexa-rule-search>.field,.alexa-test-input-row>.field{min-width:0;margin:0}.alexa-rule-search input,.alexa-test-input-row input,.alexa-rule-search>.ha-button,.alexa-test-input-row>.ha-button{height:48px;min-height:48px;box-sizing:border-box;margin:0}.alexa-rules-dialog{display:flex;flex-direction:column;max-height:calc(100dvh - 40px);overflow:hidden}.alexa-rules-dialog>.alexa-rule-results{flex:1 1 auto;min-height:0;max-height:none}.alexa-rules-dialog>:not(.alexa-rule-results){flex-shrink:0}.alexa-rules-dialog .dialog-title{display:flex;align-items:center;justify-content:space-between;gap:12px}.alexa-rules-dialog .dialog-title h2{margin:0}.alexa-confirm ha-checkbox{flex:0 0 auto}@media(max-width:600px){.alexa-rule-search,.alexa-test-input-row{grid-template-columns:minmax(0,1fr)}.alexa-rule-search>.ha-button,.alexa-test-input-row>.ha-button{justify-self:start}}
+    .alexa-card h3{display:flex;align-items:center;gap:10px}.alexa-card h3 ha-icon{color:var(--primary-color)}.alexa-card textarea{box-sizing:border-box;width:100%;max-width:100%;resize:vertical;font:inherit;line-height:1.5}.alexa-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.alexa-card .field,.alexa-card .setting-row{min-width:0}.alexa-card .field select{min-width:0;max-width:100%}.alexa-feedback{display:flex;align-items:flex-start;gap:10px;margin:14px 0 0;padding:12px;border-left:4px solid var(--success-color,#43a047);border-radius:7px;background:color-mix(in srgb,var(--success-color,#43a047) 10%,transparent);overflow-wrap:anywhere}.alexa-feedback ha-icon{flex:0 0 auto}.alexa-feedback.error{border-left-color:var(--error-color);background:color-mix(in srgb,var(--error-color) 10%,transparent)}.alexa-connection-status{display:flex;align-items:center;gap:10px;color:var(--secondary-text-color)}.alexa-connection-status.ready{color:var(--success-color,#43a047)}.alexa-status-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin:18px 0}.alexa-status-grid dt{color:var(--secondary-text-color)}.alexa-status-grid dd{margin:5px 0 0;overflow-wrap:anywhere}.alexa-speaking-help,.alexa-recent{margin-top:18px}.alexa-speaking-help summary,.alexa-recent summary{cursor:pointer;color:var(--primary-color)}.alexa-confirm{display:flex;gap:10px;align-items:flex-start;margin:16px 0}.alexa-import-preview{padding:16px;margin-top:15px;border:1px solid var(--divider-color);border-radius:9px}.alexa-preview-rows{max-height:360px;overflow:auto}.alexa-preview-row,.alexa-receipt{display:flex;gap:10px;padding:12px 0;border-bottom:1px solid var(--divider-color)}.alexa-preview-row>div,.alexa-receipt>div{display:flex;flex-direction:column;gap:5px;min-width:0;overflow-wrap:anywhere}.alexa-preview-row small,.alexa-receipt small{color:var(--secondary-text-color)}.alexa-receipt>ha-icon{color:var(--primary-color);flex:0 0 auto}.alexa-warning{color:var(--warning-color,#ffa600)}.alexa-card [hidden],.alexa-rules-dialog [hidden]{display:none!important}@media(max-width:600px){.alexa-grid,.alexa-status-grid{grid-template-columns:minmax(0,1fr)}.alexa-card .settings-inline-actions{align-items:stretch}.alexa-card .settings-inline-actions .ha-button{white-space:normal}}
     .notification-list-card{padding:0;overflow:hidden}.notification-list-toggle{display:flex;align-items:center;justify-content:space-between;gap:14px;width:100%;min-height:72px;padding:13px 16px;border:0;color:var(--primary-text-color);background:transparent;text-align:left;cursor:pointer}.notification-list-toggle:hover{background:var(--secondary-background-color)}.notification-list-toggle>span{display:flex;flex-direction:column;gap:4px;min-width:0}.notification-list-toggle strong{font-size:17px}.notification-list-toggle small{color:var(--secondary-text-color)}.notification-list-toggle ha-icon{flex:0 0 auto;color:var(--secondary-text-color)}.notification-list-body[hidden]{display:none}.notification-list-body{padding:0 14px 14px;border-top:1px solid var(--divider-color)}.notification-list-actions{display:flex;justify-content:flex-end;flex-wrap:wrap;gap:8px;padding-top:12px}.notification-assignment-heading{justify-content:space-between}.notification-assignment-identity{display:flex;align-items:center;gap:10px;min-width:0;cursor:pointer}.notification-assignment-identity>span{display:flex;flex-direction:column;min-width:0}.notification-assignment-identity small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.notification-settings-toggle{flex:0 0 auto}.notification-settings-toggle ha-icon{--mdc-icon-size:19px}
     @media(max-width:520px){.inventory-dialog-product-actions{align-items:stretch;flex-direction:column}.inventory-dialog-product-actions .ha-button{width:100%}.category-row.definition-row{grid-template-columns:auto minmax(0,1fr) auto}.category-row.definition-row>.category-symbol{grid-column:1;margin-left:10px}.category-row.definition-row>.category-open{grid-column:2;display:flex;min-width:0;flex-direction:column;align-items:flex-start;gap:4px;padding:10px 8px}.category-row.definition-row>.category-open strong,.category-row.definition-row>.category-open small{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.category-row.definition-row>.row-actions{grid-column:3;grid-row:1;padding-right:2px}.entity-history-add{grid-template-columns:1fr}.entity-history-add .ha-button{width:100%}.entity-history-row{grid-template-columns:44px minmax(0,1fr);align-items:start;padding:12px}.entity-history-details{grid-column:2;min-width:0}.entity-history-actions{grid-column:1/3;display:flex;flex-wrap:wrap;justify-content:flex-end;width:100%;padding-top:8px}.entity-history-actions .ha-button{flex:1 1 auto}.notification-profile-row{grid-template-columns:48px minmax(0,1fr);align-items:start;padding:10px 8px}.notification-profile-icon{margin-left:0}.notification-profile-main{min-width:0;padding:4px 10px}.notification-profile-main small,.notification-profile-main span{overflow-wrap:anywhere}.notification-profile-row>.row-actions{grid-column:1/3;justify-content:flex-end;width:100%;padding:4px 0 0}.category-page-actions{flex-direction:column}.category-page-actions .ha-button{width:100%}.category-specific-picker{grid-template-columns:minmax(0,1fr)}.inventory-detail-stats{grid-template-columns:1fr 1fr}.section-heading{flex-direction:column}.list-scope-card .section-heading,.dashboard-usage-card .section-heading{display:grid;grid-template-columns:minmax(0,1fr) 42px;align-items:start;width:100%}.list-scope-card .section-heading>div,.dashboard-usage-card .section-heading>div{min-width:0;text-align:left}.list-scope-card .section-heading>.icon-button,.dashboard-usage-card .section-heading>.icon-button{grid-column:2;grid-row:1;justify-self:end;margin:0}.section-heading .ha-button{width:100%}.category-rule-quick{grid-template-columns:1fr}.category-rule-quick .ha-button{width:100%}.content-header.with-action{display:block}.content-header.with-action>.ha-button,.content-header.with-action>.header-actions{width:100%;margin-top:14px}.header-actions .ha-button{width:100%}.category-product-page-header{grid-template-columns:auto minmax(0,1fr)}.category-product-page-header>.ha-button{grid-column:1/3;width:100%}.category-product-page-row{grid-template-columns:48px minmax(0,1fr)}.category-product-page-row>.ha-button{grid-column:2;justify-self:start}.dialog{padding:20px}.dialog-actions .ha-button{flex:1}.field-grid,.scanner-default-grid,.scanner-route-fields,.product-grid,.color-field,.product-dialog-top,.dynamic-category-field,.product-filters,.inventory-group-fields,.simulation-grid,.notification-automatic-grid{grid-template-columns:1fr}.active-target{align-items:flex-start;flex-wrap:wrap}.active-target .ha-button{width:100%}.scanner-row{grid-template-columns:auto minmax(0,1fr) auto}.scanner-state{grid-column:2}.scanner-row>.row-actions{grid-column:3;grid-row:1/3}.history-row{grid-template-columns:auto minmax(0,1fr)}.history-row>code{grid-column:2}.product-preview{grid-row:1;width:100%;height:150px}.dynamic-category-field .ha-button{width:100%;margin-bottom:0}.list-open{padding-left:12px}.row-actions{padding-right:2px}.item-check{width:46px}.product-image{width:48px;height:48px;margin-left:8px}.product-open{padding-left:10px}.category-row{grid-template-columns:minmax(0,1fr) auto}.category-row>.color-swatch{display:none}.category-row>.row-actions{grid-column:2}.dynamic-category-row{align-items:flex-start;flex-direction:column}.dynamic-category-row .ha-button{width:100%}.inventory-toolbar{grid-template-columns:1fr}.inventory-row{grid-template-columns:auto minmax(0,1fr) auto}.inventory-stock{grid-column:2;justify-content:start}.inventory-row>.row-actions{grid-column:3;grid-row:1/3}.inventory-image{width:44px;height:44px;margin-left:8px}.inventory-open{padding-left:8px}.category-order-row{grid-template-columns:34px 48px minmax(0,1fr) 76px}.category-order-row .category-symbol{width:38px;height:38px}.category-position-field input{width:68px}.category-order-arrows{grid-column:3/5;justify-content:flex-end;padding:0 6px 6px}.category-order-actions .ha-button{flex:1}.todo-due-fields{grid-template-columns:minmax(130px,1fr) minmax(90px,.65fr)}.todo-recurrence-fields{grid-template-columns:minmax(90px,1fr) minmax(110px,1fr)}}
     ${globalThis.HaListManagerProductEditor.styles()}

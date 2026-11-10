@@ -15,6 +15,7 @@ import sqlite3
 import time
 from dataclasses import replace
 from typing import TYPE_CHECKING, Any, TypeVar
+import unicodedata
 from uuid import uuid4
 
 from .localization import async_use_language, text as localized_text
@@ -488,6 +489,67 @@ class HaListManagerDatabase:
     async def async_get_item(self, item_id: str) -> ListItemRecord:
         """Return one list entry."""
         return await self._async_run(self._get_item, item_id)
+
+    async def async_get_alexa_state(self) -> dict[str, Any]:
+        """Return the single Alexa connection and recent intake diagnostics."""
+        return await self._async_run(self._get_alexa_state)
+
+    async def async_set_alexa_settings(self, settings: dict[str, Any]) -> dict[str, Any]:
+        """Save connection preferences without discarding processed source IDs."""
+        return await self._async_run(self._set_alexa_settings, settings)
+
+    async def async_update_alexa_status(self, status: dict[str, Any]) -> None:
+        """Merge runtime diagnostics while preserving connection preferences."""
+        await self._async_run(self._update_alexa_status, status)
+
+    async def async_get_alexa_receipts(
+        self, source_id: str, uids: list[str],
+    ) -> dict[str, dict[str, Any]]:
+        """Read processing receipts for one observed source snapshot."""
+        return await self._async_run(self._get_alexa_receipts, source_id, uids)
+
+    async def async_list_alexa_pending_receipts(self) -> list[dict[str, Any]]:
+        """Return already imported items whose optional source cleanup needs retry."""
+        return await self._async_run(self._list_alexa_pending_receipts)
+
+    async def async_ignore_alexa_items(
+        self, source_id: str, uids: list[str], *, source_entity_id: str | None = None,
+    ) -> None:
+        """Remember an initial snapshot without importing existing entries."""
+        await self._async_run(self._ignore_alexa_items, source_id, uids, source_entity_id)
+
+    async def async_accept_alexa_item(
+        self, source_id: str, uid: str, target_list_id: str, name: str,
+        description: str | None, quantity: int, cleanup_action: str,
+        original_name: str, *, include_existing: bool = False,
+        source_entity_id: str | None = None,
+        match_products: bool = False, has_unit: bool = False,
+    ) -> dict[str, Any]:
+        """Commit an item and its source receipt in the same transaction."""
+        return await self._async_run(
+            self._accept_alexa_item, source_id, uid, target_list_id, name,
+            description, quantity, cleanup_action, original_name,
+            include_existing, source_entity_id, match_products, has_unit,
+        )
+
+    async def async_preview_alexa_item(
+        self, target_list_id: str | None, name: str, description: str | None,
+        quantity: int, *, match_products: bool = False, has_unit: bool = False,
+    ) -> dict[str, Any]:
+        """Resolve an incoming item without adding it or reserving its source ID."""
+        return await self._async_run(
+            self._preview_alexa_item, target_list_id, name, description,
+            quantity, match_products, has_unit,
+        )
+
+    async def async_update_alexa_receipt(
+        self, source_id: str, uid: str, cleanup_status: str,
+        last_error: str | None = None,
+    ) -> None:
+        """Record cleanup progress independently of the local item's lifetime."""
+        await self._async_run(
+            self._update_alexa_receipt, source_id, uid, cleanup_status, last_error,
+        )
 
     async def async_create_item(
         self,
@@ -1586,6 +1648,10 @@ class HaListManagerDatabase:
                 })
             except Exception:
                 logging.getLogger(__name__).exception("Unable to publish a committed script action")
+        if target.__name__ == "_accept_alexa_item" and result.get("accepted"):
+            # A cancellation cannot undo the SQLite commit. Publish its one
+            # mutation before propagating cancellation, just like bookings.
+            self._fire_item_mutated(result.pop("_before"), result.pop("_after"))
         if cancelled is not None:
             raise cancelled
         return result
@@ -1772,7 +1838,7 @@ class HaListManagerDatabase:
                         "The existing database has no supported schema metadata"
                     )
                 version = self._read_schema_version(connection)
-                if version != DATABASE_SCHEMA_VERSION:
+                if version not in (1, DATABASE_SCHEMA_VERSION):
                     raise UnsupportedSchemaVersionError(
                         f"Database schema {version} is not supported; "
                         f"expected {DATABASE_SCHEMA_VERSION}"
@@ -1789,6 +1855,15 @@ class HaListManagerDatabase:
                 self._create_schema(connection)
                 connection.execute(
                     "INSERT INTO schema_metadata(key, value) VALUES('schema_version', ?)",
+                    (str(DATABASE_SCHEMA_VERSION),),
+                )
+            elif version == 1:
+                # Schema 2 only adds the Alexa intake ledger; existing records
+                # and IDs remain untouched and the upgrade commits atomically.
+                connection.execute("BEGIN IMMEDIATE")
+                self._create_alexa_schema(connection)
+                connection.execute(
+                    "UPDATE schema_metadata SET value = ? WHERE key = 'schema_version'",
                     (str(DATABASE_SCHEMA_VERSION),),
                 )
 
@@ -2306,6 +2381,38 @@ CREATE UNIQUE INDEX chips_list_name_unique ON chips(list_id, priority_name) WHER
         self._create_user_favorites_schema(connection)
         self._create_inventory_restock_transfers_schema(connection)
         self._create_list_scripts_schema(connection)
+        self._create_alexa_schema(connection)
+
+    @staticmethod
+    def _create_alexa_schema(connection: sqlite3.Connection) -> None:
+        """Keep one connection and durable per-source processing receipts."""
+        connection.execute("""CREATE TABLE IF NOT EXISTS alexa_inbox (
+            id INTEGER PRIMARY KEY CHECK(id = 1),
+            settings_json TEXT NOT NULL DEFAULT '{}',
+            status_json TEXT NOT NULL DEFAULT '{}',
+            updated_at TEXT NOT NULL)""")
+        # No foreign keys to list_items/lists: deleting an imported item must
+        # never make its still-visible Amazon source eligible for import again.
+        connection.execute("""CREATE TABLE IF NOT EXISTS alexa_receipts (
+            source_id TEXT NOT NULL,
+            uid TEXT NOT NULL,
+            source_entity_id TEXT,
+            target_list_id TEXT,
+            item_id TEXT,
+            original_name TEXT,
+            name TEXT,
+            description TEXT,
+            quantity INTEGER,
+            cleanup_action TEXT NOT NULL CHECK(cleanup_action IN ('keep','complete','delete')),
+            cleanup_status TEXT NOT NULL CHECK(cleanup_status IN ('ignored','kept','pending','done','error')),
+            created_at TEXT NOT NULL,
+            cleaned_at TEXT,
+            last_error TEXT,
+            PRIMARY KEY(source_id, uid))""")
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS alexa_cleanup_idx "
+            "ON alexa_receipts(cleanup_status, created_at)"
+        )
 
     @staticmethod
     def _create_inventory_restock_transfers_schema(
@@ -3823,6 +3930,271 @@ WHERE registry_entry_id IS NOT NULL;
                 connection, "list_item_labels", "item_id", item_id, row["list_id"]
             )
         return self._item_record_from_row(row, labels)
+
+    def _get_alexa_state(self) -> dict[str, Any]:
+        with self._connect() as connection:
+            row = connection.execute("SELECT * FROM alexa_inbox WHERE id = 1").fetchone()
+            receipts = connection.execute(
+                "SELECT * FROM alexa_receipts ORDER BY created_at DESC, source_id, uid LIMIT 100"
+            ).fetchall()
+        return {
+            "settings": json.loads(row["settings_json"]) if row else {},
+            "status": json.loads(row["status_json"]) if row else {},
+            "receipts": [dict(receipt) for receipt in receipts],
+        }
+
+    def _set_alexa_settings(self, settings: dict[str, Any]) -> dict[str, Any]:
+        # Copy through JSON so callers cannot mutate already persisted values.
+        encoded = json.dumps(settings, ensure_ascii=False, allow_nan=False)
+        with self._connect() as connection:
+            connection.execute(
+                "INSERT INTO alexa_inbox(id,settings_json,status_json,updated_at) "
+                "VALUES(1,?,'{}',?) ON CONFLICT(id) DO UPDATE SET "
+                "settings_json=excluded.settings_json,updated_at=excluded.updated_at",
+                (encoded, self._now()),
+            )
+        return self._get_alexa_state()
+
+    def _update_alexa_status(self, status: dict[str, Any]) -> None:
+        with self._connect() as connection:
+            row = connection.execute("SELECT status_json FROM alexa_inbox WHERE id=1").fetchone()
+            values = json.loads(row[0]) if row else {}
+            values.update(status)
+            encoded = json.dumps(values, ensure_ascii=False, allow_nan=False)
+            connection.execute(
+                "INSERT INTO alexa_inbox(id,settings_json,status_json,updated_at) "
+                "VALUES(1,'{}',?,?) ON CONFLICT(id) DO UPDATE SET "
+                "status_json=excluded.status_json,updated_at=excluded.updated_at",
+                (encoded, self._now()),
+            )
+
+    def _get_alexa_receipts(
+        self, source_id: str, uids: list[str],
+    ) -> dict[str, dict[str, Any]]:
+        found = {}
+        with self._connect() as connection:
+            for offset in range(0, len(uids), 400):
+                chunk = uids[offset:offset + 400]
+                rows = connection.execute(
+                    "SELECT * FROM alexa_receipts WHERE source_id=? AND uid IN ("
+                    + ",".join("?" for _ in chunk) + ")", (source_id, *chunk),
+                ).fetchall()
+                found.update({row["uid"]: dict(row) for row in rows})
+        return found
+
+    def _list_alexa_pending_receipts(self) -> list[dict[str, Any]]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM alexa_receipts WHERE cleanup_status IN ('pending','error') "
+                "ORDER BY created_at,source_id,uid"
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def _ignore_alexa_items(
+        self, source_id: str, uids: list[str], source_entity_id: str | None,
+    ) -> None:
+        if not source_id or not isinstance(source_id, str):
+            raise ValueError(localized_text("alexa.invalid_source"))
+        if any(not isinstance(uid, str) or not uid or len(uid) > 1000 for uid in uids):
+            raise ValueError(localized_text("alexa.invalid_source"))
+        with self._connect() as connection:
+            connection.executemany(
+                "INSERT OR IGNORE INTO alexa_receipts("
+                "source_id,uid,source_entity_id,cleanup_action,cleanup_status,created_at) "
+                "VALUES(?,?,?,'keep','ignored',?)",
+                [(source_id, uid, source_entity_id, self._now()) for uid in set(uids)],
+            )
+
+    @staticmethod
+    def _alexa_match_text(value: str | None) -> str:
+        return " ".join((value or "").split()).casefold()
+
+    @staticmethod
+    def _validate_alexa_item_input(
+        name: str, description: str | None, quantity: int,
+    ) -> tuple[str, str | None]:
+        if not isinstance(name, str) or not name.strip() or len(name) > 200:
+            raise ValueError(localized_text("alexa.item_invalid"))
+        if description is not None and (not isinstance(description, str) or len(description) > 2000):
+            raise ValueError(localized_text("backend.description_too_long"))
+        if isinstance(quantity, bool) or not isinstance(quantity, int) or not 1 <= quantity <= 1_000_000:
+            raise ValueError(localized_text("backend.quantity_range"))
+        return name.strip(), description.strip() or None if description is not None else None
+
+    def _resolve_alexa_product(
+        self, connection: sqlite3.Connection, name: str,
+        match_products: bool, has_unit: bool,
+    ) -> dict[str, Any]:
+        resolution = {
+            "product_id": None, "product_name": None,
+            "reason": "unit" if has_unit else "disabled", "match_count": 0,
+        }
+        if match_products and not has_unit:
+            key = self._alexa_match_text(unicodedata.normalize("NFKC", name))
+            products = [row for row in connection.execute("SELECT id,name FROM products")
+                        if self._alexa_match_text(unicodedata.normalize("NFKC", row["name"])) == key]
+            resolution["match_count"] = len(products)
+            resolution["reason"] = "no_match" if not products else "multiple_products"
+            if len(products) == 1:
+                product = products[0]
+                resolution.update(product_id=product["id"], product_name=product["name"], reason="unique_product")
+        return resolution
+
+    def _resolve_alexa_item(
+        self, connection: sqlite3.Connection, target_list_id: str,
+        name: str, description: str | None, quantity: int,
+        match_products: bool, has_unit: bool,
+    ) -> tuple[dict[str, Any], sqlite3.Row | None]:
+        self._require_list(connection, target_list_id)
+        target = connection.execute("SELECT * FROM lists WHERE id=?", (target_list_id,)).fetchone()
+        if target["list_type"] != "shopping" or target["provider"] != "local" or not target["enabled"]:
+            raise ValueError(localized_text("backend.local_shopping_target_required"))
+        resolution = self._resolve_alexa_product(connection, name, match_products, has_unit)
+        match = None
+        if resolution["product_id"] is not None:
+            linked = connection.execute(
+                "SELECT * FROM list_items WHERE list_id=? AND completed=0 AND product_id=? "
+                "AND external_uid IS NULL AND inventory_source_type IS NULL AND inventory_source_id IS NULL "
+                "ORDER BY position,created_at,id", (target_list_id, resolution["product_id"]),
+            ).fetchall()
+            if len(linked) > 1:
+                resolution.update(product_id=None, product_name=None, reason="multiple_items")
+            else:
+                match = linked[0] if linked else None
+        if resolution["product_id"] is None:
+            # Unit-qualified orders must never become package counts. Ambiguous
+            # products retain the established free-item merge behavior as well.
+            candidates = connection.execute(
+                "SELECT * FROM list_items WHERE list_id=? AND completed=0 "
+                "AND product_id IS NULL AND external_uid IS NULL "
+                "AND inventory_source_type IS NULL AND inventory_source_id IS NULL "
+                "ORDER BY position,created_at,id", (target_list_id,),
+            ).fetchall()
+            match = next((row for row in candidates
+                if self._alexa_match_text(row["name"]) == self._alexa_match_text(name)
+                and self._alexa_match_text(row["description"]) == self._alexa_match_text(description)), None)
+        total = quantity + (match["quantity"] if match else 0)
+        if total > 1_000_000:
+            raise ValueError(localized_text("backend.quantity_range"))
+        resolution.update(
+            action=("product" if resolution["product_id"] else "free") + ("_increase" if match else "_add"),
+            item_id=match["id"] if match else None,
+            quantity=quantity, result_quantity=total, target_missing=False,
+        )
+        return resolution, match
+
+    def _preview_alexa_item(
+        self, target_list_id: str | None, name: str, description: str | None,
+        quantity: int, match_products: bool = False, has_unit: bool = False,
+    ) -> dict[str, Any]:
+        name, description = self._validate_alexa_item_input(name, description, quantity)
+        with self._connect() as connection:
+            # Resolve against one read snapshot without creating assignments or
+            # reserving a source ID while the user inspects the preview.
+            connection.execute("BEGIN")
+            if target_list_id is None:
+                resolution = self._resolve_alexa_product(connection, name, match_products, has_unit)
+                resolution.update(action="target_required", target_missing=True, quantity=quantity)
+            else:
+                resolution, _ = self._resolve_alexa_item(
+                    connection, target_list_id, name, description, quantity,
+                    match_products, has_unit,
+                )
+        return resolution
+
+    def _accept_alexa_item(
+        self, source_id: str, uid: str, target_list_id: str, name: str,
+        description: str | None, quantity: int, cleanup_action: str,
+        original_name: str, include_existing: bool = False,
+        source_entity_id: str | None = None,
+        match_products: bool = False, has_unit: bool = False,
+    ) -> dict[str, Any]:
+        if (not isinstance(source_id, str) or not source_id or len(source_id) > 1000
+            or not isinstance(uid, str) or not uid or len(uid) > 1000):
+            raise ValueError(localized_text("alexa.invalid_source"))
+        name, description = self._validate_alexa_item_input(name, description, quantity)
+        if cleanup_action not in ("keep", "complete", "delete"):
+            raise ValueError(localized_text("alexa.invalid_cleanup"))
+        now = self._now()
+        before = None
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            previous = connection.execute(
+                "SELECT * FROM alexa_receipts WHERE source_id=? AND uid=?", (source_id, uid),
+            ).fetchone()
+            if previous is not None and not (include_existing and previous["cleanup_status"] == "ignored"):
+                row = connection.execute("SELECT * FROM list_items WHERE id=?", (previous["item_id"],)).fetchone()
+                item = self._item_record_from_row(
+                    row, self._labels_for(connection, "list_item_labels", "item_id", row["id"], row["list_id"])
+                ).as_dict() if row else None
+                return {"accepted": False, "receipt": dict(previous), "item": item, "resolution": None}
+
+            resolution, match = self._resolve_alexa_item(
+                connection, target_list_id, name, description, quantity,
+                match_products, has_unit,
+            )
+            if match:
+                before = self._item_record_from_row(
+                    match, self._labels_for(connection, "list_item_labels", "item_id", match["id"], target_list_id)
+                )
+                item_id = match["id"]
+                connection.execute(
+                    "UPDATE list_items SET quantity=quantity+?,updated_at=? WHERE id=?",
+                    (quantity, now, item_id),
+                )
+            else:
+                product_id = resolution["product_id"]
+                item_name = resolution["product_name"] if product_id else name
+                category_id = category = None
+                if product_id:
+                    category_id, category = self._resolve_product_category_for_list(connection, product_id, target_list_id)
+                if category_id is None and category is None:
+                    category_id, category = self._resolve_category_rule_for_list(connection, target_list_id, item_name)
+                category_id, category = self._resolve_item_category(connection, target_list_id, category_id, category)
+                position = connection.execute(
+                    "SELECT COALESCE(MAX(position),-1)+1 FROM list_items WHERE list_id=?", (target_list_id,),
+                ).fetchone()[0]
+                item_id = str(uuid4())
+                connection.execute(
+                    "INSERT INTO list_items(id,list_id,product_id,name,description,quantity,category_id,category,"
+                    "completed,position,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,0,?,?,?)",
+                    (item_id, target_list_id, product_id, item_name, description, quantity, category_id, category, position, now, now),
+                )
+                if product_id:
+                    labels = self._labels_for(connection, "product_labels", "product_id", product_id, target_list_id)
+                    self._replace_labels(connection, "list_item_labels", "item_id", item_id, [label.id for label in labels])
+            cleanup_status = "kept" if cleanup_action == "keep" else "pending"
+            connection.execute(
+                "INSERT INTO alexa_receipts(source_id,uid,source_entity_id,target_list_id,item_id,"
+                "original_name,name,description,quantity,cleanup_action,cleanup_status,created_at) "
+                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(source_id,uid) DO UPDATE SET "
+                "source_entity_id=excluded.source_entity_id,target_list_id=excluded.target_list_id,"
+                "item_id=excluded.item_id,original_name=excluded.original_name,name=excluded.name,"
+                "description=excluded.description,quantity=excluded.quantity,cleanup_action=excluded.cleanup_action,"
+                "cleanup_status=excluded.cleanup_status,created_at=excluded.created_at,cleaned_at=NULL,last_error=NULL",
+                (source_id, uid, source_entity_id, target_list_id, item_id, original_name,
+                 name, description, quantity, cleanup_action, cleanup_status, now),
+            )
+            row = connection.execute("SELECT * FROM list_items WHERE id=?", (item_id,)).fetchone()
+            after = self._item_record_from_row(
+                row, self._labels_for(connection, "list_item_labels", "item_id", item_id, target_list_id)
+            )
+            receipt = dict(connection.execute(
+                "SELECT * FROM alexa_receipts WHERE source_id=? AND uid=?", (source_id, uid),
+            ).fetchone())
+        return {"accepted": True, "receipt": receipt, "item": after.as_dict(), "resolution": resolution, "_before": before, "_after": after}
+
+    def _update_alexa_receipt(
+        self, source_id: str, uid: str, cleanup_status: str, last_error: str | None,
+    ) -> None:
+        if cleanup_status not in ("pending", "done", "error", "kept"):
+            raise ValueError(localized_text("alexa.invalid_cleanup"))
+        with self._connect() as connection:
+            connection.execute(
+                "UPDATE alexa_receipts SET cleanup_status=?,last_error=?,cleaned_at=? "
+                "WHERE source_id=? AND uid=? AND cleanup_status!='ignored'",
+                (cleanup_status, last_error, self._now() if cleanup_status == "done" else None, source_id, uid),
+            )
 
     def _create_item(
         self,

@@ -158,12 +158,90 @@ def _fire_items_changed(hass: HomeAssistant, list_id: str) -> None:
     hass.bus.async_fire(EVENT_ITEMS_CHANGED, {"list_id": list_id})
 
 
+async def _alexa_result(hass, connection, msg, operation, **kwargs) -> None:
+    """Keep the fixed Alexa intake administrative, including its diagnostics."""
+    try:
+        manager = _runtime(hass).alexa
+        result = await getattr(manager, operation)(**kwargs)
+    except ValueError as error:
+        _send_input_error(connection, msg, error)
+        return
+    except HomeAssistantError as error:
+        _send_error(connection, msg["id"], "alexa_error", error)
+        return
+    except Exception:
+        _send_error(connection, msg["id"], "alexa_error", localized_text("alexa.processing_failed"))
+        return
+    connection.send_result(msg["id"], result)
+
+
+@websocket_api.require_admin
+@localized_command({probatio.Required("type"): f"{DOMAIN}/alexa/get"})
+async def websocket_alexa_get(hass, connection, msg) -> None:
+    """Return settings, eligible sources and the durable intake status."""
+    await _alexa_result(hass, connection, msg, "async_get")
+
+
+@websocket_api.require_admin
+@localized_command({probatio.Required("type"): f"{DOMAIN}/alexa/set", probatio.Required("settings"): dict})
+async def websocket_alexa_set(hass, connection, msg) -> None:
+    """Configure one source and one fixed local shopping target."""
+    await _alexa_result(hass, connection, msg, "async_set", values=msg["settings"])
+
+
+@websocket_api.require_admin
+@localized_command({probatio.Required("type"): f"{DOMAIN}/alexa/preview"})
+async def websocket_alexa_preview(hass, connection, msg) -> None:
+    """Preview existing open entries without importing or cleaning anything."""
+    await _alexa_result(hass, connection, msg, "async_preview")
+
+
+@websocket_api.require_admin
+@localized_command({probatio.Required("type"): f"{DOMAIN}/alexa/process", probatio.Optional("include_existing", default=False): bool})
+async def websocket_alexa_process(hass, connection, msg) -> None:
+    """Retry intake, or explicitly include the entries excluded at activation."""
+    await _alexa_result(hass, connection, msg, "async_process", include_existing=msg.get("include_existing", False))
+
+
+@websocket_api.require_admin
+@localized_command({
+    probatio.Required("type"): f"{DOMAIN}/alexa/test",
+    probatio.Required("settings"): dict,
+    probatio.Required("text"): str,
+})
+async def websocket_alexa_test(hass, connection, msg) -> None:
+    """Test an unsaved recognition draft without changing lists or settings."""
+    await _alexa_result(hass, connection, msg, "async_test", settings=msg["settings"], input_text=msg["text"])
+
+
+@websocket_api.require_admin
+@localized_command({
+    probatio.Required("type"): f"{DOMAIN}/alexa/rules",
+    probatio.Required("language_code"): str,
+    probatio.Required("kind"): probatio.In({"numbers", "units"}),
+    probatio.Optional("query", default=""): str,
+    probatio.Optional("offset", default=0): int,
+    probatio.Optional("limit", default=50): int,
+})
+async def websocket_alexa_rules(hass, connection, msg) -> None:
+    """Return one bounded page of shipped recognition rules for a language."""
+    await _alexa_result(hass, connection, msg, "async_rules", language_code=msg["language_code"],
+                       kind=msg["kind"], query=msg["query"], offset=msg["offset"], limit=msg["limit"])
+
+
 @callback
 def async_register_websocket_commands(hass: HomeAssistant) -> None:
     """Register commands once for the current Home Assistant process."""
     if hass.data.get(DATA_WEBSOCKET_REGISTERED):
         return
     hass.data[DATA_WEBSOCKET_REGISTERED] = True
+
+    websocket_api.async_register_command(hass, websocket_alexa_get)
+    websocket_api.async_register_command(hass, websocket_alexa_set)
+    websocket_api.async_register_command(hass, websocket_alexa_preview)
+    websocket_api.async_register_command(hass, websocket_alexa_process)
+    websocket_api.async_register_command(hass, websocket_alexa_test)
+    websocket_api.async_register_command(hass, websocket_alexa_rules)
 
     websocket_api.async_register_command(hass, websocket_subscribe)
     websocket_api.async_register_command(hass, websocket_get_list_script_settings)
@@ -753,7 +831,7 @@ async def websocket_set_favorite(
     """Add or remove one navigation favorite for the authenticated user."""
     allowed_sections = {
         "lists", "products", "categories", "labels", "chips", "dishes", "inventory",
-        "entity_history", "history", "notifications", "settings", "backup", "statistics",
+        "entity_history", "history", "notifications", "alexa", "settings", "backup", "statistics",
     }
     section = msg["section"].strip()
     if section not in allowed_sections:
