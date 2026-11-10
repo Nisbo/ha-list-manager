@@ -94,9 +94,14 @@ def validate(path: Path) -> dict:
                     if connection.execute('PRAGMA integrity_check').fetchone()[0] != 'ok':
                         raise BackupError(text('backup.invalid'))
                     version = int(connection.execute("SELECT value FROM schema_metadata WHERE key='schema_version'").fetchone()[0])
-                    if version not in {1, DATABASE_SCHEMA_VERSION}:
+                    if version not in {1, 2, DATABASE_SCHEMA_VERSION}:
                         raise BackupError(text('backup.version'))
-                    if version == 1 and DATABASE_SCHEMA_VERSION == 2:
+                    if version < 3:
+                        expected.execute('DROP TABLE alexa_tombstones')
+                        expected.execute('DROP TABLE alexa_history')
+                        expected.execute('ALTER TABLE lists DROP COLUMN capitalize_first_letter')
+                        expected.execute('ALTER TABLE alexa_receipts DROP COLUMN sync_json')
+                    if version == 1:
                         # Compare against the actual old shape; never migrate the
                         # uploaded file during inspection. Setup upgrades on restore.
                         expected.execute('DROP TABLE alexa_receipts')

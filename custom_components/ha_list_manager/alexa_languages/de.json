@@ -431,792 +431,396 @@
       "phrase": "einhundert ein"
     },
     {
-      "value": 101,
-      "phrase": "einhundertein"
-    },
-    {
       "value": 102,
       "phrase": "einhundert zwei"
-    },
-    {
-      "value": 102,
-      "phrase": "einhundertzwei"
     },
     {
       "value": 103,
       "phrase": "einhundert drei"
     },
     {
-      "value": 103,
-      "phrase": "einhundertdrei"
-    },
-    {
       "value": 104,
       "phrase": "einhundert vier"
-    },
-    {
-      "value": 104,
-      "phrase": "einhundertvier"
     },
     {
       "value": 105,
       "phrase": "einhundert fünf"
     },
     {
-      "value": 105,
-      "phrase": "einhundertfünf"
-    },
-    {
       "value": 106,
       "phrase": "einhundert sechs"
-    },
-    {
-      "value": 106,
-      "phrase": "einhundertsechs"
     },
     {
       "value": 107,
       "phrase": "einhundert sieben"
     },
     {
-      "value": 107,
-      "phrase": "einhundertsieben"
-    },
-    {
       "value": 108,
       "phrase": "einhundert acht"
-    },
-    {
-      "value": 108,
-      "phrase": "einhundertacht"
     },
     {
       "value": 109,
       "phrase": "einhundert neun"
     },
     {
-      "value": 109,
-      "phrase": "einhundertneun"
-    },
-    {
       "value": 110,
       "phrase": "einhundert zehn"
-    },
-    {
-      "value": 110,
-      "phrase": "einhundertzehn"
     },
     {
       "value": 111,
       "phrase": "einhundert elf"
     },
     {
-      "value": 111,
-      "phrase": "einhundertelf"
-    },
-    {
       "value": 112,
       "phrase": "einhundert zwölf"
-    },
-    {
-      "value": 112,
-      "phrase": "einhundertzwölf"
     },
     {
       "value": 113,
       "phrase": "einhundert dreizehn"
     },
     {
-      "value": 113,
-      "phrase": "einhundertdreizehn"
-    },
-    {
       "value": 114,
       "phrase": "einhundert vierzehn"
-    },
-    {
-      "value": 114,
-      "phrase": "einhundertvierzehn"
     },
     {
       "value": 115,
       "phrase": "einhundert fünfzehn"
     },
     {
-      "value": 115,
-      "phrase": "einhundertfünfzehn"
-    },
-    {
       "value": 116,
       "phrase": "einhundert sechzehn"
-    },
-    {
-      "value": 116,
-      "phrase": "einhundertsechzehn"
     },
     {
       "value": 117,
       "phrase": "einhundert siebzehn"
     },
     {
-      "value": 117,
-      "phrase": "einhundertsiebzehn"
-    },
-    {
       "value": 118,
       "phrase": "einhundert achtzehn"
-    },
-    {
-      "value": 118,
-      "phrase": "einhundertachtzehn"
     },
     {
       "value": 119,
       "phrase": "einhundert neunzehn"
     },
     {
-      "value": 119,
-      "phrase": "einhundertneunzehn"
-    },
-    {
       "value": 120,
       "phrase": "einhundert zwanzig"
-    },
-    {
-      "value": 120,
-      "phrase": "einhundertzwanzig"
     },
     {
       "value": 121,
       "phrase": "einhundert einundzwanzig"
     },
     {
-      "value": 121,
-      "phrase": "einhunderteinundzwanzig"
-    },
-    {
       "value": 122,
       "phrase": "einhundert zweiundzwanzig"
-    },
-    {
-      "value": 122,
-      "phrase": "einhundertzweiundzwanzig"
     },
     {
       "value": 123,
       "phrase": "einhundert dreiundzwanzig"
     },
     {
-      "value": 123,
-      "phrase": "einhundertdreiundzwanzig"
-    },
-    {
       "value": 124,
       "phrase": "einhundert vierundzwanzig"
-    },
-    {
-      "value": 124,
-      "phrase": "einhundertvierundzwanzig"
     },
     {
       "value": 125,
       "phrase": "einhundert fünfundzwanzig"
     },
     {
-      "value": 125,
-      "phrase": "einhundertfünfundzwanzig"
-    },
-    {
       "value": 126,
       "phrase": "einhundert sechsundzwanzig"
-    },
-    {
-      "value": 126,
-      "phrase": "einhundertsechsundzwanzig"
     },
     {
       "value": 127,
       "phrase": "einhundert siebenundzwanzig"
     },
     {
-      "value": 127,
-      "phrase": "einhundertsiebenundzwanzig"
-    },
-    {
       "value": 128,
       "phrase": "einhundert achtundzwanzig"
-    },
-    {
-      "value": 128,
-      "phrase": "einhundertachtundzwanzig"
     },
     {
       "value": 129,
       "phrase": "einhundert neunundzwanzig"
     },
     {
-      "value": 129,
-      "phrase": "einhundertneunundzwanzig"
-    },
-    {
       "value": 130,
       "phrase": "einhundert dreißig"
-    },
-    {
-      "value": 130,
-      "phrase": "einhundertdreißig"
     },
     {
       "value": 131,
       "phrase": "einhundert einunddreißig"
     },
     {
-      "value": 131,
-      "phrase": "einhunderteinunddreißig"
-    },
-    {
       "value": 132,
       "phrase": "einhundert zweiunddreißig"
-    },
-    {
-      "value": 132,
-      "phrase": "einhundertzweiunddreißig"
     },
     {
       "value": 133,
       "phrase": "einhundert dreiunddreißig"
     },
     {
-      "value": 133,
-      "phrase": "einhundertdreiunddreißig"
-    },
-    {
       "value": 134,
       "phrase": "einhundert vierunddreißig"
-    },
-    {
-      "value": 134,
-      "phrase": "einhundertvierunddreißig"
     },
     {
       "value": 135,
       "phrase": "einhundert fünfunddreißig"
     },
     {
-      "value": 135,
-      "phrase": "einhundertfünfunddreißig"
-    },
-    {
       "value": 136,
       "phrase": "einhundert sechsunddreißig"
-    },
-    {
-      "value": 136,
-      "phrase": "einhundertsechsunddreißig"
     },
     {
       "value": 137,
       "phrase": "einhundert siebenunddreißig"
     },
     {
-      "value": 137,
-      "phrase": "einhundertsiebenunddreißig"
-    },
-    {
       "value": 138,
       "phrase": "einhundert achtunddreißig"
-    },
-    {
-      "value": 138,
-      "phrase": "einhundertachtunddreißig"
     },
     {
       "value": 139,
       "phrase": "einhundert neununddreißig"
     },
     {
-      "value": 139,
-      "phrase": "einhundertneununddreißig"
-    },
-    {
       "value": 140,
       "phrase": "einhundert vierzig"
-    },
-    {
-      "value": 140,
-      "phrase": "einhundertvierzig"
     },
     {
       "value": 141,
       "phrase": "einhundert einundvierzig"
     },
     {
-      "value": 141,
-      "phrase": "einhunderteinundvierzig"
-    },
-    {
       "value": 142,
       "phrase": "einhundert zweiundvierzig"
-    },
-    {
-      "value": 142,
-      "phrase": "einhundertzweiundvierzig"
     },
     {
       "value": 143,
       "phrase": "einhundert dreiundvierzig"
     },
     {
-      "value": 143,
-      "phrase": "einhundertdreiundvierzig"
-    },
-    {
       "value": 144,
       "phrase": "einhundert vierundvierzig"
-    },
-    {
-      "value": 144,
-      "phrase": "einhundertvierundvierzig"
     },
     {
       "value": 145,
       "phrase": "einhundert fünfundvierzig"
     },
     {
-      "value": 145,
-      "phrase": "einhundertfünfundvierzig"
-    },
-    {
       "value": 146,
       "phrase": "einhundert sechsundvierzig"
-    },
-    {
-      "value": 146,
-      "phrase": "einhundertsechsundvierzig"
     },
     {
       "value": 147,
       "phrase": "einhundert siebenundvierzig"
     },
     {
-      "value": 147,
-      "phrase": "einhundertsiebenundvierzig"
-    },
-    {
       "value": 148,
       "phrase": "einhundert achtundvierzig"
-    },
-    {
-      "value": 148,
-      "phrase": "einhundertachtundvierzig"
     },
     {
       "value": 149,
       "phrase": "einhundert neunundvierzig"
     },
     {
-      "value": 149,
-      "phrase": "einhundertneunundvierzig"
-    },
-    {
       "value": 150,
       "phrase": "einhundert fünfzig"
-    },
-    {
-      "value": 150,
-      "phrase": "einhundertfünfzig"
     },
     {
       "value": 151,
       "phrase": "einhundert einundfünfzig"
     },
     {
-      "value": 151,
-      "phrase": "einhunderteinundfünfzig"
-    },
-    {
       "value": 152,
       "phrase": "einhundert zweiundfünfzig"
-    },
-    {
-      "value": 152,
-      "phrase": "einhundertzweiundfünfzig"
     },
     {
       "value": 153,
       "phrase": "einhundert dreiundfünfzig"
     },
     {
-      "value": 153,
-      "phrase": "einhundertdreiundfünfzig"
-    },
-    {
       "value": 154,
       "phrase": "einhundert vierundfünfzig"
-    },
-    {
-      "value": 154,
-      "phrase": "einhundertvierundfünfzig"
     },
     {
       "value": 155,
       "phrase": "einhundert fünfundfünfzig"
     },
     {
-      "value": 155,
-      "phrase": "einhundertfünfundfünfzig"
-    },
-    {
       "value": 156,
       "phrase": "einhundert sechsundfünfzig"
-    },
-    {
-      "value": 156,
-      "phrase": "einhundertsechsundfünfzig"
     },
     {
       "value": 157,
       "phrase": "einhundert siebenundfünfzig"
     },
     {
-      "value": 157,
-      "phrase": "einhundertsiebenundfünfzig"
-    },
-    {
       "value": 158,
       "phrase": "einhundert achtundfünfzig"
-    },
-    {
-      "value": 158,
-      "phrase": "einhundertachtundfünfzig"
     },
     {
       "value": 159,
       "phrase": "einhundert neunundfünfzig"
     },
     {
-      "value": 159,
-      "phrase": "einhundertneunundfünfzig"
-    },
-    {
       "value": 160,
       "phrase": "einhundert sechzig"
-    },
-    {
-      "value": 160,
-      "phrase": "einhundertsechzig"
     },
     {
       "value": 161,
       "phrase": "einhundert einundsechzig"
     },
     {
-      "value": 161,
-      "phrase": "einhunderteinundsechzig"
-    },
-    {
       "value": 162,
       "phrase": "einhundert zweiundsechzig"
-    },
-    {
-      "value": 162,
-      "phrase": "einhundertzweiundsechzig"
     },
     {
       "value": 163,
       "phrase": "einhundert dreiundsechzig"
     },
     {
-      "value": 163,
-      "phrase": "einhundertdreiundsechzig"
-    },
-    {
       "value": 164,
       "phrase": "einhundert vierundsechzig"
-    },
-    {
-      "value": 164,
-      "phrase": "einhundertvierundsechzig"
     },
     {
       "value": 165,
       "phrase": "einhundert fünfundsechzig"
     },
     {
-      "value": 165,
-      "phrase": "einhundertfünfundsechzig"
-    },
-    {
       "value": 166,
       "phrase": "einhundert sechsundsechzig"
-    },
-    {
-      "value": 166,
-      "phrase": "einhundertsechsundsechzig"
     },
     {
       "value": 167,
       "phrase": "einhundert siebenundsechzig"
     },
     {
-      "value": 167,
-      "phrase": "einhundertsiebenundsechzig"
-    },
-    {
       "value": 168,
       "phrase": "einhundert achtundsechzig"
-    },
-    {
-      "value": 168,
-      "phrase": "einhundertachtundsechzig"
     },
     {
       "value": 169,
       "phrase": "einhundert neunundsechzig"
     },
     {
-      "value": 169,
-      "phrase": "einhundertneunundsechzig"
-    },
-    {
       "value": 170,
       "phrase": "einhundert siebzig"
-    },
-    {
-      "value": 170,
-      "phrase": "einhundertsiebzig"
     },
     {
       "value": 171,
       "phrase": "einhundert einundsiebzig"
     },
     {
-      "value": 171,
-      "phrase": "einhunderteinundsiebzig"
-    },
-    {
       "value": 172,
       "phrase": "einhundert zweiundsiebzig"
-    },
-    {
-      "value": 172,
-      "phrase": "einhundertzweiundsiebzig"
     },
     {
       "value": 173,
       "phrase": "einhundert dreiundsiebzig"
     },
     {
-      "value": 173,
-      "phrase": "einhundertdreiundsiebzig"
-    },
-    {
       "value": 174,
       "phrase": "einhundert vierundsiebzig"
-    },
-    {
-      "value": 174,
-      "phrase": "einhundertvierundsiebzig"
     },
     {
       "value": 175,
       "phrase": "einhundert fünfundsiebzig"
     },
     {
-      "value": 175,
-      "phrase": "einhundertfünfundsiebzig"
-    },
-    {
       "value": 176,
       "phrase": "einhundert sechsundsiebzig"
-    },
-    {
-      "value": 176,
-      "phrase": "einhundertsechsundsiebzig"
     },
     {
       "value": 177,
       "phrase": "einhundert siebenundsiebzig"
     },
     {
-      "value": 177,
-      "phrase": "einhundertsiebenundsiebzig"
-    },
-    {
       "value": 178,
       "phrase": "einhundert achtundsiebzig"
-    },
-    {
-      "value": 178,
-      "phrase": "einhundertachtundsiebzig"
     },
     {
       "value": 179,
       "phrase": "einhundert neunundsiebzig"
     },
     {
-      "value": 179,
-      "phrase": "einhundertneunundsiebzig"
-    },
-    {
       "value": 180,
       "phrase": "einhundert achtzig"
-    },
-    {
-      "value": 180,
-      "phrase": "einhundertachtzig"
     },
     {
       "value": 181,
       "phrase": "einhundert einundachtzig"
     },
     {
-      "value": 181,
-      "phrase": "einhunderteinundachtzig"
-    },
-    {
       "value": 182,
       "phrase": "einhundert zweiundachtzig"
-    },
-    {
-      "value": 182,
-      "phrase": "einhundertzweiundachtzig"
     },
     {
       "value": 183,
       "phrase": "einhundert dreiundachtzig"
     },
     {
-      "value": 183,
-      "phrase": "einhundertdreiundachtzig"
-    },
-    {
       "value": 184,
       "phrase": "einhundert vierundachtzig"
-    },
-    {
-      "value": 184,
-      "phrase": "einhundertvierundachtzig"
     },
     {
       "value": 185,
       "phrase": "einhundert fünfundachtzig"
     },
     {
-      "value": 185,
-      "phrase": "einhundertfünfundachtzig"
-    },
-    {
       "value": 186,
       "phrase": "einhundert sechsundachtzig"
-    },
-    {
-      "value": 186,
-      "phrase": "einhundertsechsundachtzig"
     },
     {
       "value": 187,
       "phrase": "einhundert siebenundachtzig"
     },
     {
-      "value": 187,
-      "phrase": "einhundertsiebenundachtzig"
-    },
-    {
       "value": 188,
       "phrase": "einhundert achtundachtzig"
-    },
-    {
-      "value": 188,
-      "phrase": "einhundertachtundachtzig"
     },
     {
       "value": 189,
       "phrase": "einhundert neunundachtzig"
     },
     {
-      "value": 189,
-      "phrase": "einhundertneunundachtzig"
-    },
-    {
       "value": 190,
       "phrase": "einhundert neunzig"
-    },
-    {
-      "value": 190,
-      "phrase": "einhundertneunzig"
     },
     {
       "value": 191,
       "phrase": "einhundert einundneunzig"
     },
     {
-      "value": 191,
-      "phrase": "einhunderteinundneunzig"
-    },
-    {
       "value": 192,
       "phrase": "einhundert zweiundneunzig"
-    },
-    {
-      "value": 192,
-      "phrase": "einhundertzweiundneunzig"
     },
     {
       "value": 193,
       "phrase": "einhundert dreiundneunzig"
     },
     {
-      "value": 193,
-      "phrase": "einhundertdreiundneunzig"
-    },
-    {
       "value": 194,
       "phrase": "einhundert vierundneunzig"
-    },
-    {
-      "value": 194,
-      "phrase": "einhundertvierundneunzig"
     },
     {
       "value": 195,
       "phrase": "einhundert fünfundneunzig"
     },
     {
-      "value": 195,
-      "phrase": "einhundertfünfundneunzig"
-    },
-    {
       "value": 196,
       "phrase": "einhundert sechsundneunzig"
-    },
-    {
-      "value": 196,
-      "phrase": "einhundertsechsundneunzig"
     },
     {
       "value": 197,
       "phrase": "einhundert siebenundneunzig"
     },
     {
-      "value": 197,
-      "phrase": "einhundertsiebenundneunzig"
-    },
-    {
       "value": 198,
       "phrase": "einhundert achtundneunzig"
     },
     {
-      "value": 198,
-      "phrase": "einhundertachtundneunzig"
-    },
-    {
       "value": 199,
       "phrase": "einhundert neunundneunzig"
-    },
-    {
-      "value": 199,
-      "phrase": "einhundertneunundneunzig"
     },
     {
       "value": 200,
@@ -1227,792 +831,396 @@
       "phrase": "zweihundert ein"
     },
     {
-      "value": 201,
-      "phrase": "zweihundertein"
-    },
-    {
       "value": 202,
       "phrase": "zweihundert zwei"
-    },
-    {
-      "value": 202,
-      "phrase": "zweihundertzwei"
     },
     {
       "value": 203,
       "phrase": "zweihundert drei"
     },
     {
-      "value": 203,
-      "phrase": "zweihundertdrei"
-    },
-    {
       "value": 204,
       "phrase": "zweihundert vier"
-    },
-    {
-      "value": 204,
-      "phrase": "zweihundertvier"
     },
     {
       "value": 205,
       "phrase": "zweihundert fünf"
     },
     {
-      "value": 205,
-      "phrase": "zweihundertfünf"
-    },
-    {
       "value": 206,
       "phrase": "zweihundert sechs"
-    },
-    {
-      "value": 206,
-      "phrase": "zweihundertsechs"
     },
     {
       "value": 207,
       "phrase": "zweihundert sieben"
     },
     {
-      "value": 207,
-      "phrase": "zweihundertsieben"
-    },
-    {
       "value": 208,
       "phrase": "zweihundert acht"
-    },
-    {
-      "value": 208,
-      "phrase": "zweihundertacht"
     },
     {
       "value": 209,
       "phrase": "zweihundert neun"
     },
     {
-      "value": 209,
-      "phrase": "zweihundertneun"
-    },
-    {
       "value": 210,
       "phrase": "zweihundert zehn"
-    },
-    {
-      "value": 210,
-      "phrase": "zweihundertzehn"
     },
     {
       "value": 211,
       "phrase": "zweihundert elf"
     },
     {
-      "value": 211,
-      "phrase": "zweihundertelf"
-    },
-    {
       "value": 212,
       "phrase": "zweihundert zwölf"
-    },
-    {
-      "value": 212,
-      "phrase": "zweihundertzwölf"
     },
     {
       "value": 213,
       "phrase": "zweihundert dreizehn"
     },
     {
-      "value": 213,
-      "phrase": "zweihundertdreizehn"
-    },
-    {
       "value": 214,
       "phrase": "zweihundert vierzehn"
-    },
-    {
-      "value": 214,
-      "phrase": "zweihundertvierzehn"
     },
     {
       "value": 215,
       "phrase": "zweihundert fünfzehn"
     },
     {
-      "value": 215,
-      "phrase": "zweihundertfünfzehn"
-    },
-    {
       "value": 216,
       "phrase": "zweihundert sechzehn"
-    },
-    {
-      "value": 216,
-      "phrase": "zweihundertsechzehn"
     },
     {
       "value": 217,
       "phrase": "zweihundert siebzehn"
     },
     {
-      "value": 217,
-      "phrase": "zweihundertsiebzehn"
-    },
-    {
       "value": 218,
       "phrase": "zweihundert achtzehn"
-    },
-    {
-      "value": 218,
-      "phrase": "zweihundertachtzehn"
     },
     {
       "value": 219,
       "phrase": "zweihundert neunzehn"
     },
     {
-      "value": 219,
-      "phrase": "zweihundertneunzehn"
-    },
-    {
       "value": 220,
       "phrase": "zweihundert zwanzig"
-    },
-    {
-      "value": 220,
-      "phrase": "zweihundertzwanzig"
     },
     {
       "value": 221,
       "phrase": "zweihundert einundzwanzig"
     },
     {
-      "value": 221,
-      "phrase": "zweihunderteinundzwanzig"
-    },
-    {
       "value": 222,
       "phrase": "zweihundert zweiundzwanzig"
-    },
-    {
-      "value": 222,
-      "phrase": "zweihundertzweiundzwanzig"
     },
     {
       "value": 223,
       "phrase": "zweihundert dreiundzwanzig"
     },
     {
-      "value": 223,
-      "phrase": "zweihundertdreiundzwanzig"
-    },
-    {
       "value": 224,
       "phrase": "zweihundert vierundzwanzig"
-    },
-    {
-      "value": 224,
-      "phrase": "zweihundertvierundzwanzig"
     },
     {
       "value": 225,
       "phrase": "zweihundert fünfundzwanzig"
     },
     {
-      "value": 225,
-      "phrase": "zweihundertfünfundzwanzig"
-    },
-    {
       "value": 226,
       "phrase": "zweihundert sechsundzwanzig"
-    },
-    {
-      "value": 226,
-      "phrase": "zweihundertsechsundzwanzig"
     },
     {
       "value": 227,
       "phrase": "zweihundert siebenundzwanzig"
     },
     {
-      "value": 227,
-      "phrase": "zweihundertsiebenundzwanzig"
-    },
-    {
       "value": 228,
       "phrase": "zweihundert achtundzwanzig"
-    },
-    {
-      "value": 228,
-      "phrase": "zweihundertachtundzwanzig"
     },
     {
       "value": 229,
       "phrase": "zweihundert neunundzwanzig"
     },
     {
-      "value": 229,
-      "phrase": "zweihundertneunundzwanzig"
-    },
-    {
       "value": 230,
       "phrase": "zweihundert dreißig"
-    },
-    {
-      "value": 230,
-      "phrase": "zweihundertdreißig"
     },
     {
       "value": 231,
       "phrase": "zweihundert einunddreißig"
     },
     {
-      "value": 231,
-      "phrase": "zweihunderteinunddreißig"
-    },
-    {
       "value": 232,
       "phrase": "zweihundert zweiunddreißig"
-    },
-    {
-      "value": 232,
-      "phrase": "zweihundertzweiunddreißig"
     },
     {
       "value": 233,
       "phrase": "zweihundert dreiunddreißig"
     },
     {
-      "value": 233,
-      "phrase": "zweihundertdreiunddreißig"
-    },
-    {
       "value": 234,
       "phrase": "zweihundert vierunddreißig"
-    },
-    {
-      "value": 234,
-      "phrase": "zweihundertvierunddreißig"
     },
     {
       "value": 235,
       "phrase": "zweihundert fünfunddreißig"
     },
     {
-      "value": 235,
-      "phrase": "zweihundertfünfunddreißig"
-    },
-    {
       "value": 236,
       "phrase": "zweihundert sechsunddreißig"
-    },
-    {
-      "value": 236,
-      "phrase": "zweihundertsechsunddreißig"
     },
     {
       "value": 237,
       "phrase": "zweihundert siebenunddreißig"
     },
     {
-      "value": 237,
-      "phrase": "zweihundertsiebenunddreißig"
-    },
-    {
       "value": 238,
       "phrase": "zweihundert achtunddreißig"
-    },
-    {
-      "value": 238,
-      "phrase": "zweihundertachtunddreißig"
     },
     {
       "value": 239,
       "phrase": "zweihundert neununddreißig"
     },
     {
-      "value": 239,
-      "phrase": "zweihundertneununddreißig"
-    },
-    {
       "value": 240,
       "phrase": "zweihundert vierzig"
-    },
-    {
-      "value": 240,
-      "phrase": "zweihundertvierzig"
     },
     {
       "value": 241,
       "phrase": "zweihundert einundvierzig"
     },
     {
-      "value": 241,
-      "phrase": "zweihunderteinundvierzig"
-    },
-    {
       "value": 242,
       "phrase": "zweihundert zweiundvierzig"
-    },
-    {
-      "value": 242,
-      "phrase": "zweihundertzweiundvierzig"
     },
     {
       "value": 243,
       "phrase": "zweihundert dreiundvierzig"
     },
     {
-      "value": 243,
-      "phrase": "zweihundertdreiundvierzig"
-    },
-    {
       "value": 244,
       "phrase": "zweihundert vierundvierzig"
-    },
-    {
-      "value": 244,
-      "phrase": "zweihundertvierundvierzig"
     },
     {
       "value": 245,
       "phrase": "zweihundert fünfundvierzig"
     },
     {
-      "value": 245,
-      "phrase": "zweihundertfünfundvierzig"
-    },
-    {
       "value": 246,
       "phrase": "zweihundert sechsundvierzig"
-    },
-    {
-      "value": 246,
-      "phrase": "zweihundertsechsundvierzig"
     },
     {
       "value": 247,
       "phrase": "zweihundert siebenundvierzig"
     },
     {
-      "value": 247,
-      "phrase": "zweihundertsiebenundvierzig"
-    },
-    {
       "value": 248,
       "phrase": "zweihundert achtundvierzig"
-    },
-    {
-      "value": 248,
-      "phrase": "zweihundertachtundvierzig"
     },
     {
       "value": 249,
       "phrase": "zweihundert neunundvierzig"
     },
     {
-      "value": 249,
-      "phrase": "zweihundertneunundvierzig"
-    },
-    {
       "value": 250,
       "phrase": "zweihundert fünfzig"
-    },
-    {
-      "value": 250,
-      "phrase": "zweihundertfünfzig"
     },
     {
       "value": 251,
       "phrase": "zweihundert einundfünfzig"
     },
     {
-      "value": 251,
-      "phrase": "zweihunderteinundfünfzig"
-    },
-    {
       "value": 252,
       "phrase": "zweihundert zweiundfünfzig"
-    },
-    {
-      "value": 252,
-      "phrase": "zweihundertzweiundfünfzig"
     },
     {
       "value": 253,
       "phrase": "zweihundert dreiundfünfzig"
     },
     {
-      "value": 253,
-      "phrase": "zweihundertdreiundfünfzig"
-    },
-    {
       "value": 254,
       "phrase": "zweihundert vierundfünfzig"
-    },
-    {
-      "value": 254,
-      "phrase": "zweihundertvierundfünfzig"
     },
     {
       "value": 255,
       "phrase": "zweihundert fünfundfünfzig"
     },
     {
-      "value": 255,
-      "phrase": "zweihundertfünfundfünfzig"
-    },
-    {
       "value": 256,
       "phrase": "zweihundert sechsundfünfzig"
-    },
-    {
-      "value": 256,
-      "phrase": "zweihundertsechsundfünfzig"
     },
     {
       "value": 257,
       "phrase": "zweihundert siebenundfünfzig"
     },
     {
-      "value": 257,
-      "phrase": "zweihundertsiebenundfünfzig"
-    },
-    {
       "value": 258,
       "phrase": "zweihundert achtundfünfzig"
-    },
-    {
-      "value": 258,
-      "phrase": "zweihundertachtundfünfzig"
     },
     {
       "value": 259,
       "phrase": "zweihundert neunundfünfzig"
     },
     {
-      "value": 259,
-      "phrase": "zweihundertneunundfünfzig"
-    },
-    {
       "value": 260,
       "phrase": "zweihundert sechzig"
-    },
-    {
-      "value": 260,
-      "phrase": "zweihundertsechzig"
     },
     {
       "value": 261,
       "phrase": "zweihundert einundsechzig"
     },
     {
-      "value": 261,
-      "phrase": "zweihunderteinundsechzig"
-    },
-    {
       "value": 262,
       "phrase": "zweihundert zweiundsechzig"
-    },
-    {
-      "value": 262,
-      "phrase": "zweihundertzweiundsechzig"
     },
     {
       "value": 263,
       "phrase": "zweihundert dreiundsechzig"
     },
     {
-      "value": 263,
-      "phrase": "zweihundertdreiundsechzig"
-    },
-    {
       "value": 264,
       "phrase": "zweihundert vierundsechzig"
-    },
-    {
-      "value": 264,
-      "phrase": "zweihundertvierundsechzig"
     },
     {
       "value": 265,
       "phrase": "zweihundert fünfundsechzig"
     },
     {
-      "value": 265,
-      "phrase": "zweihundertfünfundsechzig"
-    },
-    {
       "value": 266,
       "phrase": "zweihundert sechsundsechzig"
-    },
-    {
-      "value": 266,
-      "phrase": "zweihundertsechsundsechzig"
     },
     {
       "value": 267,
       "phrase": "zweihundert siebenundsechzig"
     },
     {
-      "value": 267,
-      "phrase": "zweihundertsiebenundsechzig"
-    },
-    {
       "value": 268,
       "phrase": "zweihundert achtundsechzig"
-    },
-    {
-      "value": 268,
-      "phrase": "zweihundertachtundsechzig"
     },
     {
       "value": 269,
       "phrase": "zweihundert neunundsechzig"
     },
     {
-      "value": 269,
-      "phrase": "zweihundertneunundsechzig"
-    },
-    {
       "value": 270,
       "phrase": "zweihundert siebzig"
-    },
-    {
-      "value": 270,
-      "phrase": "zweihundertsiebzig"
     },
     {
       "value": 271,
       "phrase": "zweihundert einundsiebzig"
     },
     {
-      "value": 271,
-      "phrase": "zweihunderteinundsiebzig"
-    },
-    {
       "value": 272,
       "phrase": "zweihundert zweiundsiebzig"
-    },
-    {
-      "value": 272,
-      "phrase": "zweihundertzweiundsiebzig"
     },
     {
       "value": 273,
       "phrase": "zweihundert dreiundsiebzig"
     },
     {
-      "value": 273,
-      "phrase": "zweihundertdreiundsiebzig"
-    },
-    {
       "value": 274,
       "phrase": "zweihundert vierundsiebzig"
-    },
-    {
-      "value": 274,
-      "phrase": "zweihundertvierundsiebzig"
     },
     {
       "value": 275,
       "phrase": "zweihundert fünfundsiebzig"
     },
     {
-      "value": 275,
-      "phrase": "zweihundertfünfundsiebzig"
-    },
-    {
       "value": 276,
       "phrase": "zweihundert sechsundsiebzig"
-    },
-    {
-      "value": 276,
-      "phrase": "zweihundertsechsundsiebzig"
     },
     {
       "value": 277,
       "phrase": "zweihundert siebenundsiebzig"
     },
     {
-      "value": 277,
-      "phrase": "zweihundertsiebenundsiebzig"
-    },
-    {
       "value": 278,
       "phrase": "zweihundert achtundsiebzig"
-    },
-    {
-      "value": 278,
-      "phrase": "zweihundertachtundsiebzig"
     },
     {
       "value": 279,
       "phrase": "zweihundert neunundsiebzig"
     },
     {
-      "value": 279,
-      "phrase": "zweihundertneunundsiebzig"
-    },
-    {
       "value": 280,
       "phrase": "zweihundert achtzig"
-    },
-    {
-      "value": 280,
-      "phrase": "zweihundertachtzig"
     },
     {
       "value": 281,
       "phrase": "zweihundert einundachtzig"
     },
     {
-      "value": 281,
-      "phrase": "zweihunderteinundachtzig"
-    },
-    {
       "value": 282,
       "phrase": "zweihundert zweiundachtzig"
-    },
-    {
-      "value": 282,
-      "phrase": "zweihundertzweiundachtzig"
     },
     {
       "value": 283,
       "phrase": "zweihundert dreiundachtzig"
     },
     {
-      "value": 283,
-      "phrase": "zweihundertdreiundachtzig"
-    },
-    {
       "value": 284,
       "phrase": "zweihundert vierundachtzig"
-    },
-    {
-      "value": 284,
-      "phrase": "zweihundertvierundachtzig"
     },
     {
       "value": 285,
       "phrase": "zweihundert fünfundachtzig"
     },
     {
-      "value": 285,
-      "phrase": "zweihundertfünfundachtzig"
-    },
-    {
       "value": 286,
       "phrase": "zweihundert sechsundachtzig"
-    },
-    {
-      "value": 286,
-      "phrase": "zweihundertsechsundachtzig"
     },
     {
       "value": 287,
       "phrase": "zweihundert siebenundachtzig"
     },
     {
-      "value": 287,
-      "phrase": "zweihundertsiebenundachtzig"
-    },
-    {
       "value": 288,
       "phrase": "zweihundert achtundachtzig"
-    },
-    {
-      "value": 288,
-      "phrase": "zweihundertachtundachtzig"
     },
     {
       "value": 289,
       "phrase": "zweihundert neunundachtzig"
     },
     {
-      "value": 289,
-      "phrase": "zweihundertneunundachtzig"
-    },
-    {
       "value": 290,
       "phrase": "zweihundert neunzig"
-    },
-    {
-      "value": 290,
-      "phrase": "zweihundertneunzig"
     },
     {
       "value": 291,
       "phrase": "zweihundert einundneunzig"
     },
     {
-      "value": 291,
-      "phrase": "zweihunderteinundneunzig"
-    },
-    {
       "value": 292,
       "phrase": "zweihundert zweiundneunzig"
-    },
-    {
-      "value": 292,
-      "phrase": "zweihundertzweiundneunzig"
     },
     {
       "value": 293,
       "phrase": "zweihundert dreiundneunzig"
     },
     {
-      "value": 293,
-      "phrase": "zweihundertdreiundneunzig"
-    },
-    {
       "value": 294,
       "phrase": "zweihundert vierundneunzig"
-    },
-    {
-      "value": 294,
-      "phrase": "zweihundertvierundneunzig"
     },
     {
       "value": 295,
       "phrase": "zweihundert fünfundneunzig"
     },
     {
-      "value": 295,
-      "phrase": "zweihundertfünfundneunzig"
-    },
-    {
       "value": 296,
       "phrase": "zweihundert sechsundneunzig"
-    },
-    {
-      "value": 296,
-      "phrase": "zweihundertsechsundneunzig"
     },
     {
       "value": 297,
       "phrase": "zweihundert siebenundneunzig"
     },
     {
-      "value": 297,
-      "phrase": "zweihundertsiebenundneunzig"
-    },
-    {
       "value": 298,
       "phrase": "zweihundert achtundneunzig"
     },
     {
-      "value": 298,
-      "phrase": "zweihundertachtundneunzig"
-    },
-    {
       "value": 299,
       "phrase": "zweihundert neunundneunzig"
-    },
-    {
-      "value": 299,
-      "phrase": "zweihundertneunundneunzig"
     },
     {
       "value": 300,
@@ -2023,792 +1231,396 @@
       "phrase": "dreihundert ein"
     },
     {
-      "value": 301,
-      "phrase": "dreihundertein"
-    },
-    {
       "value": 302,
       "phrase": "dreihundert zwei"
-    },
-    {
-      "value": 302,
-      "phrase": "dreihundertzwei"
     },
     {
       "value": 303,
       "phrase": "dreihundert drei"
     },
     {
-      "value": 303,
-      "phrase": "dreihundertdrei"
-    },
-    {
       "value": 304,
       "phrase": "dreihundert vier"
-    },
-    {
-      "value": 304,
-      "phrase": "dreihundertvier"
     },
     {
       "value": 305,
       "phrase": "dreihundert fünf"
     },
     {
-      "value": 305,
-      "phrase": "dreihundertfünf"
-    },
-    {
       "value": 306,
       "phrase": "dreihundert sechs"
-    },
-    {
-      "value": 306,
-      "phrase": "dreihundertsechs"
     },
     {
       "value": 307,
       "phrase": "dreihundert sieben"
     },
     {
-      "value": 307,
-      "phrase": "dreihundertsieben"
-    },
-    {
       "value": 308,
       "phrase": "dreihundert acht"
-    },
-    {
-      "value": 308,
-      "phrase": "dreihundertacht"
     },
     {
       "value": 309,
       "phrase": "dreihundert neun"
     },
     {
-      "value": 309,
-      "phrase": "dreihundertneun"
-    },
-    {
       "value": 310,
       "phrase": "dreihundert zehn"
-    },
-    {
-      "value": 310,
-      "phrase": "dreihundertzehn"
     },
     {
       "value": 311,
       "phrase": "dreihundert elf"
     },
     {
-      "value": 311,
-      "phrase": "dreihundertelf"
-    },
-    {
       "value": 312,
       "phrase": "dreihundert zwölf"
-    },
-    {
-      "value": 312,
-      "phrase": "dreihundertzwölf"
     },
     {
       "value": 313,
       "phrase": "dreihundert dreizehn"
     },
     {
-      "value": 313,
-      "phrase": "dreihundertdreizehn"
-    },
-    {
       "value": 314,
       "phrase": "dreihundert vierzehn"
-    },
-    {
-      "value": 314,
-      "phrase": "dreihundertvierzehn"
     },
     {
       "value": 315,
       "phrase": "dreihundert fünfzehn"
     },
     {
-      "value": 315,
-      "phrase": "dreihundertfünfzehn"
-    },
-    {
       "value": 316,
       "phrase": "dreihundert sechzehn"
-    },
-    {
-      "value": 316,
-      "phrase": "dreihundertsechzehn"
     },
     {
       "value": 317,
       "phrase": "dreihundert siebzehn"
     },
     {
-      "value": 317,
-      "phrase": "dreihundertsiebzehn"
-    },
-    {
       "value": 318,
       "phrase": "dreihundert achtzehn"
-    },
-    {
-      "value": 318,
-      "phrase": "dreihundertachtzehn"
     },
     {
       "value": 319,
       "phrase": "dreihundert neunzehn"
     },
     {
-      "value": 319,
-      "phrase": "dreihundertneunzehn"
-    },
-    {
       "value": 320,
       "phrase": "dreihundert zwanzig"
-    },
-    {
-      "value": 320,
-      "phrase": "dreihundertzwanzig"
     },
     {
       "value": 321,
       "phrase": "dreihundert einundzwanzig"
     },
     {
-      "value": 321,
-      "phrase": "dreihunderteinundzwanzig"
-    },
-    {
       "value": 322,
       "phrase": "dreihundert zweiundzwanzig"
-    },
-    {
-      "value": 322,
-      "phrase": "dreihundertzweiundzwanzig"
     },
     {
       "value": 323,
       "phrase": "dreihundert dreiundzwanzig"
     },
     {
-      "value": 323,
-      "phrase": "dreihundertdreiundzwanzig"
-    },
-    {
       "value": 324,
       "phrase": "dreihundert vierundzwanzig"
-    },
-    {
-      "value": 324,
-      "phrase": "dreihundertvierundzwanzig"
     },
     {
       "value": 325,
       "phrase": "dreihundert fünfundzwanzig"
     },
     {
-      "value": 325,
-      "phrase": "dreihundertfünfundzwanzig"
-    },
-    {
       "value": 326,
       "phrase": "dreihundert sechsundzwanzig"
-    },
-    {
-      "value": 326,
-      "phrase": "dreihundertsechsundzwanzig"
     },
     {
       "value": 327,
       "phrase": "dreihundert siebenundzwanzig"
     },
     {
-      "value": 327,
-      "phrase": "dreihundertsiebenundzwanzig"
-    },
-    {
       "value": 328,
       "phrase": "dreihundert achtundzwanzig"
-    },
-    {
-      "value": 328,
-      "phrase": "dreihundertachtundzwanzig"
     },
     {
       "value": 329,
       "phrase": "dreihundert neunundzwanzig"
     },
     {
-      "value": 329,
-      "phrase": "dreihundertneunundzwanzig"
-    },
-    {
       "value": 330,
       "phrase": "dreihundert dreißig"
-    },
-    {
-      "value": 330,
-      "phrase": "dreihundertdreißig"
     },
     {
       "value": 331,
       "phrase": "dreihundert einunddreißig"
     },
     {
-      "value": 331,
-      "phrase": "dreihunderteinunddreißig"
-    },
-    {
       "value": 332,
       "phrase": "dreihundert zweiunddreißig"
-    },
-    {
-      "value": 332,
-      "phrase": "dreihundertzweiunddreißig"
     },
     {
       "value": 333,
       "phrase": "dreihundert dreiunddreißig"
     },
     {
-      "value": 333,
-      "phrase": "dreihundertdreiunddreißig"
-    },
-    {
       "value": 334,
       "phrase": "dreihundert vierunddreißig"
-    },
-    {
-      "value": 334,
-      "phrase": "dreihundertvierunddreißig"
     },
     {
       "value": 335,
       "phrase": "dreihundert fünfunddreißig"
     },
     {
-      "value": 335,
-      "phrase": "dreihundertfünfunddreißig"
-    },
-    {
       "value": 336,
       "phrase": "dreihundert sechsunddreißig"
-    },
-    {
-      "value": 336,
-      "phrase": "dreihundertsechsunddreißig"
     },
     {
       "value": 337,
       "phrase": "dreihundert siebenunddreißig"
     },
     {
-      "value": 337,
-      "phrase": "dreihundertsiebenunddreißig"
-    },
-    {
       "value": 338,
       "phrase": "dreihundert achtunddreißig"
-    },
-    {
-      "value": 338,
-      "phrase": "dreihundertachtunddreißig"
     },
     {
       "value": 339,
       "phrase": "dreihundert neununddreißig"
     },
     {
-      "value": 339,
-      "phrase": "dreihundertneununddreißig"
-    },
-    {
       "value": 340,
       "phrase": "dreihundert vierzig"
-    },
-    {
-      "value": 340,
-      "phrase": "dreihundertvierzig"
     },
     {
       "value": 341,
       "phrase": "dreihundert einundvierzig"
     },
     {
-      "value": 341,
-      "phrase": "dreihunderteinundvierzig"
-    },
-    {
       "value": 342,
       "phrase": "dreihundert zweiundvierzig"
-    },
-    {
-      "value": 342,
-      "phrase": "dreihundertzweiundvierzig"
     },
     {
       "value": 343,
       "phrase": "dreihundert dreiundvierzig"
     },
     {
-      "value": 343,
-      "phrase": "dreihundertdreiundvierzig"
-    },
-    {
       "value": 344,
       "phrase": "dreihundert vierundvierzig"
-    },
-    {
-      "value": 344,
-      "phrase": "dreihundertvierundvierzig"
     },
     {
       "value": 345,
       "phrase": "dreihundert fünfundvierzig"
     },
     {
-      "value": 345,
-      "phrase": "dreihundertfünfundvierzig"
-    },
-    {
       "value": 346,
       "phrase": "dreihundert sechsundvierzig"
-    },
-    {
-      "value": 346,
-      "phrase": "dreihundertsechsundvierzig"
     },
     {
       "value": 347,
       "phrase": "dreihundert siebenundvierzig"
     },
     {
-      "value": 347,
-      "phrase": "dreihundertsiebenundvierzig"
-    },
-    {
       "value": 348,
       "phrase": "dreihundert achtundvierzig"
-    },
-    {
-      "value": 348,
-      "phrase": "dreihundertachtundvierzig"
     },
     {
       "value": 349,
       "phrase": "dreihundert neunundvierzig"
     },
     {
-      "value": 349,
-      "phrase": "dreihundertneunundvierzig"
-    },
-    {
       "value": 350,
       "phrase": "dreihundert fünfzig"
-    },
-    {
-      "value": 350,
-      "phrase": "dreihundertfünfzig"
     },
     {
       "value": 351,
       "phrase": "dreihundert einundfünfzig"
     },
     {
-      "value": 351,
-      "phrase": "dreihunderteinundfünfzig"
-    },
-    {
       "value": 352,
       "phrase": "dreihundert zweiundfünfzig"
-    },
-    {
-      "value": 352,
-      "phrase": "dreihundertzweiundfünfzig"
     },
     {
       "value": 353,
       "phrase": "dreihundert dreiundfünfzig"
     },
     {
-      "value": 353,
-      "phrase": "dreihundertdreiundfünfzig"
-    },
-    {
       "value": 354,
       "phrase": "dreihundert vierundfünfzig"
-    },
-    {
-      "value": 354,
-      "phrase": "dreihundertvierundfünfzig"
     },
     {
       "value": 355,
       "phrase": "dreihundert fünfundfünfzig"
     },
     {
-      "value": 355,
-      "phrase": "dreihundertfünfundfünfzig"
-    },
-    {
       "value": 356,
       "phrase": "dreihundert sechsundfünfzig"
-    },
-    {
-      "value": 356,
-      "phrase": "dreihundertsechsundfünfzig"
     },
     {
       "value": 357,
       "phrase": "dreihundert siebenundfünfzig"
     },
     {
-      "value": 357,
-      "phrase": "dreihundertsiebenundfünfzig"
-    },
-    {
       "value": 358,
       "phrase": "dreihundert achtundfünfzig"
-    },
-    {
-      "value": 358,
-      "phrase": "dreihundertachtundfünfzig"
     },
     {
       "value": 359,
       "phrase": "dreihundert neunundfünfzig"
     },
     {
-      "value": 359,
-      "phrase": "dreihundertneunundfünfzig"
-    },
-    {
       "value": 360,
       "phrase": "dreihundert sechzig"
-    },
-    {
-      "value": 360,
-      "phrase": "dreihundertsechzig"
     },
     {
       "value": 361,
       "phrase": "dreihundert einundsechzig"
     },
     {
-      "value": 361,
-      "phrase": "dreihunderteinundsechzig"
-    },
-    {
       "value": 362,
       "phrase": "dreihundert zweiundsechzig"
-    },
-    {
-      "value": 362,
-      "phrase": "dreihundertzweiundsechzig"
     },
     {
       "value": 363,
       "phrase": "dreihundert dreiundsechzig"
     },
     {
-      "value": 363,
-      "phrase": "dreihundertdreiundsechzig"
-    },
-    {
       "value": 364,
       "phrase": "dreihundert vierundsechzig"
-    },
-    {
-      "value": 364,
-      "phrase": "dreihundertvierundsechzig"
     },
     {
       "value": 365,
       "phrase": "dreihundert fünfundsechzig"
     },
     {
-      "value": 365,
-      "phrase": "dreihundertfünfundsechzig"
-    },
-    {
       "value": 366,
       "phrase": "dreihundert sechsundsechzig"
-    },
-    {
-      "value": 366,
-      "phrase": "dreihundertsechsundsechzig"
     },
     {
       "value": 367,
       "phrase": "dreihundert siebenundsechzig"
     },
     {
-      "value": 367,
-      "phrase": "dreihundertsiebenundsechzig"
-    },
-    {
       "value": 368,
       "phrase": "dreihundert achtundsechzig"
-    },
-    {
-      "value": 368,
-      "phrase": "dreihundertachtundsechzig"
     },
     {
       "value": 369,
       "phrase": "dreihundert neunundsechzig"
     },
     {
-      "value": 369,
-      "phrase": "dreihundertneunundsechzig"
-    },
-    {
       "value": 370,
       "phrase": "dreihundert siebzig"
-    },
-    {
-      "value": 370,
-      "phrase": "dreihundertsiebzig"
     },
     {
       "value": 371,
       "phrase": "dreihundert einundsiebzig"
     },
     {
-      "value": 371,
-      "phrase": "dreihunderteinundsiebzig"
-    },
-    {
       "value": 372,
       "phrase": "dreihundert zweiundsiebzig"
-    },
-    {
-      "value": 372,
-      "phrase": "dreihundertzweiundsiebzig"
     },
     {
       "value": 373,
       "phrase": "dreihundert dreiundsiebzig"
     },
     {
-      "value": 373,
-      "phrase": "dreihundertdreiundsiebzig"
-    },
-    {
       "value": 374,
       "phrase": "dreihundert vierundsiebzig"
-    },
-    {
-      "value": 374,
-      "phrase": "dreihundertvierundsiebzig"
     },
     {
       "value": 375,
       "phrase": "dreihundert fünfundsiebzig"
     },
     {
-      "value": 375,
-      "phrase": "dreihundertfünfundsiebzig"
-    },
-    {
       "value": 376,
       "phrase": "dreihundert sechsundsiebzig"
-    },
-    {
-      "value": 376,
-      "phrase": "dreihundertsechsundsiebzig"
     },
     {
       "value": 377,
       "phrase": "dreihundert siebenundsiebzig"
     },
     {
-      "value": 377,
-      "phrase": "dreihundertsiebenundsiebzig"
-    },
-    {
       "value": 378,
       "phrase": "dreihundert achtundsiebzig"
-    },
-    {
-      "value": 378,
-      "phrase": "dreihundertachtundsiebzig"
     },
     {
       "value": 379,
       "phrase": "dreihundert neunundsiebzig"
     },
     {
-      "value": 379,
-      "phrase": "dreihundertneunundsiebzig"
-    },
-    {
       "value": 380,
       "phrase": "dreihundert achtzig"
-    },
-    {
-      "value": 380,
-      "phrase": "dreihundertachtzig"
     },
     {
       "value": 381,
       "phrase": "dreihundert einundachtzig"
     },
     {
-      "value": 381,
-      "phrase": "dreihunderteinundachtzig"
-    },
-    {
       "value": 382,
       "phrase": "dreihundert zweiundachtzig"
-    },
-    {
-      "value": 382,
-      "phrase": "dreihundertzweiundachtzig"
     },
     {
       "value": 383,
       "phrase": "dreihundert dreiundachtzig"
     },
     {
-      "value": 383,
-      "phrase": "dreihundertdreiundachtzig"
-    },
-    {
       "value": 384,
       "phrase": "dreihundert vierundachtzig"
-    },
-    {
-      "value": 384,
-      "phrase": "dreihundertvierundachtzig"
     },
     {
       "value": 385,
       "phrase": "dreihundert fünfundachtzig"
     },
     {
-      "value": 385,
-      "phrase": "dreihundertfünfundachtzig"
-    },
-    {
       "value": 386,
       "phrase": "dreihundert sechsundachtzig"
-    },
-    {
-      "value": 386,
-      "phrase": "dreihundertsechsundachtzig"
     },
     {
       "value": 387,
       "phrase": "dreihundert siebenundachtzig"
     },
     {
-      "value": 387,
-      "phrase": "dreihundertsiebenundachtzig"
-    },
-    {
       "value": 388,
       "phrase": "dreihundert achtundachtzig"
-    },
-    {
-      "value": 388,
-      "phrase": "dreihundertachtundachtzig"
     },
     {
       "value": 389,
       "phrase": "dreihundert neunundachtzig"
     },
     {
-      "value": 389,
-      "phrase": "dreihundertneunundachtzig"
-    },
-    {
       "value": 390,
       "phrase": "dreihundert neunzig"
-    },
-    {
-      "value": 390,
-      "phrase": "dreihundertneunzig"
     },
     {
       "value": 391,
       "phrase": "dreihundert einundneunzig"
     },
     {
-      "value": 391,
-      "phrase": "dreihunderteinundneunzig"
-    },
-    {
       "value": 392,
       "phrase": "dreihundert zweiundneunzig"
-    },
-    {
-      "value": 392,
-      "phrase": "dreihundertzweiundneunzig"
     },
     {
       "value": 393,
       "phrase": "dreihundert dreiundneunzig"
     },
     {
-      "value": 393,
-      "phrase": "dreihundertdreiundneunzig"
-    },
-    {
       "value": 394,
       "phrase": "dreihundert vierundneunzig"
-    },
-    {
-      "value": 394,
-      "phrase": "dreihundertvierundneunzig"
     },
     {
       "value": 395,
       "phrase": "dreihundert fünfundneunzig"
     },
     {
-      "value": 395,
-      "phrase": "dreihundertfünfundneunzig"
-    },
-    {
       "value": 396,
       "phrase": "dreihundert sechsundneunzig"
-    },
-    {
-      "value": 396,
-      "phrase": "dreihundertsechsundneunzig"
     },
     {
       "value": 397,
       "phrase": "dreihundert siebenundneunzig"
     },
     {
-      "value": 397,
-      "phrase": "dreihundertsiebenundneunzig"
-    },
-    {
       "value": 398,
       "phrase": "dreihundert achtundneunzig"
     },
     {
-      "value": 398,
-      "phrase": "dreihundertachtundneunzig"
-    },
-    {
       "value": 399,
       "phrase": "dreihundert neunundneunzig"
-    },
-    {
-      "value": 399,
-      "phrase": "dreihundertneunundneunzig"
     },
     {
       "value": 400,
@@ -2819,792 +1631,396 @@
       "phrase": "vierhundert ein"
     },
     {
-      "value": 401,
-      "phrase": "vierhundertein"
-    },
-    {
       "value": 402,
       "phrase": "vierhundert zwei"
-    },
-    {
-      "value": 402,
-      "phrase": "vierhundertzwei"
     },
     {
       "value": 403,
       "phrase": "vierhundert drei"
     },
     {
-      "value": 403,
-      "phrase": "vierhundertdrei"
-    },
-    {
       "value": 404,
       "phrase": "vierhundert vier"
-    },
-    {
-      "value": 404,
-      "phrase": "vierhundertvier"
     },
     {
       "value": 405,
       "phrase": "vierhundert fünf"
     },
     {
-      "value": 405,
-      "phrase": "vierhundertfünf"
-    },
-    {
       "value": 406,
       "phrase": "vierhundert sechs"
-    },
-    {
-      "value": 406,
-      "phrase": "vierhundertsechs"
     },
     {
       "value": 407,
       "phrase": "vierhundert sieben"
     },
     {
-      "value": 407,
-      "phrase": "vierhundertsieben"
-    },
-    {
       "value": 408,
       "phrase": "vierhundert acht"
-    },
-    {
-      "value": 408,
-      "phrase": "vierhundertacht"
     },
     {
       "value": 409,
       "phrase": "vierhundert neun"
     },
     {
-      "value": 409,
-      "phrase": "vierhundertneun"
-    },
-    {
       "value": 410,
       "phrase": "vierhundert zehn"
-    },
-    {
-      "value": 410,
-      "phrase": "vierhundertzehn"
     },
     {
       "value": 411,
       "phrase": "vierhundert elf"
     },
     {
-      "value": 411,
-      "phrase": "vierhundertelf"
-    },
-    {
       "value": 412,
       "phrase": "vierhundert zwölf"
-    },
-    {
-      "value": 412,
-      "phrase": "vierhundertzwölf"
     },
     {
       "value": 413,
       "phrase": "vierhundert dreizehn"
     },
     {
-      "value": 413,
-      "phrase": "vierhundertdreizehn"
-    },
-    {
       "value": 414,
       "phrase": "vierhundert vierzehn"
-    },
-    {
-      "value": 414,
-      "phrase": "vierhundertvierzehn"
     },
     {
       "value": 415,
       "phrase": "vierhundert fünfzehn"
     },
     {
-      "value": 415,
-      "phrase": "vierhundertfünfzehn"
-    },
-    {
       "value": 416,
       "phrase": "vierhundert sechzehn"
-    },
-    {
-      "value": 416,
-      "phrase": "vierhundertsechzehn"
     },
     {
       "value": 417,
       "phrase": "vierhundert siebzehn"
     },
     {
-      "value": 417,
-      "phrase": "vierhundertsiebzehn"
-    },
-    {
       "value": 418,
       "phrase": "vierhundert achtzehn"
-    },
-    {
-      "value": 418,
-      "phrase": "vierhundertachtzehn"
     },
     {
       "value": 419,
       "phrase": "vierhundert neunzehn"
     },
     {
-      "value": 419,
-      "phrase": "vierhundertneunzehn"
-    },
-    {
       "value": 420,
       "phrase": "vierhundert zwanzig"
-    },
-    {
-      "value": 420,
-      "phrase": "vierhundertzwanzig"
     },
     {
       "value": 421,
       "phrase": "vierhundert einundzwanzig"
     },
     {
-      "value": 421,
-      "phrase": "vierhunderteinundzwanzig"
-    },
-    {
       "value": 422,
       "phrase": "vierhundert zweiundzwanzig"
-    },
-    {
-      "value": 422,
-      "phrase": "vierhundertzweiundzwanzig"
     },
     {
       "value": 423,
       "phrase": "vierhundert dreiundzwanzig"
     },
     {
-      "value": 423,
-      "phrase": "vierhundertdreiundzwanzig"
-    },
-    {
       "value": 424,
       "phrase": "vierhundert vierundzwanzig"
-    },
-    {
-      "value": 424,
-      "phrase": "vierhundertvierundzwanzig"
     },
     {
       "value": 425,
       "phrase": "vierhundert fünfundzwanzig"
     },
     {
-      "value": 425,
-      "phrase": "vierhundertfünfundzwanzig"
-    },
-    {
       "value": 426,
       "phrase": "vierhundert sechsundzwanzig"
-    },
-    {
-      "value": 426,
-      "phrase": "vierhundertsechsundzwanzig"
     },
     {
       "value": 427,
       "phrase": "vierhundert siebenundzwanzig"
     },
     {
-      "value": 427,
-      "phrase": "vierhundertsiebenundzwanzig"
-    },
-    {
       "value": 428,
       "phrase": "vierhundert achtundzwanzig"
-    },
-    {
-      "value": 428,
-      "phrase": "vierhundertachtundzwanzig"
     },
     {
       "value": 429,
       "phrase": "vierhundert neunundzwanzig"
     },
     {
-      "value": 429,
-      "phrase": "vierhundertneunundzwanzig"
-    },
-    {
       "value": 430,
       "phrase": "vierhundert dreißig"
-    },
-    {
-      "value": 430,
-      "phrase": "vierhundertdreißig"
     },
     {
       "value": 431,
       "phrase": "vierhundert einunddreißig"
     },
     {
-      "value": 431,
-      "phrase": "vierhunderteinunddreißig"
-    },
-    {
       "value": 432,
       "phrase": "vierhundert zweiunddreißig"
-    },
-    {
-      "value": 432,
-      "phrase": "vierhundertzweiunddreißig"
     },
     {
       "value": 433,
       "phrase": "vierhundert dreiunddreißig"
     },
     {
-      "value": 433,
-      "phrase": "vierhundertdreiunddreißig"
-    },
-    {
       "value": 434,
       "phrase": "vierhundert vierunddreißig"
-    },
-    {
-      "value": 434,
-      "phrase": "vierhundertvierunddreißig"
     },
     {
       "value": 435,
       "phrase": "vierhundert fünfunddreißig"
     },
     {
-      "value": 435,
-      "phrase": "vierhundertfünfunddreißig"
-    },
-    {
       "value": 436,
       "phrase": "vierhundert sechsunddreißig"
-    },
-    {
-      "value": 436,
-      "phrase": "vierhundertsechsunddreißig"
     },
     {
       "value": 437,
       "phrase": "vierhundert siebenunddreißig"
     },
     {
-      "value": 437,
-      "phrase": "vierhundertsiebenunddreißig"
-    },
-    {
       "value": 438,
       "phrase": "vierhundert achtunddreißig"
-    },
-    {
-      "value": 438,
-      "phrase": "vierhundertachtunddreißig"
     },
     {
       "value": 439,
       "phrase": "vierhundert neununddreißig"
     },
     {
-      "value": 439,
-      "phrase": "vierhundertneununddreißig"
-    },
-    {
       "value": 440,
       "phrase": "vierhundert vierzig"
-    },
-    {
-      "value": 440,
-      "phrase": "vierhundertvierzig"
     },
     {
       "value": 441,
       "phrase": "vierhundert einundvierzig"
     },
     {
-      "value": 441,
-      "phrase": "vierhunderteinundvierzig"
-    },
-    {
       "value": 442,
       "phrase": "vierhundert zweiundvierzig"
-    },
-    {
-      "value": 442,
-      "phrase": "vierhundertzweiundvierzig"
     },
     {
       "value": 443,
       "phrase": "vierhundert dreiundvierzig"
     },
     {
-      "value": 443,
-      "phrase": "vierhundertdreiundvierzig"
-    },
-    {
       "value": 444,
       "phrase": "vierhundert vierundvierzig"
-    },
-    {
-      "value": 444,
-      "phrase": "vierhundertvierundvierzig"
     },
     {
       "value": 445,
       "phrase": "vierhundert fünfundvierzig"
     },
     {
-      "value": 445,
-      "phrase": "vierhundertfünfundvierzig"
-    },
-    {
       "value": 446,
       "phrase": "vierhundert sechsundvierzig"
-    },
-    {
-      "value": 446,
-      "phrase": "vierhundertsechsundvierzig"
     },
     {
       "value": 447,
       "phrase": "vierhundert siebenundvierzig"
     },
     {
-      "value": 447,
-      "phrase": "vierhundertsiebenundvierzig"
-    },
-    {
       "value": 448,
       "phrase": "vierhundert achtundvierzig"
-    },
-    {
-      "value": 448,
-      "phrase": "vierhundertachtundvierzig"
     },
     {
       "value": 449,
       "phrase": "vierhundert neunundvierzig"
     },
     {
-      "value": 449,
-      "phrase": "vierhundertneunundvierzig"
-    },
-    {
       "value": 450,
       "phrase": "vierhundert fünfzig"
-    },
-    {
-      "value": 450,
-      "phrase": "vierhundertfünfzig"
     },
     {
       "value": 451,
       "phrase": "vierhundert einundfünfzig"
     },
     {
-      "value": 451,
-      "phrase": "vierhunderteinundfünfzig"
-    },
-    {
       "value": 452,
       "phrase": "vierhundert zweiundfünfzig"
-    },
-    {
-      "value": 452,
-      "phrase": "vierhundertzweiundfünfzig"
     },
     {
       "value": 453,
       "phrase": "vierhundert dreiundfünfzig"
     },
     {
-      "value": 453,
-      "phrase": "vierhundertdreiundfünfzig"
-    },
-    {
       "value": 454,
       "phrase": "vierhundert vierundfünfzig"
-    },
-    {
-      "value": 454,
-      "phrase": "vierhundertvierundfünfzig"
     },
     {
       "value": 455,
       "phrase": "vierhundert fünfundfünfzig"
     },
     {
-      "value": 455,
-      "phrase": "vierhundertfünfundfünfzig"
-    },
-    {
       "value": 456,
       "phrase": "vierhundert sechsundfünfzig"
-    },
-    {
-      "value": 456,
-      "phrase": "vierhundertsechsundfünfzig"
     },
     {
       "value": 457,
       "phrase": "vierhundert siebenundfünfzig"
     },
     {
-      "value": 457,
-      "phrase": "vierhundertsiebenundfünfzig"
-    },
-    {
       "value": 458,
       "phrase": "vierhundert achtundfünfzig"
-    },
-    {
-      "value": 458,
-      "phrase": "vierhundertachtundfünfzig"
     },
     {
       "value": 459,
       "phrase": "vierhundert neunundfünfzig"
     },
     {
-      "value": 459,
-      "phrase": "vierhundertneunundfünfzig"
-    },
-    {
       "value": 460,
       "phrase": "vierhundert sechzig"
-    },
-    {
-      "value": 460,
-      "phrase": "vierhundertsechzig"
     },
     {
       "value": 461,
       "phrase": "vierhundert einundsechzig"
     },
     {
-      "value": 461,
-      "phrase": "vierhunderteinundsechzig"
-    },
-    {
       "value": 462,
       "phrase": "vierhundert zweiundsechzig"
-    },
-    {
-      "value": 462,
-      "phrase": "vierhundertzweiundsechzig"
     },
     {
       "value": 463,
       "phrase": "vierhundert dreiundsechzig"
     },
     {
-      "value": 463,
-      "phrase": "vierhundertdreiundsechzig"
-    },
-    {
       "value": 464,
       "phrase": "vierhundert vierundsechzig"
-    },
-    {
-      "value": 464,
-      "phrase": "vierhundertvierundsechzig"
     },
     {
       "value": 465,
       "phrase": "vierhundert fünfundsechzig"
     },
     {
-      "value": 465,
-      "phrase": "vierhundertfünfundsechzig"
-    },
-    {
       "value": 466,
       "phrase": "vierhundert sechsundsechzig"
-    },
-    {
-      "value": 466,
-      "phrase": "vierhundertsechsundsechzig"
     },
     {
       "value": 467,
       "phrase": "vierhundert siebenundsechzig"
     },
     {
-      "value": 467,
-      "phrase": "vierhundertsiebenundsechzig"
-    },
-    {
       "value": 468,
       "phrase": "vierhundert achtundsechzig"
-    },
-    {
-      "value": 468,
-      "phrase": "vierhundertachtundsechzig"
     },
     {
       "value": 469,
       "phrase": "vierhundert neunundsechzig"
     },
     {
-      "value": 469,
-      "phrase": "vierhundertneunundsechzig"
-    },
-    {
       "value": 470,
       "phrase": "vierhundert siebzig"
-    },
-    {
-      "value": 470,
-      "phrase": "vierhundertsiebzig"
     },
     {
       "value": 471,
       "phrase": "vierhundert einundsiebzig"
     },
     {
-      "value": 471,
-      "phrase": "vierhunderteinundsiebzig"
-    },
-    {
       "value": 472,
       "phrase": "vierhundert zweiundsiebzig"
-    },
-    {
-      "value": 472,
-      "phrase": "vierhundertzweiundsiebzig"
     },
     {
       "value": 473,
       "phrase": "vierhundert dreiundsiebzig"
     },
     {
-      "value": 473,
-      "phrase": "vierhundertdreiundsiebzig"
-    },
-    {
       "value": 474,
       "phrase": "vierhundert vierundsiebzig"
-    },
-    {
-      "value": 474,
-      "phrase": "vierhundertvierundsiebzig"
     },
     {
       "value": 475,
       "phrase": "vierhundert fünfundsiebzig"
     },
     {
-      "value": 475,
-      "phrase": "vierhundertfünfundsiebzig"
-    },
-    {
       "value": 476,
       "phrase": "vierhundert sechsundsiebzig"
-    },
-    {
-      "value": 476,
-      "phrase": "vierhundertsechsundsiebzig"
     },
     {
       "value": 477,
       "phrase": "vierhundert siebenundsiebzig"
     },
     {
-      "value": 477,
-      "phrase": "vierhundertsiebenundsiebzig"
-    },
-    {
       "value": 478,
       "phrase": "vierhundert achtundsiebzig"
-    },
-    {
-      "value": 478,
-      "phrase": "vierhundertachtundsiebzig"
     },
     {
       "value": 479,
       "phrase": "vierhundert neunundsiebzig"
     },
     {
-      "value": 479,
-      "phrase": "vierhundertneunundsiebzig"
-    },
-    {
       "value": 480,
       "phrase": "vierhundert achtzig"
-    },
-    {
-      "value": 480,
-      "phrase": "vierhundertachtzig"
     },
     {
       "value": 481,
       "phrase": "vierhundert einundachtzig"
     },
     {
-      "value": 481,
-      "phrase": "vierhunderteinundachtzig"
-    },
-    {
       "value": 482,
       "phrase": "vierhundert zweiundachtzig"
-    },
-    {
-      "value": 482,
-      "phrase": "vierhundertzweiundachtzig"
     },
     {
       "value": 483,
       "phrase": "vierhundert dreiundachtzig"
     },
     {
-      "value": 483,
-      "phrase": "vierhundertdreiundachtzig"
-    },
-    {
       "value": 484,
       "phrase": "vierhundert vierundachtzig"
-    },
-    {
-      "value": 484,
-      "phrase": "vierhundertvierundachtzig"
     },
     {
       "value": 485,
       "phrase": "vierhundert fünfundachtzig"
     },
     {
-      "value": 485,
-      "phrase": "vierhundertfünfundachtzig"
-    },
-    {
       "value": 486,
       "phrase": "vierhundert sechsundachtzig"
-    },
-    {
-      "value": 486,
-      "phrase": "vierhundertsechsundachtzig"
     },
     {
       "value": 487,
       "phrase": "vierhundert siebenundachtzig"
     },
     {
-      "value": 487,
-      "phrase": "vierhundertsiebenundachtzig"
-    },
-    {
       "value": 488,
       "phrase": "vierhundert achtundachtzig"
-    },
-    {
-      "value": 488,
-      "phrase": "vierhundertachtundachtzig"
     },
     {
       "value": 489,
       "phrase": "vierhundert neunundachtzig"
     },
     {
-      "value": 489,
-      "phrase": "vierhundertneunundachtzig"
-    },
-    {
       "value": 490,
       "phrase": "vierhundert neunzig"
-    },
-    {
-      "value": 490,
-      "phrase": "vierhundertneunzig"
     },
     {
       "value": 491,
       "phrase": "vierhundert einundneunzig"
     },
     {
-      "value": 491,
-      "phrase": "vierhunderteinundneunzig"
-    },
-    {
       "value": 492,
       "phrase": "vierhundert zweiundneunzig"
-    },
-    {
-      "value": 492,
-      "phrase": "vierhundertzweiundneunzig"
     },
     {
       "value": 493,
       "phrase": "vierhundert dreiundneunzig"
     },
     {
-      "value": 493,
-      "phrase": "vierhundertdreiundneunzig"
-    },
-    {
       "value": 494,
       "phrase": "vierhundert vierundneunzig"
-    },
-    {
-      "value": 494,
-      "phrase": "vierhundertvierundneunzig"
     },
     {
       "value": 495,
       "phrase": "vierhundert fünfundneunzig"
     },
     {
-      "value": 495,
-      "phrase": "vierhundertfünfundneunzig"
-    },
-    {
       "value": 496,
       "phrase": "vierhundert sechsundneunzig"
-    },
-    {
-      "value": 496,
-      "phrase": "vierhundertsechsundneunzig"
     },
     {
       "value": 497,
       "phrase": "vierhundert siebenundneunzig"
     },
     {
-      "value": 497,
-      "phrase": "vierhundertsiebenundneunzig"
-    },
-    {
       "value": 498,
       "phrase": "vierhundert achtundneunzig"
     },
     {
-      "value": 498,
-      "phrase": "vierhundertachtundneunzig"
-    },
-    {
       "value": 499,
       "phrase": "vierhundert neunundneunzig"
-    },
-    {
-      "value": 499,
-      "phrase": "vierhundertneunundneunzig"
     },
     {
       "value": 500,
@@ -3615,792 +2031,396 @@
       "phrase": "fünfhundert ein"
     },
     {
-      "value": 501,
-      "phrase": "fünfhundertein"
-    },
-    {
       "value": 502,
       "phrase": "fünfhundert zwei"
-    },
-    {
-      "value": 502,
-      "phrase": "fünfhundertzwei"
     },
     {
       "value": 503,
       "phrase": "fünfhundert drei"
     },
     {
-      "value": 503,
-      "phrase": "fünfhundertdrei"
-    },
-    {
       "value": 504,
       "phrase": "fünfhundert vier"
-    },
-    {
-      "value": 504,
-      "phrase": "fünfhundertvier"
     },
     {
       "value": 505,
       "phrase": "fünfhundert fünf"
     },
     {
-      "value": 505,
-      "phrase": "fünfhundertfünf"
-    },
-    {
       "value": 506,
       "phrase": "fünfhundert sechs"
-    },
-    {
-      "value": 506,
-      "phrase": "fünfhundertsechs"
     },
     {
       "value": 507,
       "phrase": "fünfhundert sieben"
     },
     {
-      "value": 507,
-      "phrase": "fünfhundertsieben"
-    },
-    {
       "value": 508,
       "phrase": "fünfhundert acht"
-    },
-    {
-      "value": 508,
-      "phrase": "fünfhundertacht"
     },
     {
       "value": 509,
       "phrase": "fünfhundert neun"
     },
     {
-      "value": 509,
-      "phrase": "fünfhundertneun"
-    },
-    {
       "value": 510,
       "phrase": "fünfhundert zehn"
-    },
-    {
-      "value": 510,
-      "phrase": "fünfhundertzehn"
     },
     {
       "value": 511,
       "phrase": "fünfhundert elf"
     },
     {
-      "value": 511,
-      "phrase": "fünfhundertelf"
-    },
-    {
       "value": 512,
       "phrase": "fünfhundert zwölf"
-    },
-    {
-      "value": 512,
-      "phrase": "fünfhundertzwölf"
     },
     {
       "value": 513,
       "phrase": "fünfhundert dreizehn"
     },
     {
-      "value": 513,
-      "phrase": "fünfhundertdreizehn"
-    },
-    {
       "value": 514,
       "phrase": "fünfhundert vierzehn"
-    },
-    {
-      "value": 514,
-      "phrase": "fünfhundertvierzehn"
     },
     {
       "value": 515,
       "phrase": "fünfhundert fünfzehn"
     },
     {
-      "value": 515,
-      "phrase": "fünfhundertfünfzehn"
-    },
-    {
       "value": 516,
       "phrase": "fünfhundert sechzehn"
-    },
-    {
-      "value": 516,
-      "phrase": "fünfhundertsechzehn"
     },
     {
       "value": 517,
       "phrase": "fünfhundert siebzehn"
     },
     {
-      "value": 517,
-      "phrase": "fünfhundertsiebzehn"
-    },
-    {
       "value": 518,
       "phrase": "fünfhundert achtzehn"
-    },
-    {
-      "value": 518,
-      "phrase": "fünfhundertachtzehn"
     },
     {
       "value": 519,
       "phrase": "fünfhundert neunzehn"
     },
     {
-      "value": 519,
-      "phrase": "fünfhundertneunzehn"
-    },
-    {
       "value": 520,
       "phrase": "fünfhundert zwanzig"
-    },
-    {
-      "value": 520,
-      "phrase": "fünfhundertzwanzig"
     },
     {
       "value": 521,
       "phrase": "fünfhundert einundzwanzig"
     },
     {
-      "value": 521,
-      "phrase": "fünfhunderteinundzwanzig"
-    },
-    {
       "value": 522,
       "phrase": "fünfhundert zweiundzwanzig"
-    },
-    {
-      "value": 522,
-      "phrase": "fünfhundertzweiundzwanzig"
     },
     {
       "value": 523,
       "phrase": "fünfhundert dreiundzwanzig"
     },
     {
-      "value": 523,
-      "phrase": "fünfhundertdreiundzwanzig"
-    },
-    {
       "value": 524,
       "phrase": "fünfhundert vierundzwanzig"
-    },
-    {
-      "value": 524,
-      "phrase": "fünfhundertvierundzwanzig"
     },
     {
       "value": 525,
       "phrase": "fünfhundert fünfundzwanzig"
     },
     {
-      "value": 525,
-      "phrase": "fünfhundertfünfundzwanzig"
-    },
-    {
       "value": 526,
       "phrase": "fünfhundert sechsundzwanzig"
-    },
-    {
-      "value": 526,
-      "phrase": "fünfhundertsechsundzwanzig"
     },
     {
       "value": 527,
       "phrase": "fünfhundert siebenundzwanzig"
     },
     {
-      "value": 527,
-      "phrase": "fünfhundertsiebenundzwanzig"
-    },
-    {
       "value": 528,
       "phrase": "fünfhundert achtundzwanzig"
-    },
-    {
-      "value": 528,
-      "phrase": "fünfhundertachtundzwanzig"
     },
     {
       "value": 529,
       "phrase": "fünfhundert neunundzwanzig"
     },
     {
-      "value": 529,
-      "phrase": "fünfhundertneunundzwanzig"
-    },
-    {
       "value": 530,
       "phrase": "fünfhundert dreißig"
-    },
-    {
-      "value": 530,
-      "phrase": "fünfhundertdreißig"
     },
     {
       "value": 531,
       "phrase": "fünfhundert einunddreißig"
     },
     {
-      "value": 531,
-      "phrase": "fünfhunderteinunddreißig"
-    },
-    {
       "value": 532,
       "phrase": "fünfhundert zweiunddreißig"
-    },
-    {
-      "value": 532,
-      "phrase": "fünfhundertzweiunddreißig"
     },
     {
       "value": 533,
       "phrase": "fünfhundert dreiunddreißig"
     },
     {
-      "value": 533,
-      "phrase": "fünfhundertdreiunddreißig"
-    },
-    {
       "value": 534,
       "phrase": "fünfhundert vierunddreißig"
-    },
-    {
-      "value": 534,
-      "phrase": "fünfhundertvierunddreißig"
     },
     {
       "value": 535,
       "phrase": "fünfhundert fünfunddreißig"
     },
     {
-      "value": 535,
-      "phrase": "fünfhundertfünfunddreißig"
-    },
-    {
       "value": 536,
       "phrase": "fünfhundert sechsunddreißig"
-    },
-    {
-      "value": 536,
-      "phrase": "fünfhundertsechsunddreißig"
     },
     {
       "value": 537,
       "phrase": "fünfhundert siebenunddreißig"
     },
     {
-      "value": 537,
-      "phrase": "fünfhundertsiebenunddreißig"
-    },
-    {
       "value": 538,
       "phrase": "fünfhundert achtunddreißig"
-    },
-    {
-      "value": 538,
-      "phrase": "fünfhundertachtunddreißig"
     },
     {
       "value": 539,
       "phrase": "fünfhundert neununddreißig"
     },
     {
-      "value": 539,
-      "phrase": "fünfhundertneununddreißig"
-    },
-    {
       "value": 540,
       "phrase": "fünfhundert vierzig"
-    },
-    {
-      "value": 540,
-      "phrase": "fünfhundertvierzig"
     },
     {
       "value": 541,
       "phrase": "fünfhundert einundvierzig"
     },
     {
-      "value": 541,
-      "phrase": "fünfhunderteinundvierzig"
-    },
-    {
       "value": 542,
       "phrase": "fünfhundert zweiundvierzig"
-    },
-    {
-      "value": 542,
-      "phrase": "fünfhundertzweiundvierzig"
     },
     {
       "value": 543,
       "phrase": "fünfhundert dreiundvierzig"
     },
     {
-      "value": 543,
-      "phrase": "fünfhundertdreiundvierzig"
-    },
-    {
       "value": 544,
       "phrase": "fünfhundert vierundvierzig"
-    },
-    {
-      "value": 544,
-      "phrase": "fünfhundertvierundvierzig"
     },
     {
       "value": 545,
       "phrase": "fünfhundert fünfundvierzig"
     },
     {
-      "value": 545,
-      "phrase": "fünfhundertfünfundvierzig"
-    },
-    {
       "value": 546,
       "phrase": "fünfhundert sechsundvierzig"
-    },
-    {
-      "value": 546,
-      "phrase": "fünfhundertsechsundvierzig"
     },
     {
       "value": 547,
       "phrase": "fünfhundert siebenundvierzig"
     },
     {
-      "value": 547,
-      "phrase": "fünfhundertsiebenundvierzig"
-    },
-    {
       "value": 548,
       "phrase": "fünfhundert achtundvierzig"
-    },
-    {
-      "value": 548,
-      "phrase": "fünfhundertachtundvierzig"
     },
     {
       "value": 549,
       "phrase": "fünfhundert neunundvierzig"
     },
     {
-      "value": 549,
-      "phrase": "fünfhundertneunundvierzig"
-    },
-    {
       "value": 550,
       "phrase": "fünfhundert fünfzig"
-    },
-    {
-      "value": 550,
-      "phrase": "fünfhundertfünfzig"
     },
     {
       "value": 551,
       "phrase": "fünfhundert einundfünfzig"
     },
     {
-      "value": 551,
-      "phrase": "fünfhunderteinundfünfzig"
-    },
-    {
       "value": 552,
       "phrase": "fünfhundert zweiundfünfzig"
-    },
-    {
-      "value": 552,
-      "phrase": "fünfhundertzweiundfünfzig"
     },
     {
       "value": 553,
       "phrase": "fünfhundert dreiundfünfzig"
     },
     {
-      "value": 553,
-      "phrase": "fünfhundertdreiundfünfzig"
-    },
-    {
       "value": 554,
       "phrase": "fünfhundert vierundfünfzig"
-    },
-    {
-      "value": 554,
-      "phrase": "fünfhundertvierundfünfzig"
     },
     {
       "value": 555,
       "phrase": "fünfhundert fünfundfünfzig"
     },
     {
-      "value": 555,
-      "phrase": "fünfhundertfünfundfünfzig"
-    },
-    {
       "value": 556,
       "phrase": "fünfhundert sechsundfünfzig"
-    },
-    {
-      "value": 556,
-      "phrase": "fünfhundertsechsundfünfzig"
     },
     {
       "value": 557,
       "phrase": "fünfhundert siebenundfünfzig"
     },
     {
-      "value": 557,
-      "phrase": "fünfhundertsiebenundfünfzig"
-    },
-    {
       "value": 558,
       "phrase": "fünfhundert achtundfünfzig"
-    },
-    {
-      "value": 558,
-      "phrase": "fünfhundertachtundfünfzig"
     },
     {
       "value": 559,
       "phrase": "fünfhundert neunundfünfzig"
     },
     {
-      "value": 559,
-      "phrase": "fünfhundertneunundfünfzig"
-    },
-    {
       "value": 560,
       "phrase": "fünfhundert sechzig"
-    },
-    {
-      "value": 560,
-      "phrase": "fünfhundertsechzig"
     },
     {
       "value": 561,
       "phrase": "fünfhundert einundsechzig"
     },
     {
-      "value": 561,
-      "phrase": "fünfhunderteinundsechzig"
-    },
-    {
       "value": 562,
       "phrase": "fünfhundert zweiundsechzig"
-    },
-    {
-      "value": 562,
-      "phrase": "fünfhundertzweiundsechzig"
     },
     {
       "value": 563,
       "phrase": "fünfhundert dreiundsechzig"
     },
     {
-      "value": 563,
-      "phrase": "fünfhundertdreiundsechzig"
-    },
-    {
       "value": 564,
       "phrase": "fünfhundert vierundsechzig"
-    },
-    {
-      "value": 564,
-      "phrase": "fünfhundertvierundsechzig"
     },
     {
       "value": 565,
       "phrase": "fünfhundert fünfundsechzig"
     },
     {
-      "value": 565,
-      "phrase": "fünfhundertfünfundsechzig"
-    },
-    {
       "value": 566,
       "phrase": "fünfhundert sechsundsechzig"
-    },
-    {
-      "value": 566,
-      "phrase": "fünfhundertsechsundsechzig"
     },
     {
       "value": 567,
       "phrase": "fünfhundert siebenundsechzig"
     },
     {
-      "value": 567,
-      "phrase": "fünfhundertsiebenundsechzig"
-    },
-    {
       "value": 568,
       "phrase": "fünfhundert achtundsechzig"
-    },
-    {
-      "value": 568,
-      "phrase": "fünfhundertachtundsechzig"
     },
     {
       "value": 569,
       "phrase": "fünfhundert neunundsechzig"
     },
     {
-      "value": 569,
-      "phrase": "fünfhundertneunundsechzig"
-    },
-    {
       "value": 570,
       "phrase": "fünfhundert siebzig"
-    },
-    {
-      "value": 570,
-      "phrase": "fünfhundertsiebzig"
     },
     {
       "value": 571,
       "phrase": "fünfhundert einundsiebzig"
     },
     {
-      "value": 571,
-      "phrase": "fünfhunderteinundsiebzig"
-    },
-    {
       "value": 572,
       "phrase": "fünfhundert zweiundsiebzig"
-    },
-    {
-      "value": 572,
-      "phrase": "fünfhundertzweiundsiebzig"
     },
     {
       "value": 573,
       "phrase": "fünfhundert dreiundsiebzig"
     },
     {
-      "value": 573,
-      "phrase": "fünfhundertdreiundsiebzig"
-    },
-    {
       "value": 574,
       "phrase": "fünfhundert vierundsiebzig"
-    },
-    {
-      "value": 574,
-      "phrase": "fünfhundertvierundsiebzig"
     },
     {
       "value": 575,
       "phrase": "fünfhundert fünfundsiebzig"
     },
     {
-      "value": 575,
-      "phrase": "fünfhundertfünfundsiebzig"
-    },
-    {
       "value": 576,
       "phrase": "fünfhundert sechsundsiebzig"
-    },
-    {
-      "value": 576,
-      "phrase": "fünfhundertsechsundsiebzig"
     },
     {
       "value": 577,
       "phrase": "fünfhundert siebenundsiebzig"
     },
     {
-      "value": 577,
-      "phrase": "fünfhundertsiebenundsiebzig"
-    },
-    {
       "value": 578,
       "phrase": "fünfhundert achtundsiebzig"
-    },
-    {
-      "value": 578,
-      "phrase": "fünfhundertachtundsiebzig"
     },
     {
       "value": 579,
       "phrase": "fünfhundert neunundsiebzig"
     },
     {
-      "value": 579,
-      "phrase": "fünfhundertneunundsiebzig"
-    },
-    {
       "value": 580,
       "phrase": "fünfhundert achtzig"
-    },
-    {
-      "value": 580,
-      "phrase": "fünfhundertachtzig"
     },
     {
       "value": 581,
       "phrase": "fünfhundert einundachtzig"
     },
     {
-      "value": 581,
-      "phrase": "fünfhunderteinundachtzig"
-    },
-    {
       "value": 582,
       "phrase": "fünfhundert zweiundachtzig"
-    },
-    {
-      "value": 582,
-      "phrase": "fünfhundertzweiundachtzig"
     },
     {
       "value": 583,
       "phrase": "fünfhundert dreiundachtzig"
     },
     {
-      "value": 583,
-      "phrase": "fünfhundertdreiundachtzig"
-    },
-    {
       "value": 584,
       "phrase": "fünfhundert vierundachtzig"
-    },
-    {
-      "value": 584,
-      "phrase": "fünfhundertvierundachtzig"
     },
     {
       "value": 585,
       "phrase": "fünfhundert fünfundachtzig"
     },
     {
-      "value": 585,
-      "phrase": "fünfhundertfünfundachtzig"
-    },
-    {
       "value": 586,
       "phrase": "fünfhundert sechsundachtzig"
-    },
-    {
-      "value": 586,
-      "phrase": "fünfhundertsechsundachtzig"
     },
     {
       "value": 587,
       "phrase": "fünfhundert siebenundachtzig"
     },
     {
-      "value": 587,
-      "phrase": "fünfhundertsiebenundachtzig"
-    },
-    {
       "value": 588,
       "phrase": "fünfhundert achtundachtzig"
-    },
-    {
-      "value": 588,
-      "phrase": "fünfhundertachtundachtzig"
     },
     {
       "value": 589,
       "phrase": "fünfhundert neunundachtzig"
     },
     {
-      "value": 589,
-      "phrase": "fünfhundertneunundachtzig"
-    },
-    {
       "value": 590,
       "phrase": "fünfhundert neunzig"
-    },
-    {
-      "value": 590,
-      "phrase": "fünfhundertneunzig"
     },
     {
       "value": 591,
       "phrase": "fünfhundert einundneunzig"
     },
     {
-      "value": 591,
-      "phrase": "fünfhunderteinundneunzig"
-    },
-    {
       "value": 592,
       "phrase": "fünfhundert zweiundneunzig"
-    },
-    {
-      "value": 592,
-      "phrase": "fünfhundertzweiundneunzig"
     },
     {
       "value": 593,
       "phrase": "fünfhundert dreiundneunzig"
     },
     {
-      "value": 593,
-      "phrase": "fünfhundertdreiundneunzig"
-    },
-    {
       "value": 594,
       "phrase": "fünfhundert vierundneunzig"
-    },
-    {
-      "value": 594,
-      "phrase": "fünfhundertvierundneunzig"
     },
     {
       "value": 595,
       "phrase": "fünfhundert fünfundneunzig"
     },
     {
-      "value": 595,
-      "phrase": "fünfhundertfünfundneunzig"
-    },
-    {
       "value": 596,
       "phrase": "fünfhundert sechsundneunzig"
-    },
-    {
-      "value": 596,
-      "phrase": "fünfhundertsechsundneunzig"
     },
     {
       "value": 597,
       "phrase": "fünfhundert siebenundneunzig"
     },
     {
-      "value": 597,
-      "phrase": "fünfhundertsiebenundneunzig"
-    },
-    {
       "value": 598,
       "phrase": "fünfhundert achtundneunzig"
     },
     {
-      "value": 598,
-      "phrase": "fünfhundertachtundneunzig"
-    },
-    {
       "value": 599,
       "phrase": "fünfhundert neunundneunzig"
-    },
-    {
-      "value": 599,
-      "phrase": "fünfhundertneunundneunzig"
     },
     {
       "value": 600,
@@ -4411,792 +2431,396 @@
       "phrase": "sechshundert ein"
     },
     {
-      "value": 601,
-      "phrase": "sechshundertein"
-    },
-    {
       "value": 602,
       "phrase": "sechshundert zwei"
-    },
-    {
-      "value": 602,
-      "phrase": "sechshundertzwei"
     },
     {
       "value": 603,
       "phrase": "sechshundert drei"
     },
     {
-      "value": 603,
-      "phrase": "sechshundertdrei"
-    },
-    {
       "value": 604,
       "phrase": "sechshundert vier"
-    },
-    {
-      "value": 604,
-      "phrase": "sechshundertvier"
     },
     {
       "value": 605,
       "phrase": "sechshundert fünf"
     },
     {
-      "value": 605,
-      "phrase": "sechshundertfünf"
-    },
-    {
       "value": 606,
       "phrase": "sechshundert sechs"
-    },
-    {
-      "value": 606,
-      "phrase": "sechshundertsechs"
     },
     {
       "value": 607,
       "phrase": "sechshundert sieben"
     },
     {
-      "value": 607,
-      "phrase": "sechshundertsieben"
-    },
-    {
       "value": 608,
       "phrase": "sechshundert acht"
-    },
-    {
-      "value": 608,
-      "phrase": "sechshundertacht"
     },
     {
       "value": 609,
       "phrase": "sechshundert neun"
     },
     {
-      "value": 609,
-      "phrase": "sechshundertneun"
-    },
-    {
       "value": 610,
       "phrase": "sechshundert zehn"
-    },
-    {
-      "value": 610,
-      "phrase": "sechshundertzehn"
     },
     {
       "value": 611,
       "phrase": "sechshundert elf"
     },
     {
-      "value": 611,
-      "phrase": "sechshundertelf"
-    },
-    {
       "value": 612,
       "phrase": "sechshundert zwölf"
-    },
-    {
-      "value": 612,
-      "phrase": "sechshundertzwölf"
     },
     {
       "value": 613,
       "phrase": "sechshundert dreizehn"
     },
     {
-      "value": 613,
-      "phrase": "sechshundertdreizehn"
-    },
-    {
       "value": 614,
       "phrase": "sechshundert vierzehn"
-    },
-    {
-      "value": 614,
-      "phrase": "sechshundertvierzehn"
     },
     {
       "value": 615,
       "phrase": "sechshundert fünfzehn"
     },
     {
-      "value": 615,
-      "phrase": "sechshundertfünfzehn"
-    },
-    {
       "value": 616,
       "phrase": "sechshundert sechzehn"
-    },
-    {
-      "value": 616,
-      "phrase": "sechshundertsechzehn"
     },
     {
       "value": 617,
       "phrase": "sechshundert siebzehn"
     },
     {
-      "value": 617,
-      "phrase": "sechshundertsiebzehn"
-    },
-    {
       "value": 618,
       "phrase": "sechshundert achtzehn"
-    },
-    {
-      "value": 618,
-      "phrase": "sechshundertachtzehn"
     },
     {
       "value": 619,
       "phrase": "sechshundert neunzehn"
     },
     {
-      "value": 619,
-      "phrase": "sechshundertneunzehn"
-    },
-    {
       "value": 620,
       "phrase": "sechshundert zwanzig"
-    },
-    {
-      "value": 620,
-      "phrase": "sechshundertzwanzig"
     },
     {
       "value": 621,
       "phrase": "sechshundert einundzwanzig"
     },
     {
-      "value": 621,
-      "phrase": "sechshunderteinundzwanzig"
-    },
-    {
       "value": 622,
       "phrase": "sechshundert zweiundzwanzig"
-    },
-    {
-      "value": 622,
-      "phrase": "sechshundertzweiundzwanzig"
     },
     {
       "value": 623,
       "phrase": "sechshundert dreiundzwanzig"
     },
     {
-      "value": 623,
-      "phrase": "sechshundertdreiundzwanzig"
-    },
-    {
       "value": 624,
       "phrase": "sechshundert vierundzwanzig"
-    },
-    {
-      "value": 624,
-      "phrase": "sechshundertvierundzwanzig"
     },
     {
       "value": 625,
       "phrase": "sechshundert fünfundzwanzig"
     },
     {
-      "value": 625,
-      "phrase": "sechshundertfünfundzwanzig"
-    },
-    {
       "value": 626,
       "phrase": "sechshundert sechsundzwanzig"
-    },
-    {
-      "value": 626,
-      "phrase": "sechshundertsechsundzwanzig"
     },
     {
       "value": 627,
       "phrase": "sechshundert siebenundzwanzig"
     },
     {
-      "value": 627,
-      "phrase": "sechshundertsiebenundzwanzig"
-    },
-    {
       "value": 628,
       "phrase": "sechshundert achtundzwanzig"
-    },
-    {
-      "value": 628,
-      "phrase": "sechshundertachtundzwanzig"
     },
     {
       "value": 629,
       "phrase": "sechshundert neunundzwanzig"
     },
     {
-      "value": 629,
-      "phrase": "sechshundertneunundzwanzig"
-    },
-    {
       "value": 630,
       "phrase": "sechshundert dreißig"
-    },
-    {
-      "value": 630,
-      "phrase": "sechshundertdreißig"
     },
     {
       "value": 631,
       "phrase": "sechshundert einunddreißig"
     },
     {
-      "value": 631,
-      "phrase": "sechshunderteinunddreißig"
-    },
-    {
       "value": 632,
       "phrase": "sechshundert zweiunddreißig"
-    },
-    {
-      "value": 632,
-      "phrase": "sechshundertzweiunddreißig"
     },
     {
       "value": 633,
       "phrase": "sechshundert dreiunddreißig"
     },
     {
-      "value": 633,
-      "phrase": "sechshundertdreiunddreißig"
-    },
-    {
       "value": 634,
       "phrase": "sechshundert vierunddreißig"
-    },
-    {
-      "value": 634,
-      "phrase": "sechshundertvierunddreißig"
     },
     {
       "value": 635,
       "phrase": "sechshundert fünfunddreißig"
     },
     {
-      "value": 635,
-      "phrase": "sechshundertfünfunddreißig"
-    },
-    {
       "value": 636,
       "phrase": "sechshundert sechsunddreißig"
-    },
-    {
-      "value": 636,
-      "phrase": "sechshundertsechsunddreißig"
     },
     {
       "value": 637,
       "phrase": "sechshundert siebenunddreißig"
     },
     {
-      "value": 637,
-      "phrase": "sechshundertsiebenunddreißig"
-    },
-    {
       "value": 638,
       "phrase": "sechshundert achtunddreißig"
-    },
-    {
-      "value": 638,
-      "phrase": "sechshundertachtunddreißig"
     },
     {
       "value": 639,
       "phrase": "sechshundert neununddreißig"
     },
     {
-      "value": 639,
-      "phrase": "sechshundertneununddreißig"
-    },
-    {
       "value": 640,
       "phrase": "sechshundert vierzig"
-    },
-    {
-      "value": 640,
-      "phrase": "sechshundertvierzig"
     },
     {
       "value": 641,
       "phrase": "sechshundert einundvierzig"
     },
     {
-      "value": 641,
-      "phrase": "sechshunderteinundvierzig"
-    },
-    {
       "value": 642,
       "phrase": "sechshundert zweiundvierzig"
-    },
-    {
-      "value": 642,
-      "phrase": "sechshundertzweiundvierzig"
     },
     {
       "value": 643,
       "phrase": "sechshundert dreiundvierzig"
     },
     {
-      "value": 643,
-      "phrase": "sechshundertdreiundvierzig"
-    },
-    {
       "value": 644,
       "phrase": "sechshundert vierundvierzig"
-    },
-    {
-      "value": 644,
-      "phrase": "sechshundertvierundvierzig"
     },
     {
       "value": 645,
       "phrase": "sechshundert fünfundvierzig"
     },
     {
-      "value": 645,
-      "phrase": "sechshundertfünfundvierzig"
-    },
-    {
       "value": 646,
       "phrase": "sechshundert sechsundvierzig"
-    },
-    {
-      "value": 646,
-      "phrase": "sechshundertsechsundvierzig"
     },
     {
       "value": 647,
       "phrase": "sechshundert siebenundvierzig"
     },
     {
-      "value": 647,
-      "phrase": "sechshundertsiebenundvierzig"
-    },
-    {
       "value": 648,
       "phrase": "sechshundert achtundvierzig"
-    },
-    {
-      "value": 648,
-      "phrase": "sechshundertachtundvierzig"
     },
     {
       "value": 649,
       "phrase": "sechshundert neunundvierzig"
     },
     {
-      "value": 649,
-      "phrase": "sechshundertneunundvierzig"
-    },
-    {
       "value": 650,
       "phrase": "sechshundert fünfzig"
-    },
-    {
-      "value": 650,
-      "phrase": "sechshundertfünfzig"
     },
     {
       "value": 651,
       "phrase": "sechshundert einundfünfzig"
     },
     {
-      "value": 651,
-      "phrase": "sechshunderteinundfünfzig"
-    },
-    {
       "value": 652,
       "phrase": "sechshundert zweiundfünfzig"
-    },
-    {
-      "value": 652,
-      "phrase": "sechshundertzweiundfünfzig"
     },
     {
       "value": 653,
       "phrase": "sechshundert dreiundfünfzig"
     },
     {
-      "value": 653,
-      "phrase": "sechshundertdreiundfünfzig"
-    },
-    {
       "value": 654,
       "phrase": "sechshundert vierundfünfzig"
-    },
-    {
-      "value": 654,
-      "phrase": "sechshundertvierundfünfzig"
     },
     {
       "value": 655,
       "phrase": "sechshundert fünfundfünfzig"
     },
     {
-      "value": 655,
-      "phrase": "sechshundertfünfundfünfzig"
-    },
-    {
       "value": 656,
       "phrase": "sechshundert sechsundfünfzig"
-    },
-    {
-      "value": 656,
-      "phrase": "sechshundertsechsundfünfzig"
     },
     {
       "value": 657,
       "phrase": "sechshundert siebenundfünfzig"
     },
     {
-      "value": 657,
-      "phrase": "sechshundertsiebenundfünfzig"
-    },
-    {
       "value": 658,
       "phrase": "sechshundert achtundfünfzig"
-    },
-    {
-      "value": 658,
-      "phrase": "sechshundertachtundfünfzig"
     },
     {
       "value": 659,
       "phrase": "sechshundert neunundfünfzig"
     },
     {
-      "value": 659,
-      "phrase": "sechshundertneunundfünfzig"
-    },
-    {
       "value": 660,
       "phrase": "sechshundert sechzig"
-    },
-    {
-      "value": 660,
-      "phrase": "sechshundertsechzig"
     },
     {
       "value": 661,
       "phrase": "sechshundert einundsechzig"
     },
     {
-      "value": 661,
-      "phrase": "sechshunderteinundsechzig"
-    },
-    {
       "value": 662,
       "phrase": "sechshundert zweiundsechzig"
-    },
-    {
-      "value": 662,
-      "phrase": "sechshundertzweiundsechzig"
     },
     {
       "value": 663,
       "phrase": "sechshundert dreiundsechzig"
     },
     {
-      "value": 663,
-      "phrase": "sechshundertdreiundsechzig"
-    },
-    {
       "value": 664,
       "phrase": "sechshundert vierundsechzig"
-    },
-    {
-      "value": 664,
-      "phrase": "sechshundertvierundsechzig"
     },
     {
       "value": 665,
       "phrase": "sechshundert fünfundsechzig"
     },
     {
-      "value": 665,
-      "phrase": "sechshundertfünfundsechzig"
-    },
-    {
       "value": 666,
       "phrase": "sechshundert sechsundsechzig"
-    },
-    {
-      "value": 666,
-      "phrase": "sechshundertsechsundsechzig"
     },
     {
       "value": 667,
       "phrase": "sechshundert siebenundsechzig"
     },
     {
-      "value": 667,
-      "phrase": "sechshundertsiebenundsechzig"
-    },
-    {
       "value": 668,
       "phrase": "sechshundert achtundsechzig"
-    },
-    {
-      "value": 668,
-      "phrase": "sechshundertachtundsechzig"
     },
     {
       "value": 669,
       "phrase": "sechshundert neunundsechzig"
     },
     {
-      "value": 669,
-      "phrase": "sechshundertneunundsechzig"
-    },
-    {
       "value": 670,
       "phrase": "sechshundert siebzig"
-    },
-    {
-      "value": 670,
-      "phrase": "sechshundertsiebzig"
     },
     {
       "value": 671,
       "phrase": "sechshundert einundsiebzig"
     },
     {
-      "value": 671,
-      "phrase": "sechshunderteinundsiebzig"
-    },
-    {
       "value": 672,
       "phrase": "sechshundert zweiundsiebzig"
-    },
-    {
-      "value": 672,
-      "phrase": "sechshundertzweiundsiebzig"
     },
     {
       "value": 673,
       "phrase": "sechshundert dreiundsiebzig"
     },
     {
-      "value": 673,
-      "phrase": "sechshundertdreiundsiebzig"
-    },
-    {
       "value": 674,
       "phrase": "sechshundert vierundsiebzig"
-    },
-    {
-      "value": 674,
-      "phrase": "sechshundertvierundsiebzig"
     },
     {
       "value": 675,
       "phrase": "sechshundert fünfundsiebzig"
     },
     {
-      "value": 675,
-      "phrase": "sechshundertfünfundsiebzig"
-    },
-    {
       "value": 676,
       "phrase": "sechshundert sechsundsiebzig"
-    },
-    {
-      "value": 676,
-      "phrase": "sechshundertsechsundsiebzig"
     },
     {
       "value": 677,
       "phrase": "sechshundert siebenundsiebzig"
     },
     {
-      "value": 677,
-      "phrase": "sechshundertsiebenundsiebzig"
-    },
-    {
       "value": 678,
       "phrase": "sechshundert achtundsiebzig"
-    },
-    {
-      "value": 678,
-      "phrase": "sechshundertachtundsiebzig"
     },
     {
       "value": 679,
       "phrase": "sechshundert neunundsiebzig"
     },
     {
-      "value": 679,
-      "phrase": "sechshundertneunundsiebzig"
-    },
-    {
       "value": 680,
       "phrase": "sechshundert achtzig"
-    },
-    {
-      "value": 680,
-      "phrase": "sechshundertachtzig"
     },
     {
       "value": 681,
       "phrase": "sechshundert einundachtzig"
     },
     {
-      "value": 681,
-      "phrase": "sechshunderteinundachtzig"
-    },
-    {
       "value": 682,
       "phrase": "sechshundert zweiundachtzig"
-    },
-    {
-      "value": 682,
-      "phrase": "sechshundertzweiundachtzig"
     },
     {
       "value": 683,
       "phrase": "sechshundert dreiundachtzig"
     },
     {
-      "value": 683,
-      "phrase": "sechshundertdreiundachtzig"
-    },
-    {
       "value": 684,
       "phrase": "sechshundert vierundachtzig"
-    },
-    {
-      "value": 684,
-      "phrase": "sechshundertvierundachtzig"
     },
     {
       "value": 685,
       "phrase": "sechshundert fünfundachtzig"
     },
     {
-      "value": 685,
-      "phrase": "sechshundertfünfundachtzig"
-    },
-    {
       "value": 686,
       "phrase": "sechshundert sechsundachtzig"
-    },
-    {
-      "value": 686,
-      "phrase": "sechshundertsechsundachtzig"
     },
     {
       "value": 687,
       "phrase": "sechshundert siebenundachtzig"
     },
     {
-      "value": 687,
-      "phrase": "sechshundertsiebenundachtzig"
-    },
-    {
       "value": 688,
       "phrase": "sechshundert achtundachtzig"
-    },
-    {
-      "value": 688,
-      "phrase": "sechshundertachtundachtzig"
     },
     {
       "value": 689,
       "phrase": "sechshundert neunundachtzig"
     },
     {
-      "value": 689,
-      "phrase": "sechshundertneunundachtzig"
-    },
-    {
       "value": 690,
       "phrase": "sechshundert neunzig"
-    },
-    {
-      "value": 690,
-      "phrase": "sechshundertneunzig"
     },
     {
       "value": 691,
       "phrase": "sechshundert einundneunzig"
     },
     {
-      "value": 691,
-      "phrase": "sechshunderteinundneunzig"
-    },
-    {
       "value": 692,
       "phrase": "sechshundert zweiundneunzig"
-    },
-    {
-      "value": 692,
-      "phrase": "sechshundertzweiundneunzig"
     },
     {
       "value": 693,
       "phrase": "sechshundert dreiundneunzig"
     },
     {
-      "value": 693,
-      "phrase": "sechshundertdreiundneunzig"
-    },
-    {
       "value": 694,
       "phrase": "sechshundert vierundneunzig"
-    },
-    {
-      "value": 694,
-      "phrase": "sechshundertvierundneunzig"
     },
     {
       "value": 695,
       "phrase": "sechshundert fünfundneunzig"
     },
     {
-      "value": 695,
-      "phrase": "sechshundertfünfundneunzig"
-    },
-    {
       "value": 696,
       "phrase": "sechshundert sechsundneunzig"
-    },
-    {
-      "value": 696,
-      "phrase": "sechshundertsechsundneunzig"
     },
     {
       "value": 697,
       "phrase": "sechshundert siebenundneunzig"
     },
     {
-      "value": 697,
-      "phrase": "sechshundertsiebenundneunzig"
-    },
-    {
       "value": 698,
       "phrase": "sechshundert achtundneunzig"
     },
     {
-      "value": 698,
-      "phrase": "sechshundertachtundneunzig"
-    },
-    {
       "value": 699,
       "phrase": "sechshundert neunundneunzig"
-    },
-    {
-      "value": 699,
-      "phrase": "sechshundertneunundneunzig"
     },
     {
       "value": 700,
@@ -5207,792 +2831,396 @@
       "phrase": "siebenhundert ein"
     },
     {
-      "value": 701,
-      "phrase": "siebenhundertein"
-    },
-    {
       "value": 702,
       "phrase": "siebenhundert zwei"
-    },
-    {
-      "value": 702,
-      "phrase": "siebenhundertzwei"
     },
     {
       "value": 703,
       "phrase": "siebenhundert drei"
     },
     {
-      "value": 703,
-      "phrase": "siebenhundertdrei"
-    },
-    {
       "value": 704,
       "phrase": "siebenhundert vier"
-    },
-    {
-      "value": 704,
-      "phrase": "siebenhundertvier"
     },
     {
       "value": 705,
       "phrase": "siebenhundert fünf"
     },
     {
-      "value": 705,
-      "phrase": "siebenhundertfünf"
-    },
-    {
       "value": 706,
       "phrase": "siebenhundert sechs"
-    },
-    {
-      "value": 706,
-      "phrase": "siebenhundertsechs"
     },
     {
       "value": 707,
       "phrase": "siebenhundert sieben"
     },
     {
-      "value": 707,
-      "phrase": "siebenhundertsieben"
-    },
-    {
       "value": 708,
       "phrase": "siebenhundert acht"
-    },
-    {
-      "value": 708,
-      "phrase": "siebenhundertacht"
     },
     {
       "value": 709,
       "phrase": "siebenhundert neun"
     },
     {
-      "value": 709,
-      "phrase": "siebenhundertneun"
-    },
-    {
       "value": 710,
       "phrase": "siebenhundert zehn"
-    },
-    {
-      "value": 710,
-      "phrase": "siebenhundertzehn"
     },
     {
       "value": 711,
       "phrase": "siebenhundert elf"
     },
     {
-      "value": 711,
-      "phrase": "siebenhundertelf"
-    },
-    {
       "value": 712,
       "phrase": "siebenhundert zwölf"
-    },
-    {
-      "value": 712,
-      "phrase": "siebenhundertzwölf"
     },
     {
       "value": 713,
       "phrase": "siebenhundert dreizehn"
     },
     {
-      "value": 713,
-      "phrase": "siebenhundertdreizehn"
-    },
-    {
       "value": 714,
       "phrase": "siebenhundert vierzehn"
-    },
-    {
-      "value": 714,
-      "phrase": "siebenhundertvierzehn"
     },
     {
       "value": 715,
       "phrase": "siebenhundert fünfzehn"
     },
     {
-      "value": 715,
-      "phrase": "siebenhundertfünfzehn"
-    },
-    {
       "value": 716,
       "phrase": "siebenhundert sechzehn"
-    },
-    {
-      "value": 716,
-      "phrase": "siebenhundertsechzehn"
     },
     {
       "value": 717,
       "phrase": "siebenhundert siebzehn"
     },
     {
-      "value": 717,
-      "phrase": "siebenhundertsiebzehn"
-    },
-    {
       "value": 718,
       "phrase": "siebenhundert achtzehn"
-    },
-    {
-      "value": 718,
-      "phrase": "siebenhundertachtzehn"
     },
     {
       "value": 719,
       "phrase": "siebenhundert neunzehn"
     },
     {
-      "value": 719,
-      "phrase": "siebenhundertneunzehn"
-    },
-    {
       "value": 720,
       "phrase": "siebenhundert zwanzig"
-    },
-    {
-      "value": 720,
-      "phrase": "siebenhundertzwanzig"
     },
     {
       "value": 721,
       "phrase": "siebenhundert einundzwanzig"
     },
     {
-      "value": 721,
-      "phrase": "siebenhunderteinundzwanzig"
-    },
-    {
       "value": 722,
       "phrase": "siebenhundert zweiundzwanzig"
-    },
-    {
-      "value": 722,
-      "phrase": "siebenhundertzweiundzwanzig"
     },
     {
       "value": 723,
       "phrase": "siebenhundert dreiundzwanzig"
     },
     {
-      "value": 723,
-      "phrase": "siebenhundertdreiundzwanzig"
-    },
-    {
       "value": 724,
       "phrase": "siebenhundert vierundzwanzig"
-    },
-    {
-      "value": 724,
-      "phrase": "siebenhundertvierundzwanzig"
     },
     {
       "value": 725,
       "phrase": "siebenhundert fünfundzwanzig"
     },
     {
-      "value": 725,
-      "phrase": "siebenhundertfünfundzwanzig"
-    },
-    {
       "value": 726,
       "phrase": "siebenhundert sechsundzwanzig"
-    },
-    {
-      "value": 726,
-      "phrase": "siebenhundertsechsundzwanzig"
     },
     {
       "value": 727,
       "phrase": "siebenhundert siebenundzwanzig"
     },
     {
-      "value": 727,
-      "phrase": "siebenhundertsiebenundzwanzig"
-    },
-    {
       "value": 728,
       "phrase": "siebenhundert achtundzwanzig"
-    },
-    {
-      "value": 728,
-      "phrase": "siebenhundertachtundzwanzig"
     },
     {
       "value": 729,
       "phrase": "siebenhundert neunundzwanzig"
     },
     {
-      "value": 729,
-      "phrase": "siebenhundertneunundzwanzig"
-    },
-    {
       "value": 730,
       "phrase": "siebenhundert dreißig"
-    },
-    {
-      "value": 730,
-      "phrase": "siebenhundertdreißig"
     },
     {
       "value": 731,
       "phrase": "siebenhundert einunddreißig"
     },
     {
-      "value": 731,
-      "phrase": "siebenhunderteinunddreißig"
-    },
-    {
       "value": 732,
       "phrase": "siebenhundert zweiunddreißig"
-    },
-    {
-      "value": 732,
-      "phrase": "siebenhundertzweiunddreißig"
     },
     {
       "value": 733,
       "phrase": "siebenhundert dreiunddreißig"
     },
     {
-      "value": 733,
-      "phrase": "siebenhundertdreiunddreißig"
-    },
-    {
       "value": 734,
       "phrase": "siebenhundert vierunddreißig"
-    },
-    {
-      "value": 734,
-      "phrase": "siebenhundertvierunddreißig"
     },
     {
       "value": 735,
       "phrase": "siebenhundert fünfunddreißig"
     },
     {
-      "value": 735,
-      "phrase": "siebenhundertfünfunddreißig"
-    },
-    {
       "value": 736,
       "phrase": "siebenhundert sechsunddreißig"
-    },
-    {
-      "value": 736,
-      "phrase": "siebenhundertsechsunddreißig"
     },
     {
       "value": 737,
       "phrase": "siebenhundert siebenunddreißig"
     },
     {
-      "value": 737,
-      "phrase": "siebenhundertsiebenunddreißig"
-    },
-    {
       "value": 738,
       "phrase": "siebenhundert achtunddreißig"
-    },
-    {
-      "value": 738,
-      "phrase": "siebenhundertachtunddreißig"
     },
     {
       "value": 739,
       "phrase": "siebenhundert neununddreißig"
     },
     {
-      "value": 739,
-      "phrase": "siebenhundertneununddreißig"
-    },
-    {
       "value": 740,
       "phrase": "siebenhundert vierzig"
-    },
-    {
-      "value": 740,
-      "phrase": "siebenhundertvierzig"
     },
     {
       "value": 741,
       "phrase": "siebenhundert einundvierzig"
     },
     {
-      "value": 741,
-      "phrase": "siebenhunderteinundvierzig"
-    },
-    {
       "value": 742,
       "phrase": "siebenhundert zweiundvierzig"
-    },
-    {
-      "value": 742,
-      "phrase": "siebenhundertzweiundvierzig"
     },
     {
       "value": 743,
       "phrase": "siebenhundert dreiundvierzig"
     },
     {
-      "value": 743,
-      "phrase": "siebenhundertdreiundvierzig"
-    },
-    {
       "value": 744,
       "phrase": "siebenhundert vierundvierzig"
-    },
-    {
-      "value": 744,
-      "phrase": "siebenhundertvierundvierzig"
     },
     {
       "value": 745,
       "phrase": "siebenhundert fünfundvierzig"
     },
     {
-      "value": 745,
-      "phrase": "siebenhundertfünfundvierzig"
-    },
-    {
       "value": 746,
       "phrase": "siebenhundert sechsundvierzig"
-    },
-    {
-      "value": 746,
-      "phrase": "siebenhundertsechsundvierzig"
     },
     {
       "value": 747,
       "phrase": "siebenhundert siebenundvierzig"
     },
     {
-      "value": 747,
-      "phrase": "siebenhundertsiebenundvierzig"
-    },
-    {
       "value": 748,
       "phrase": "siebenhundert achtundvierzig"
-    },
-    {
-      "value": 748,
-      "phrase": "siebenhundertachtundvierzig"
     },
     {
       "value": 749,
       "phrase": "siebenhundert neunundvierzig"
     },
     {
-      "value": 749,
-      "phrase": "siebenhundertneunundvierzig"
-    },
-    {
       "value": 750,
       "phrase": "siebenhundert fünfzig"
-    },
-    {
-      "value": 750,
-      "phrase": "siebenhundertfünfzig"
     },
     {
       "value": 751,
       "phrase": "siebenhundert einundfünfzig"
     },
     {
-      "value": 751,
-      "phrase": "siebenhunderteinundfünfzig"
-    },
-    {
       "value": 752,
       "phrase": "siebenhundert zweiundfünfzig"
-    },
-    {
-      "value": 752,
-      "phrase": "siebenhundertzweiundfünfzig"
     },
     {
       "value": 753,
       "phrase": "siebenhundert dreiundfünfzig"
     },
     {
-      "value": 753,
-      "phrase": "siebenhundertdreiundfünfzig"
-    },
-    {
       "value": 754,
       "phrase": "siebenhundert vierundfünfzig"
-    },
-    {
-      "value": 754,
-      "phrase": "siebenhundertvierundfünfzig"
     },
     {
       "value": 755,
       "phrase": "siebenhundert fünfundfünfzig"
     },
     {
-      "value": 755,
-      "phrase": "siebenhundertfünfundfünfzig"
-    },
-    {
       "value": 756,
       "phrase": "siebenhundert sechsundfünfzig"
-    },
-    {
-      "value": 756,
-      "phrase": "siebenhundertsechsundfünfzig"
     },
     {
       "value": 757,
       "phrase": "siebenhundert siebenundfünfzig"
     },
     {
-      "value": 757,
-      "phrase": "siebenhundertsiebenundfünfzig"
-    },
-    {
       "value": 758,
       "phrase": "siebenhundert achtundfünfzig"
-    },
-    {
-      "value": 758,
-      "phrase": "siebenhundertachtundfünfzig"
     },
     {
       "value": 759,
       "phrase": "siebenhundert neunundfünfzig"
     },
     {
-      "value": 759,
-      "phrase": "siebenhundertneunundfünfzig"
-    },
-    {
       "value": 760,
       "phrase": "siebenhundert sechzig"
-    },
-    {
-      "value": 760,
-      "phrase": "siebenhundertsechzig"
     },
     {
       "value": 761,
       "phrase": "siebenhundert einundsechzig"
     },
     {
-      "value": 761,
-      "phrase": "siebenhunderteinundsechzig"
-    },
-    {
       "value": 762,
       "phrase": "siebenhundert zweiundsechzig"
-    },
-    {
-      "value": 762,
-      "phrase": "siebenhundertzweiundsechzig"
     },
     {
       "value": 763,
       "phrase": "siebenhundert dreiundsechzig"
     },
     {
-      "value": 763,
-      "phrase": "siebenhundertdreiundsechzig"
-    },
-    {
       "value": 764,
       "phrase": "siebenhundert vierundsechzig"
-    },
-    {
-      "value": 764,
-      "phrase": "siebenhundertvierundsechzig"
     },
     {
       "value": 765,
       "phrase": "siebenhundert fünfundsechzig"
     },
     {
-      "value": 765,
-      "phrase": "siebenhundertfünfundsechzig"
-    },
-    {
       "value": 766,
       "phrase": "siebenhundert sechsundsechzig"
-    },
-    {
-      "value": 766,
-      "phrase": "siebenhundertsechsundsechzig"
     },
     {
       "value": 767,
       "phrase": "siebenhundert siebenundsechzig"
     },
     {
-      "value": 767,
-      "phrase": "siebenhundertsiebenundsechzig"
-    },
-    {
       "value": 768,
       "phrase": "siebenhundert achtundsechzig"
-    },
-    {
-      "value": 768,
-      "phrase": "siebenhundertachtundsechzig"
     },
     {
       "value": 769,
       "phrase": "siebenhundert neunundsechzig"
     },
     {
-      "value": 769,
-      "phrase": "siebenhundertneunundsechzig"
-    },
-    {
       "value": 770,
       "phrase": "siebenhundert siebzig"
-    },
-    {
-      "value": 770,
-      "phrase": "siebenhundertsiebzig"
     },
     {
       "value": 771,
       "phrase": "siebenhundert einundsiebzig"
     },
     {
-      "value": 771,
-      "phrase": "siebenhunderteinundsiebzig"
-    },
-    {
       "value": 772,
       "phrase": "siebenhundert zweiundsiebzig"
-    },
-    {
-      "value": 772,
-      "phrase": "siebenhundertzweiundsiebzig"
     },
     {
       "value": 773,
       "phrase": "siebenhundert dreiundsiebzig"
     },
     {
-      "value": 773,
-      "phrase": "siebenhundertdreiundsiebzig"
-    },
-    {
       "value": 774,
       "phrase": "siebenhundert vierundsiebzig"
-    },
-    {
-      "value": 774,
-      "phrase": "siebenhundertvierundsiebzig"
     },
     {
       "value": 775,
       "phrase": "siebenhundert fünfundsiebzig"
     },
     {
-      "value": 775,
-      "phrase": "siebenhundertfünfundsiebzig"
-    },
-    {
       "value": 776,
       "phrase": "siebenhundert sechsundsiebzig"
-    },
-    {
-      "value": 776,
-      "phrase": "siebenhundertsechsundsiebzig"
     },
     {
       "value": 777,
       "phrase": "siebenhundert siebenundsiebzig"
     },
     {
-      "value": 777,
-      "phrase": "siebenhundertsiebenundsiebzig"
-    },
-    {
       "value": 778,
       "phrase": "siebenhundert achtundsiebzig"
-    },
-    {
-      "value": 778,
-      "phrase": "siebenhundertachtundsiebzig"
     },
     {
       "value": 779,
       "phrase": "siebenhundert neunundsiebzig"
     },
     {
-      "value": 779,
-      "phrase": "siebenhundertneunundsiebzig"
-    },
-    {
       "value": 780,
       "phrase": "siebenhundert achtzig"
-    },
-    {
-      "value": 780,
-      "phrase": "siebenhundertachtzig"
     },
     {
       "value": 781,
       "phrase": "siebenhundert einundachtzig"
     },
     {
-      "value": 781,
-      "phrase": "siebenhunderteinundachtzig"
-    },
-    {
       "value": 782,
       "phrase": "siebenhundert zweiundachtzig"
-    },
-    {
-      "value": 782,
-      "phrase": "siebenhundertzweiundachtzig"
     },
     {
       "value": 783,
       "phrase": "siebenhundert dreiundachtzig"
     },
     {
-      "value": 783,
-      "phrase": "siebenhundertdreiundachtzig"
-    },
-    {
       "value": 784,
       "phrase": "siebenhundert vierundachtzig"
-    },
-    {
-      "value": 784,
-      "phrase": "siebenhundertvierundachtzig"
     },
     {
       "value": 785,
       "phrase": "siebenhundert fünfundachtzig"
     },
     {
-      "value": 785,
-      "phrase": "siebenhundertfünfundachtzig"
-    },
-    {
       "value": 786,
       "phrase": "siebenhundert sechsundachtzig"
-    },
-    {
-      "value": 786,
-      "phrase": "siebenhundertsechsundachtzig"
     },
     {
       "value": 787,
       "phrase": "siebenhundert siebenundachtzig"
     },
     {
-      "value": 787,
-      "phrase": "siebenhundertsiebenundachtzig"
-    },
-    {
       "value": 788,
       "phrase": "siebenhundert achtundachtzig"
-    },
-    {
-      "value": 788,
-      "phrase": "siebenhundertachtundachtzig"
     },
     {
       "value": 789,
       "phrase": "siebenhundert neunundachtzig"
     },
     {
-      "value": 789,
-      "phrase": "siebenhundertneunundachtzig"
-    },
-    {
       "value": 790,
       "phrase": "siebenhundert neunzig"
-    },
-    {
-      "value": 790,
-      "phrase": "siebenhundertneunzig"
     },
     {
       "value": 791,
       "phrase": "siebenhundert einundneunzig"
     },
     {
-      "value": 791,
-      "phrase": "siebenhunderteinundneunzig"
-    },
-    {
       "value": 792,
       "phrase": "siebenhundert zweiundneunzig"
-    },
-    {
-      "value": 792,
-      "phrase": "siebenhundertzweiundneunzig"
     },
     {
       "value": 793,
       "phrase": "siebenhundert dreiundneunzig"
     },
     {
-      "value": 793,
-      "phrase": "siebenhundertdreiundneunzig"
-    },
-    {
       "value": 794,
       "phrase": "siebenhundert vierundneunzig"
-    },
-    {
-      "value": 794,
-      "phrase": "siebenhundertvierundneunzig"
     },
     {
       "value": 795,
       "phrase": "siebenhundert fünfundneunzig"
     },
     {
-      "value": 795,
-      "phrase": "siebenhundertfünfundneunzig"
-    },
-    {
       "value": 796,
       "phrase": "siebenhundert sechsundneunzig"
-    },
-    {
-      "value": 796,
-      "phrase": "siebenhundertsechsundneunzig"
     },
     {
       "value": 797,
       "phrase": "siebenhundert siebenundneunzig"
     },
     {
-      "value": 797,
-      "phrase": "siebenhundertsiebenundneunzig"
-    },
-    {
       "value": 798,
       "phrase": "siebenhundert achtundneunzig"
     },
     {
-      "value": 798,
-      "phrase": "siebenhundertachtundneunzig"
-    },
-    {
       "value": 799,
       "phrase": "siebenhundert neunundneunzig"
-    },
-    {
-      "value": 799,
-      "phrase": "siebenhundertneunundneunzig"
     },
     {
       "value": 800,
@@ -6003,792 +3231,396 @@
       "phrase": "achthundert ein"
     },
     {
-      "value": 801,
-      "phrase": "achthundertein"
-    },
-    {
       "value": 802,
       "phrase": "achthundert zwei"
-    },
-    {
-      "value": 802,
-      "phrase": "achthundertzwei"
     },
     {
       "value": 803,
       "phrase": "achthundert drei"
     },
     {
-      "value": 803,
-      "phrase": "achthundertdrei"
-    },
-    {
       "value": 804,
       "phrase": "achthundert vier"
-    },
-    {
-      "value": 804,
-      "phrase": "achthundertvier"
     },
     {
       "value": 805,
       "phrase": "achthundert fünf"
     },
     {
-      "value": 805,
-      "phrase": "achthundertfünf"
-    },
-    {
       "value": 806,
       "phrase": "achthundert sechs"
-    },
-    {
-      "value": 806,
-      "phrase": "achthundertsechs"
     },
     {
       "value": 807,
       "phrase": "achthundert sieben"
     },
     {
-      "value": 807,
-      "phrase": "achthundertsieben"
-    },
-    {
       "value": 808,
       "phrase": "achthundert acht"
-    },
-    {
-      "value": 808,
-      "phrase": "achthundertacht"
     },
     {
       "value": 809,
       "phrase": "achthundert neun"
     },
     {
-      "value": 809,
-      "phrase": "achthundertneun"
-    },
-    {
       "value": 810,
       "phrase": "achthundert zehn"
-    },
-    {
-      "value": 810,
-      "phrase": "achthundertzehn"
     },
     {
       "value": 811,
       "phrase": "achthundert elf"
     },
     {
-      "value": 811,
-      "phrase": "achthundertelf"
-    },
-    {
       "value": 812,
       "phrase": "achthundert zwölf"
-    },
-    {
-      "value": 812,
-      "phrase": "achthundertzwölf"
     },
     {
       "value": 813,
       "phrase": "achthundert dreizehn"
     },
     {
-      "value": 813,
-      "phrase": "achthundertdreizehn"
-    },
-    {
       "value": 814,
       "phrase": "achthundert vierzehn"
-    },
-    {
-      "value": 814,
-      "phrase": "achthundertvierzehn"
     },
     {
       "value": 815,
       "phrase": "achthundert fünfzehn"
     },
     {
-      "value": 815,
-      "phrase": "achthundertfünfzehn"
-    },
-    {
       "value": 816,
       "phrase": "achthundert sechzehn"
-    },
-    {
-      "value": 816,
-      "phrase": "achthundertsechzehn"
     },
     {
       "value": 817,
       "phrase": "achthundert siebzehn"
     },
     {
-      "value": 817,
-      "phrase": "achthundertsiebzehn"
-    },
-    {
       "value": 818,
       "phrase": "achthundert achtzehn"
-    },
-    {
-      "value": 818,
-      "phrase": "achthundertachtzehn"
     },
     {
       "value": 819,
       "phrase": "achthundert neunzehn"
     },
     {
-      "value": 819,
-      "phrase": "achthundertneunzehn"
-    },
-    {
       "value": 820,
       "phrase": "achthundert zwanzig"
-    },
-    {
-      "value": 820,
-      "phrase": "achthundertzwanzig"
     },
     {
       "value": 821,
       "phrase": "achthundert einundzwanzig"
     },
     {
-      "value": 821,
-      "phrase": "achthunderteinundzwanzig"
-    },
-    {
       "value": 822,
       "phrase": "achthundert zweiundzwanzig"
-    },
-    {
-      "value": 822,
-      "phrase": "achthundertzweiundzwanzig"
     },
     {
       "value": 823,
       "phrase": "achthundert dreiundzwanzig"
     },
     {
-      "value": 823,
-      "phrase": "achthundertdreiundzwanzig"
-    },
-    {
       "value": 824,
       "phrase": "achthundert vierundzwanzig"
-    },
-    {
-      "value": 824,
-      "phrase": "achthundertvierundzwanzig"
     },
     {
       "value": 825,
       "phrase": "achthundert fünfundzwanzig"
     },
     {
-      "value": 825,
-      "phrase": "achthundertfünfundzwanzig"
-    },
-    {
       "value": 826,
       "phrase": "achthundert sechsundzwanzig"
-    },
-    {
-      "value": 826,
-      "phrase": "achthundertsechsundzwanzig"
     },
     {
       "value": 827,
       "phrase": "achthundert siebenundzwanzig"
     },
     {
-      "value": 827,
-      "phrase": "achthundertsiebenundzwanzig"
-    },
-    {
       "value": 828,
       "phrase": "achthundert achtundzwanzig"
-    },
-    {
-      "value": 828,
-      "phrase": "achthundertachtundzwanzig"
     },
     {
       "value": 829,
       "phrase": "achthundert neunundzwanzig"
     },
     {
-      "value": 829,
-      "phrase": "achthundertneunundzwanzig"
-    },
-    {
       "value": 830,
       "phrase": "achthundert dreißig"
-    },
-    {
-      "value": 830,
-      "phrase": "achthundertdreißig"
     },
     {
       "value": 831,
       "phrase": "achthundert einunddreißig"
     },
     {
-      "value": 831,
-      "phrase": "achthunderteinunddreißig"
-    },
-    {
       "value": 832,
       "phrase": "achthundert zweiunddreißig"
-    },
-    {
-      "value": 832,
-      "phrase": "achthundertzweiunddreißig"
     },
     {
       "value": 833,
       "phrase": "achthundert dreiunddreißig"
     },
     {
-      "value": 833,
-      "phrase": "achthundertdreiunddreißig"
-    },
-    {
       "value": 834,
       "phrase": "achthundert vierunddreißig"
-    },
-    {
-      "value": 834,
-      "phrase": "achthundertvierunddreißig"
     },
     {
       "value": 835,
       "phrase": "achthundert fünfunddreißig"
     },
     {
-      "value": 835,
-      "phrase": "achthundertfünfunddreißig"
-    },
-    {
       "value": 836,
       "phrase": "achthundert sechsunddreißig"
-    },
-    {
-      "value": 836,
-      "phrase": "achthundertsechsunddreißig"
     },
     {
       "value": 837,
       "phrase": "achthundert siebenunddreißig"
     },
     {
-      "value": 837,
-      "phrase": "achthundertsiebenunddreißig"
-    },
-    {
       "value": 838,
       "phrase": "achthundert achtunddreißig"
-    },
-    {
-      "value": 838,
-      "phrase": "achthundertachtunddreißig"
     },
     {
       "value": 839,
       "phrase": "achthundert neununddreißig"
     },
     {
-      "value": 839,
-      "phrase": "achthundertneununddreißig"
-    },
-    {
       "value": 840,
       "phrase": "achthundert vierzig"
-    },
-    {
-      "value": 840,
-      "phrase": "achthundertvierzig"
     },
     {
       "value": 841,
       "phrase": "achthundert einundvierzig"
     },
     {
-      "value": 841,
-      "phrase": "achthunderteinundvierzig"
-    },
-    {
       "value": 842,
       "phrase": "achthundert zweiundvierzig"
-    },
-    {
-      "value": 842,
-      "phrase": "achthundertzweiundvierzig"
     },
     {
       "value": 843,
       "phrase": "achthundert dreiundvierzig"
     },
     {
-      "value": 843,
-      "phrase": "achthundertdreiundvierzig"
-    },
-    {
       "value": 844,
       "phrase": "achthundert vierundvierzig"
-    },
-    {
-      "value": 844,
-      "phrase": "achthundertvierundvierzig"
     },
     {
       "value": 845,
       "phrase": "achthundert fünfundvierzig"
     },
     {
-      "value": 845,
-      "phrase": "achthundertfünfundvierzig"
-    },
-    {
       "value": 846,
       "phrase": "achthundert sechsundvierzig"
-    },
-    {
-      "value": 846,
-      "phrase": "achthundertsechsundvierzig"
     },
     {
       "value": 847,
       "phrase": "achthundert siebenundvierzig"
     },
     {
-      "value": 847,
-      "phrase": "achthundertsiebenundvierzig"
-    },
-    {
       "value": 848,
       "phrase": "achthundert achtundvierzig"
-    },
-    {
-      "value": 848,
-      "phrase": "achthundertachtundvierzig"
     },
     {
       "value": 849,
       "phrase": "achthundert neunundvierzig"
     },
     {
-      "value": 849,
-      "phrase": "achthundertneunundvierzig"
-    },
-    {
       "value": 850,
       "phrase": "achthundert fünfzig"
-    },
-    {
-      "value": 850,
-      "phrase": "achthundertfünfzig"
     },
     {
       "value": 851,
       "phrase": "achthundert einundfünfzig"
     },
     {
-      "value": 851,
-      "phrase": "achthunderteinundfünfzig"
-    },
-    {
       "value": 852,
       "phrase": "achthundert zweiundfünfzig"
-    },
-    {
-      "value": 852,
-      "phrase": "achthundertzweiundfünfzig"
     },
     {
       "value": 853,
       "phrase": "achthundert dreiundfünfzig"
     },
     {
-      "value": 853,
-      "phrase": "achthundertdreiundfünfzig"
-    },
-    {
       "value": 854,
       "phrase": "achthundert vierundfünfzig"
-    },
-    {
-      "value": 854,
-      "phrase": "achthundertvierundfünfzig"
     },
     {
       "value": 855,
       "phrase": "achthundert fünfundfünfzig"
     },
     {
-      "value": 855,
-      "phrase": "achthundertfünfundfünfzig"
-    },
-    {
       "value": 856,
       "phrase": "achthundert sechsundfünfzig"
-    },
-    {
-      "value": 856,
-      "phrase": "achthundertsechsundfünfzig"
     },
     {
       "value": 857,
       "phrase": "achthundert siebenundfünfzig"
     },
     {
-      "value": 857,
-      "phrase": "achthundertsiebenundfünfzig"
-    },
-    {
       "value": 858,
       "phrase": "achthundert achtundfünfzig"
-    },
-    {
-      "value": 858,
-      "phrase": "achthundertachtundfünfzig"
     },
     {
       "value": 859,
       "phrase": "achthundert neunundfünfzig"
     },
     {
-      "value": 859,
-      "phrase": "achthundertneunundfünfzig"
-    },
-    {
       "value": 860,
       "phrase": "achthundert sechzig"
-    },
-    {
-      "value": 860,
-      "phrase": "achthundertsechzig"
     },
     {
       "value": 861,
       "phrase": "achthundert einundsechzig"
     },
     {
-      "value": 861,
-      "phrase": "achthunderteinundsechzig"
-    },
-    {
       "value": 862,
       "phrase": "achthundert zweiundsechzig"
-    },
-    {
-      "value": 862,
-      "phrase": "achthundertzweiundsechzig"
     },
     {
       "value": 863,
       "phrase": "achthundert dreiundsechzig"
     },
     {
-      "value": 863,
-      "phrase": "achthundertdreiundsechzig"
-    },
-    {
       "value": 864,
       "phrase": "achthundert vierundsechzig"
-    },
-    {
-      "value": 864,
-      "phrase": "achthundertvierundsechzig"
     },
     {
       "value": 865,
       "phrase": "achthundert fünfundsechzig"
     },
     {
-      "value": 865,
-      "phrase": "achthundertfünfundsechzig"
-    },
-    {
       "value": 866,
       "phrase": "achthundert sechsundsechzig"
-    },
-    {
-      "value": 866,
-      "phrase": "achthundertsechsundsechzig"
     },
     {
       "value": 867,
       "phrase": "achthundert siebenundsechzig"
     },
     {
-      "value": 867,
-      "phrase": "achthundertsiebenundsechzig"
-    },
-    {
       "value": 868,
       "phrase": "achthundert achtundsechzig"
-    },
-    {
-      "value": 868,
-      "phrase": "achthundertachtundsechzig"
     },
     {
       "value": 869,
       "phrase": "achthundert neunundsechzig"
     },
     {
-      "value": 869,
-      "phrase": "achthundertneunundsechzig"
-    },
-    {
       "value": 870,
       "phrase": "achthundert siebzig"
-    },
-    {
-      "value": 870,
-      "phrase": "achthundertsiebzig"
     },
     {
       "value": 871,
       "phrase": "achthundert einundsiebzig"
     },
     {
-      "value": 871,
-      "phrase": "achthunderteinundsiebzig"
-    },
-    {
       "value": 872,
       "phrase": "achthundert zweiundsiebzig"
-    },
-    {
-      "value": 872,
-      "phrase": "achthundertzweiundsiebzig"
     },
     {
       "value": 873,
       "phrase": "achthundert dreiundsiebzig"
     },
     {
-      "value": 873,
-      "phrase": "achthundertdreiundsiebzig"
-    },
-    {
       "value": 874,
       "phrase": "achthundert vierundsiebzig"
-    },
-    {
-      "value": 874,
-      "phrase": "achthundertvierundsiebzig"
     },
     {
       "value": 875,
       "phrase": "achthundert fünfundsiebzig"
     },
     {
-      "value": 875,
-      "phrase": "achthundertfünfundsiebzig"
-    },
-    {
       "value": 876,
       "phrase": "achthundert sechsundsiebzig"
-    },
-    {
-      "value": 876,
-      "phrase": "achthundertsechsundsiebzig"
     },
     {
       "value": 877,
       "phrase": "achthundert siebenundsiebzig"
     },
     {
-      "value": 877,
-      "phrase": "achthundertsiebenundsiebzig"
-    },
-    {
       "value": 878,
       "phrase": "achthundert achtundsiebzig"
-    },
-    {
-      "value": 878,
-      "phrase": "achthundertachtundsiebzig"
     },
     {
       "value": 879,
       "phrase": "achthundert neunundsiebzig"
     },
     {
-      "value": 879,
-      "phrase": "achthundertneunundsiebzig"
-    },
-    {
       "value": 880,
       "phrase": "achthundert achtzig"
-    },
-    {
-      "value": 880,
-      "phrase": "achthundertachtzig"
     },
     {
       "value": 881,
       "phrase": "achthundert einundachtzig"
     },
     {
-      "value": 881,
-      "phrase": "achthunderteinundachtzig"
-    },
-    {
       "value": 882,
       "phrase": "achthundert zweiundachtzig"
-    },
-    {
-      "value": 882,
-      "phrase": "achthundertzweiundachtzig"
     },
     {
       "value": 883,
       "phrase": "achthundert dreiundachtzig"
     },
     {
-      "value": 883,
-      "phrase": "achthundertdreiundachtzig"
-    },
-    {
       "value": 884,
       "phrase": "achthundert vierundachtzig"
-    },
-    {
-      "value": 884,
-      "phrase": "achthundertvierundachtzig"
     },
     {
       "value": 885,
       "phrase": "achthundert fünfundachtzig"
     },
     {
-      "value": 885,
-      "phrase": "achthundertfünfundachtzig"
-    },
-    {
       "value": 886,
       "phrase": "achthundert sechsundachtzig"
-    },
-    {
-      "value": 886,
-      "phrase": "achthundertsechsundachtzig"
     },
     {
       "value": 887,
       "phrase": "achthundert siebenundachtzig"
     },
     {
-      "value": 887,
-      "phrase": "achthundertsiebenundachtzig"
-    },
-    {
       "value": 888,
       "phrase": "achthundert achtundachtzig"
-    },
-    {
-      "value": 888,
-      "phrase": "achthundertachtundachtzig"
     },
     {
       "value": 889,
       "phrase": "achthundert neunundachtzig"
     },
     {
-      "value": 889,
-      "phrase": "achthundertneunundachtzig"
-    },
-    {
       "value": 890,
       "phrase": "achthundert neunzig"
-    },
-    {
-      "value": 890,
-      "phrase": "achthundertneunzig"
     },
     {
       "value": 891,
       "phrase": "achthundert einundneunzig"
     },
     {
-      "value": 891,
-      "phrase": "achthunderteinundneunzig"
-    },
-    {
       "value": 892,
       "phrase": "achthundert zweiundneunzig"
-    },
-    {
-      "value": 892,
-      "phrase": "achthundertzweiundneunzig"
     },
     {
       "value": 893,
       "phrase": "achthundert dreiundneunzig"
     },
     {
-      "value": 893,
-      "phrase": "achthundertdreiundneunzig"
-    },
-    {
       "value": 894,
       "phrase": "achthundert vierundneunzig"
-    },
-    {
-      "value": 894,
-      "phrase": "achthundertvierundneunzig"
     },
     {
       "value": 895,
       "phrase": "achthundert fünfundneunzig"
     },
     {
-      "value": 895,
-      "phrase": "achthundertfünfundneunzig"
-    },
-    {
       "value": 896,
       "phrase": "achthundert sechsundneunzig"
-    },
-    {
-      "value": 896,
-      "phrase": "achthundertsechsundneunzig"
     },
     {
       "value": 897,
       "phrase": "achthundert siebenundneunzig"
     },
     {
-      "value": 897,
-      "phrase": "achthundertsiebenundneunzig"
-    },
-    {
       "value": 898,
       "phrase": "achthundert achtundneunzig"
     },
     {
-      "value": 898,
-      "phrase": "achthundertachtundneunzig"
-    },
-    {
       "value": 899,
       "phrase": "achthundert neunundneunzig"
-    },
-    {
-      "value": 899,
-      "phrase": "achthundertneunundneunzig"
     },
     {
       "value": 900,
@@ -6799,792 +3631,396 @@
       "phrase": "neunhundert ein"
     },
     {
-      "value": 901,
-      "phrase": "neunhundertein"
-    },
-    {
       "value": 902,
       "phrase": "neunhundert zwei"
-    },
-    {
-      "value": 902,
-      "phrase": "neunhundertzwei"
     },
     {
       "value": 903,
       "phrase": "neunhundert drei"
     },
     {
-      "value": 903,
-      "phrase": "neunhundertdrei"
-    },
-    {
       "value": 904,
       "phrase": "neunhundert vier"
-    },
-    {
-      "value": 904,
-      "phrase": "neunhundertvier"
     },
     {
       "value": 905,
       "phrase": "neunhundert fünf"
     },
     {
-      "value": 905,
-      "phrase": "neunhundertfünf"
-    },
-    {
       "value": 906,
       "phrase": "neunhundert sechs"
-    },
-    {
-      "value": 906,
-      "phrase": "neunhundertsechs"
     },
     {
       "value": 907,
       "phrase": "neunhundert sieben"
     },
     {
-      "value": 907,
-      "phrase": "neunhundertsieben"
-    },
-    {
       "value": 908,
       "phrase": "neunhundert acht"
-    },
-    {
-      "value": 908,
-      "phrase": "neunhundertacht"
     },
     {
       "value": 909,
       "phrase": "neunhundert neun"
     },
     {
-      "value": 909,
-      "phrase": "neunhundertneun"
-    },
-    {
       "value": 910,
       "phrase": "neunhundert zehn"
-    },
-    {
-      "value": 910,
-      "phrase": "neunhundertzehn"
     },
     {
       "value": 911,
       "phrase": "neunhundert elf"
     },
     {
-      "value": 911,
-      "phrase": "neunhundertelf"
-    },
-    {
       "value": 912,
       "phrase": "neunhundert zwölf"
-    },
-    {
-      "value": 912,
-      "phrase": "neunhundertzwölf"
     },
     {
       "value": 913,
       "phrase": "neunhundert dreizehn"
     },
     {
-      "value": 913,
-      "phrase": "neunhundertdreizehn"
-    },
-    {
       "value": 914,
       "phrase": "neunhundert vierzehn"
-    },
-    {
-      "value": 914,
-      "phrase": "neunhundertvierzehn"
     },
     {
       "value": 915,
       "phrase": "neunhundert fünfzehn"
     },
     {
-      "value": 915,
-      "phrase": "neunhundertfünfzehn"
-    },
-    {
       "value": 916,
       "phrase": "neunhundert sechzehn"
-    },
-    {
-      "value": 916,
-      "phrase": "neunhundertsechzehn"
     },
     {
       "value": 917,
       "phrase": "neunhundert siebzehn"
     },
     {
-      "value": 917,
-      "phrase": "neunhundertsiebzehn"
-    },
-    {
       "value": 918,
       "phrase": "neunhundert achtzehn"
-    },
-    {
-      "value": 918,
-      "phrase": "neunhundertachtzehn"
     },
     {
       "value": 919,
       "phrase": "neunhundert neunzehn"
     },
     {
-      "value": 919,
-      "phrase": "neunhundertneunzehn"
-    },
-    {
       "value": 920,
       "phrase": "neunhundert zwanzig"
-    },
-    {
-      "value": 920,
-      "phrase": "neunhundertzwanzig"
     },
     {
       "value": 921,
       "phrase": "neunhundert einundzwanzig"
     },
     {
-      "value": 921,
-      "phrase": "neunhunderteinundzwanzig"
-    },
-    {
       "value": 922,
       "phrase": "neunhundert zweiundzwanzig"
-    },
-    {
-      "value": 922,
-      "phrase": "neunhundertzweiundzwanzig"
     },
     {
       "value": 923,
       "phrase": "neunhundert dreiundzwanzig"
     },
     {
-      "value": 923,
-      "phrase": "neunhundertdreiundzwanzig"
-    },
-    {
       "value": 924,
       "phrase": "neunhundert vierundzwanzig"
-    },
-    {
-      "value": 924,
-      "phrase": "neunhundertvierundzwanzig"
     },
     {
       "value": 925,
       "phrase": "neunhundert fünfundzwanzig"
     },
     {
-      "value": 925,
-      "phrase": "neunhundertfünfundzwanzig"
-    },
-    {
       "value": 926,
       "phrase": "neunhundert sechsundzwanzig"
-    },
-    {
-      "value": 926,
-      "phrase": "neunhundertsechsundzwanzig"
     },
     {
       "value": 927,
       "phrase": "neunhundert siebenundzwanzig"
     },
     {
-      "value": 927,
-      "phrase": "neunhundertsiebenundzwanzig"
-    },
-    {
       "value": 928,
       "phrase": "neunhundert achtundzwanzig"
-    },
-    {
-      "value": 928,
-      "phrase": "neunhundertachtundzwanzig"
     },
     {
       "value": 929,
       "phrase": "neunhundert neunundzwanzig"
     },
     {
-      "value": 929,
-      "phrase": "neunhundertneunundzwanzig"
-    },
-    {
       "value": 930,
       "phrase": "neunhundert dreißig"
-    },
-    {
-      "value": 930,
-      "phrase": "neunhundertdreißig"
     },
     {
       "value": 931,
       "phrase": "neunhundert einunddreißig"
     },
     {
-      "value": 931,
-      "phrase": "neunhunderteinunddreißig"
-    },
-    {
       "value": 932,
       "phrase": "neunhundert zweiunddreißig"
-    },
-    {
-      "value": 932,
-      "phrase": "neunhundertzweiunddreißig"
     },
     {
       "value": 933,
       "phrase": "neunhundert dreiunddreißig"
     },
     {
-      "value": 933,
-      "phrase": "neunhundertdreiunddreißig"
-    },
-    {
       "value": 934,
       "phrase": "neunhundert vierunddreißig"
-    },
-    {
-      "value": 934,
-      "phrase": "neunhundertvierunddreißig"
     },
     {
       "value": 935,
       "phrase": "neunhundert fünfunddreißig"
     },
     {
-      "value": 935,
-      "phrase": "neunhundertfünfunddreißig"
-    },
-    {
       "value": 936,
       "phrase": "neunhundert sechsunddreißig"
-    },
-    {
-      "value": 936,
-      "phrase": "neunhundertsechsunddreißig"
     },
     {
       "value": 937,
       "phrase": "neunhundert siebenunddreißig"
     },
     {
-      "value": 937,
-      "phrase": "neunhundertsiebenunddreißig"
-    },
-    {
       "value": 938,
       "phrase": "neunhundert achtunddreißig"
-    },
-    {
-      "value": 938,
-      "phrase": "neunhundertachtunddreißig"
     },
     {
       "value": 939,
       "phrase": "neunhundert neununddreißig"
     },
     {
-      "value": 939,
-      "phrase": "neunhundertneununddreißig"
-    },
-    {
       "value": 940,
       "phrase": "neunhundert vierzig"
-    },
-    {
-      "value": 940,
-      "phrase": "neunhundertvierzig"
     },
     {
       "value": 941,
       "phrase": "neunhundert einundvierzig"
     },
     {
-      "value": 941,
-      "phrase": "neunhunderteinundvierzig"
-    },
-    {
       "value": 942,
       "phrase": "neunhundert zweiundvierzig"
-    },
-    {
-      "value": 942,
-      "phrase": "neunhundertzweiundvierzig"
     },
     {
       "value": 943,
       "phrase": "neunhundert dreiundvierzig"
     },
     {
-      "value": 943,
-      "phrase": "neunhundertdreiundvierzig"
-    },
-    {
       "value": 944,
       "phrase": "neunhundert vierundvierzig"
-    },
-    {
-      "value": 944,
-      "phrase": "neunhundertvierundvierzig"
     },
     {
       "value": 945,
       "phrase": "neunhundert fünfundvierzig"
     },
     {
-      "value": 945,
-      "phrase": "neunhundertfünfundvierzig"
-    },
-    {
       "value": 946,
       "phrase": "neunhundert sechsundvierzig"
-    },
-    {
-      "value": 946,
-      "phrase": "neunhundertsechsundvierzig"
     },
     {
       "value": 947,
       "phrase": "neunhundert siebenundvierzig"
     },
     {
-      "value": 947,
-      "phrase": "neunhundertsiebenundvierzig"
-    },
-    {
       "value": 948,
       "phrase": "neunhundert achtundvierzig"
-    },
-    {
-      "value": 948,
-      "phrase": "neunhundertachtundvierzig"
     },
     {
       "value": 949,
       "phrase": "neunhundert neunundvierzig"
     },
     {
-      "value": 949,
-      "phrase": "neunhundertneunundvierzig"
-    },
-    {
       "value": 950,
       "phrase": "neunhundert fünfzig"
-    },
-    {
-      "value": 950,
-      "phrase": "neunhundertfünfzig"
     },
     {
       "value": 951,
       "phrase": "neunhundert einundfünfzig"
     },
     {
-      "value": 951,
-      "phrase": "neunhunderteinundfünfzig"
-    },
-    {
       "value": 952,
       "phrase": "neunhundert zweiundfünfzig"
-    },
-    {
-      "value": 952,
-      "phrase": "neunhundertzweiundfünfzig"
     },
     {
       "value": 953,
       "phrase": "neunhundert dreiundfünfzig"
     },
     {
-      "value": 953,
-      "phrase": "neunhundertdreiundfünfzig"
-    },
-    {
       "value": 954,
       "phrase": "neunhundert vierundfünfzig"
-    },
-    {
-      "value": 954,
-      "phrase": "neunhundertvierundfünfzig"
     },
     {
       "value": 955,
       "phrase": "neunhundert fünfundfünfzig"
     },
     {
-      "value": 955,
-      "phrase": "neunhundertfünfundfünfzig"
-    },
-    {
       "value": 956,
       "phrase": "neunhundert sechsundfünfzig"
-    },
-    {
-      "value": 956,
-      "phrase": "neunhundertsechsundfünfzig"
     },
     {
       "value": 957,
       "phrase": "neunhundert siebenundfünfzig"
     },
     {
-      "value": 957,
-      "phrase": "neunhundertsiebenundfünfzig"
-    },
-    {
       "value": 958,
       "phrase": "neunhundert achtundfünfzig"
-    },
-    {
-      "value": 958,
-      "phrase": "neunhundertachtundfünfzig"
     },
     {
       "value": 959,
       "phrase": "neunhundert neunundfünfzig"
     },
     {
-      "value": 959,
-      "phrase": "neunhundertneunundfünfzig"
-    },
-    {
       "value": 960,
       "phrase": "neunhundert sechzig"
-    },
-    {
-      "value": 960,
-      "phrase": "neunhundertsechzig"
     },
     {
       "value": 961,
       "phrase": "neunhundert einundsechzig"
     },
     {
-      "value": 961,
-      "phrase": "neunhunderteinundsechzig"
-    },
-    {
       "value": 962,
       "phrase": "neunhundert zweiundsechzig"
-    },
-    {
-      "value": 962,
-      "phrase": "neunhundertzweiundsechzig"
     },
     {
       "value": 963,
       "phrase": "neunhundert dreiundsechzig"
     },
     {
-      "value": 963,
-      "phrase": "neunhundertdreiundsechzig"
-    },
-    {
       "value": 964,
       "phrase": "neunhundert vierundsechzig"
-    },
-    {
-      "value": 964,
-      "phrase": "neunhundertvierundsechzig"
     },
     {
       "value": 965,
       "phrase": "neunhundert fünfundsechzig"
     },
     {
-      "value": 965,
-      "phrase": "neunhundertfünfundsechzig"
-    },
-    {
       "value": 966,
       "phrase": "neunhundert sechsundsechzig"
-    },
-    {
-      "value": 966,
-      "phrase": "neunhundertsechsundsechzig"
     },
     {
       "value": 967,
       "phrase": "neunhundert siebenundsechzig"
     },
     {
-      "value": 967,
-      "phrase": "neunhundertsiebenundsechzig"
-    },
-    {
       "value": 968,
       "phrase": "neunhundert achtundsechzig"
-    },
-    {
-      "value": 968,
-      "phrase": "neunhundertachtundsechzig"
     },
     {
       "value": 969,
       "phrase": "neunhundert neunundsechzig"
     },
     {
-      "value": 969,
-      "phrase": "neunhundertneunundsechzig"
-    },
-    {
       "value": 970,
       "phrase": "neunhundert siebzig"
-    },
-    {
-      "value": 970,
-      "phrase": "neunhundertsiebzig"
     },
     {
       "value": 971,
       "phrase": "neunhundert einundsiebzig"
     },
     {
-      "value": 971,
-      "phrase": "neunhunderteinundsiebzig"
-    },
-    {
       "value": 972,
       "phrase": "neunhundert zweiundsiebzig"
-    },
-    {
-      "value": 972,
-      "phrase": "neunhundertzweiundsiebzig"
     },
     {
       "value": 973,
       "phrase": "neunhundert dreiundsiebzig"
     },
     {
-      "value": 973,
-      "phrase": "neunhundertdreiundsiebzig"
-    },
-    {
       "value": 974,
       "phrase": "neunhundert vierundsiebzig"
-    },
-    {
-      "value": 974,
-      "phrase": "neunhundertvierundsiebzig"
     },
     {
       "value": 975,
       "phrase": "neunhundert fünfundsiebzig"
     },
     {
-      "value": 975,
-      "phrase": "neunhundertfünfundsiebzig"
-    },
-    {
       "value": 976,
       "phrase": "neunhundert sechsundsiebzig"
-    },
-    {
-      "value": 976,
-      "phrase": "neunhundertsechsundsiebzig"
     },
     {
       "value": 977,
       "phrase": "neunhundert siebenundsiebzig"
     },
     {
-      "value": 977,
-      "phrase": "neunhundertsiebenundsiebzig"
-    },
-    {
       "value": 978,
       "phrase": "neunhundert achtundsiebzig"
-    },
-    {
-      "value": 978,
-      "phrase": "neunhundertachtundsiebzig"
     },
     {
       "value": 979,
       "phrase": "neunhundert neunundsiebzig"
     },
     {
-      "value": 979,
-      "phrase": "neunhundertneunundsiebzig"
-    },
-    {
       "value": 980,
       "phrase": "neunhundert achtzig"
-    },
-    {
-      "value": 980,
-      "phrase": "neunhundertachtzig"
     },
     {
       "value": 981,
       "phrase": "neunhundert einundachtzig"
     },
     {
-      "value": 981,
-      "phrase": "neunhunderteinundachtzig"
-    },
-    {
       "value": 982,
       "phrase": "neunhundert zweiundachtzig"
-    },
-    {
-      "value": 982,
-      "phrase": "neunhundertzweiundachtzig"
     },
     {
       "value": 983,
       "phrase": "neunhundert dreiundachtzig"
     },
     {
-      "value": 983,
-      "phrase": "neunhundertdreiundachtzig"
-    },
-    {
       "value": 984,
       "phrase": "neunhundert vierundachtzig"
-    },
-    {
-      "value": 984,
-      "phrase": "neunhundertvierundachtzig"
     },
     {
       "value": 985,
       "phrase": "neunhundert fünfundachtzig"
     },
     {
-      "value": 985,
-      "phrase": "neunhundertfünfundachtzig"
-    },
-    {
       "value": 986,
       "phrase": "neunhundert sechsundachtzig"
-    },
-    {
-      "value": 986,
-      "phrase": "neunhundertsechsundachtzig"
     },
     {
       "value": 987,
       "phrase": "neunhundert siebenundachtzig"
     },
     {
-      "value": 987,
-      "phrase": "neunhundertsiebenundachtzig"
-    },
-    {
       "value": 988,
       "phrase": "neunhundert achtundachtzig"
-    },
-    {
-      "value": 988,
-      "phrase": "neunhundertachtundachtzig"
     },
     {
       "value": 989,
       "phrase": "neunhundert neunundachtzig"
     },
     {
-      "value": 989,
-      "phrase": "neunhundertneunundachtzig"
-    },
-    {
       "value": 990,
       "phrase": "neunhundert neunzig"
-    },
-    {
-      "value": 990,
-      "phrase": "neunhundertneunzig"
     },
     {
       "value": 991,
       "phrase": "neunhundert einundneunzig"
     },
     {
-      "value": 991,
-      "phrase": "neunhunderteinundneunzig"
-    },
-    {
       "value": 992,
       "phrase": "neunhundert zweiundneunzig"
-    },
-    {
-      "value": 992,
-      "phrase": "neunhundertzweiundneunzig"
     },
     {
       "value": 993,
       "phrase": "neunhundert dreiundneunzig"
     },
     {
-      "value": 993,
-      "phrase": "neunhundertdreiundneunzig"
-    },
-    {
       "value": 994,
       "phrase": "neunhundert vierundneunzig"
-    },
-    {
-      "value": 994,
-      "phrase": "neunhundertvierundneunzig"
     },
     {
       "value": 995,
       "phrase": "neunhundert fünfundneunzig"
     },
     {
-      "value": 995,
-      "phrase": "neunhundertfünfundneunzig"
-    },
-    {
       "value": 996,
       "phrase": "neunhundert sechsundneunzig"
-    },
-    {
-      "value": 996,
-      "phrase": "neunhundertsechsundneunzig"
     },
     {
       "value": 997,
       "phrase": "neunhundert siebenundneunzig"
     },
     {
-      "value": 997,
-      "phrase": "neunhundertsiebenundneunzig"
-    },
-    {
       "value": 998,
       "phrase": "neunhundert achtundneunzig"
     },
     {
-      "value": 998,
-      "phrase": "neunhundertachtundneunzig"
-    },
-    {
       "value": 999,
       "phrase": "neunhundert neunundneunzig"
-    },
-    {
-      "value": 999,
-      "phrase": "neunhundertneunundneunzig"
     },
     {
       "value": 1000,

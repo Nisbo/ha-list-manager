@@ -33,6 +33,7 @@ class ListRecord:
     enabled: bool
     created_at: str
     updated_at: str
+    capitalize_first_letter: bool = False
 
     def as_dict(self) -> dict[str, Any]:
         """Return a JSON-serializable representation."""

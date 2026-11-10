@@ -1,8 +1,9 @@
-"""One-way intake from an existing Alexa Devices list, without Amazon login."""
+"""Backend-owned Alexa intake and optional linked-list synchronization."""
 from __future__ import annotations
 
 import asyncio
 from collections.abc import Mapping
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -14,7 +15,9 @@ from .alexa_parser import (
     AlexaParseError, AlexaParser, alexa_language_rules,
     available_alexa_languages, default_alexa_languages,
 )
-from .const import EVENT_ALEXA_CHANGED, EVENT_ITEMS_CHANGED
+from .alexa_sync import AlexaSyncManager
+from .const import EVENT_ALEXA_CHANGED, EVENT_ITEM_MUTATED, EVENT_ITEMS_CHANGED
+from .database import ListNotFoundError
 from .localization import text
 
 DEFAULT_SETTINGS = {
@@ -28,7 +31,10 @@ DEFAULT_SETTINGS = {
     "number_mappings": "",
     "unit_mappings": "",
     "exceptions": "",
-    "cleanup_action": "keep",
+    "cleanup_action": "delete",
+    "mode": "one_way",
+    "coupled_completion": "complete",
+    "sync_quantities": False,
 }
 
 
@@ -53,6 +59,8 @@ class AlexaInboxManager:
         self._generation = 0
         self._cleanup_cursor = None
         self._languages_loaded = False
+        self._sync = AlexaSyncManager(hass, database)
+        self._local_debounce = None
 
     async def _warm_languages(self) -> None:
         if not self._languages_loaded:
@@ -81,13 +89,18 @@ class AlexaInboxManager:
             self._subscribe_source()
             self._schedule()
 
-        @callback
-        def retry(_now) -> None:
+        async def retry(_now) -> None:
+            if self._stopped:
+                return
+            # Expire duplicate guards even while Alexa intake is disabled.
+            await self._database.async_prune_alexa_tombstones()
             self._subscribe_source()
             self._schedule()
 
         self._unsubs.append(self._hass.bus.async_listen("state_changed", changed))
         self._unsubs.append(self._hass.bus.async_listen("entity_registry_updated", started))
+        self._unsubs.append(self._hass.bus.async_listen(EVENT_ITEMS_CHANGED, self._local_items_changed))
+        self._unsubs.append(self._hass.bus.async_listen(EVENT_ITEM_MUTATED, self._local_items_changed))
         self._unsubs.append(async_track_time_interval(self._hass, retry, timedelta(minutes=1)))
         if getattr(self._hass, "is_running", True):
             self._subscribe_source()
@@ -98,6 +111,9 @@ class AlexaInboxManager:
     async def async_stop(self) -> None:
         self._stopped = True
         self._generation += 1
+        if self._local_debounce:
+            self._local_debounce.cancel()
+            self._local_debounce = None
         if self._source_unsub:
             self._source_unsub()
         self._source_unsub = self._source_object = None
@@ -151,6 +167,23 @@ class AlexaInboxManager:
         if self._worker is None or self._worker.done():
             self._worker = self._hass.async_create_task(self._run())
 
+    @callback
+    def _local_items_changed(self, event) -> None:
+        if (self._stopped or not self._settings["enabled"]
+                or self._settings["mode"] != "coupled"
+                or event.data.get("list_id") != self._settings["target_list_id"]):
+            return
+        if self._local_debounce:
+            self._local_debounce.cancel()
+
+        def settled():
+            self._local_debounce = None
+            self._schedule()
+
+        # Coalesce rapid plus/minus taps into one cloud projection. Source
+        # intake remains immediate and acknowledges each new UID exactly once.
+        self._local_debounce = asyncio.get_running_loop().call_later(0.5, settled)
+
     async def _run(self) -> None:
         while self._requested and not self._stopped:
             self._requested = False
@@ -185,18 +218,28 @@ class AlexaInboxManager:
                 sources.append({"entity_id": candidate.entity_id, "name": (state.attributes.get("friendly_name") if state else None) or candidate.name or candidate.original_name or candidate.entity_id, "available": self._valid_source(candidate) and self._available(candidate.entity_id)})
         targets = [{"id": record.id, "name": record.name} for record in await self._database.async_list_lists() if record.enabled and record.provider == "local" and record.list_type == "shopping"]
         pending = await self._database.async_list_alexa_pending_receipts()
-        status = {**stored["status"], "enabled": settings["enabled"], "source_available": self._valid_source(entry) and self._available(settings["source_entity_id"]), "target_available": any(target["id"] == settings["target_list_id"] for target in targets), "source_name": next((source["name"] for source in sources if source["entity_id"] == settings["source_entity_id"]), None), "target_name": next((target["name"] for target in targets if target["id"] == settings["target_list_id"]), None), "pending_cleanup": len(pending)}
+        coupled_pending = await self._sync.async_pending_count(entry.id, settings["target_list_id"]) if entry else 0
+        status = {**stored["status"], "enabled": settings["enabled"], "source_available": self._valid_source(entry) and self._available(settings["source_entity_id"]), "target_available": any(target["id"] == settings["target_list_id"] for target in targets), "source_name": next((source["name"] for source in sources if source["entity_id"] == settings["source_entity_id"]), None), "target_name": next((target["name"] for target in targets if target["id"] == settings["target_list_id"]), None), "pending_cleanup": len(pending) + coupled_pending}
         return {"settings": settings, "languages": available_alexa_languages(), "sources": sorted(sources, key=lambda row: row["name"].casefold()), "targets": targets, "status": status, "receipts": [receipt for receipt in stored["receipts"] if receipt.get("cleanup_status") != "ignored"][:20]}
 
     def _validate_settings(self, values):
         if not isinstance(values, dict) or set(values) - set(DEFAULT_SETTINGS):
             raise AlexaInboxError(text("alexa.settings_invalid"))
         settings = {**DEFAULT_SETTINGS, **values}
-        for key in ("enabled", "recognize_numbers", "recognize_units", "match_products"):
+        for key in ("enabled", "recognize_numbers", "recognize_units", "match_products", "sync_quantities"):
             if type(settings[key]) is not bool:
                 raise AlexaInboxError(text("alexa.settings_invalid"))
         if settings["cleanup_action"] not in {"keep", "complete", "delete"}:
             raise AlexaInboxError(text("alexa.settings_invalid"))
+        if (settings["mode"] not in {"one_way", "coupled"}
+                or settings["coupled_completion"] not in {"complete", "delete"}):
+            raise AlexaInboxError(text("alexa.settings_invalid"))
+        if settings["mode"] == "coupled":
+            settings["cleanup_action"] = "keep"
+            if "sync_quantities" not in values:
+                settings["sync_quantities"] = True
+        else:
+            settings["sync_quantities"] = False
         for key in ("source_entity_id", "target_list_id"):
             value = settings[key]
             if value is not None and (not isinstance(value, str) or len(value) > 255):
@@ -226,11 +269,29 @@ class AlexaInboxManager:
             if entry:
                 settings["source_registry_id"] = entry.id
             changed_mapping = any(settings.get(key) != self._settings.get(key) for key in ("source_registry_id", "target_list_id"))
+            changed_sync = any(settings.get(key) != self._settings.get(key) for key in (
+                "mode", "coupled_completion", "sync_quantities"))
+            baseline = None
             if settings["enabled"] and (not self._settings["enabled"] or changed_mapping):
-                items = await self._read_source(entry.entity_id)
-                await self._database.async_ignore_alexa_items(entry.id, [row["uid"] for row in items], source_entity_id=entry.entity_id)
+                # A failed validation/read must leave the previous connection's
+                # journal and outstanding cleanup jobs intact.
+                baseline = await self._read_source(entry.entity_id)
+            if entry and (changed_sync or changed_mapping):
+                await self._sync.async_mode_changed(entry.id)
+            if entry and settings["mode"] == "coupled":
+                for link in await self._database.async_list_alexa_links(entry.id):
+                    if (link["target_list_id"] == settings["target_list_id"]
+                            and link["cleanup_status"] != "ignored"
+                            and link["cleanup_action"] != "keep"):
+                        await self._database.async_update_alexa_link(entry.id, link["uid"],
+                            sync=link["sync"], cleanup_action="keep", cleanup_status="kept")
+            if baseline is not None:
+                await self._database.async_ignore_alexa_items(entry.id, [row["uid"] for row in baseline], source_entity_id=entry.entity_id)
             await self._database.async_set_alexa_settings(settings)
             self._settings = settings
+            if self._local_debounce:
+                self._local_debounce.cancel()
+                self._local_debounce = None
             self._subscribe_source()
             self._notify()
             self._schedule()
@@ -270,6 +331,17 @@ class AlexaInboxManager:
             raise AlexaInboxError(text("alexa.item_invalid"))
         return item
 
+    async def _display_parsed(self, item, target_id):
+        """Apply the list's free-name convention after parsing off quantities."""
+        if target_id:
+            try:
+                target = await self._database.async_get_list(target_id)
+            except ListNotFoundError:
+                return item
+            if target.capitalize_first_letter:
+                item = replace(item, name=item.name[:1].upper() + item.name[1:])
+        return item
+
     async def async_rules(self, *, language_code, kind, query="", offset=0, limit=50):
         """Browse shipped rules without loading every language into the page."""
         await self._warm_languages()
@@ -284,11 +356,14 @@ class AlexaInboxManager:
         values = self._validate_settings(settings)
         if not isinstance(input_text, str) or not input_text.strip() or len(input_text) > 2000:
             raise AlexaInboxError(text("alexa.item_invalid"))
-        item = self._parsed({"summary": input_text}, AlexaParser(values))
+        item = await self._display_parsed(
+            self._parsed({"summary": input_text}, AlexaParser(values)), values["target_list_id"])
         resolution = await self._database.async_preview_alexa_item(
             values["target_list_id"], item.name, item.description, item.quantity,
             match_products=values["match_products"], has_unit=item.has_unit,
         )
+        if resolution.get("product_id") and resolution.get("product_name"):
+            item = replace(item, name=resolution["product_name"])
         return {"parsed": {"name": item.name, "quantity": item.quantity,
             "description": item.description, "has_unit": item.has_unit}, "resolution": resolution}
 
@@ -300,20 +375,24 @@ class AlexaInboxManager:
             await self._require_target(self._settings["target_list_id"])
             rows = await self._read_source(entry.entity_id)
             receipts = await self._database.async_get_alexa_receipts(entry.id, [row["uid"] for row in rows])
+            processed_uids = await self._database.async_has_alexa_history(entry.id, [row["uid"] for row in rows])
             parser = AlexaParser(self._settings)
             items = []
             for row in rows:
                 if row["status"] != "needs_action":
                     continue
                 receipt = receipts.get(row["uid"])
-                result = {"uid": row["uid"], "original_name": row["summary"], "already_processed": bool(receipt and receipt["cleanup_status"] != "ignored")}
+                already_processed = bool(receipt and receipt["cleanup_status"] != "ignored") or row["uid"] in processed_uids
+                result = {"uid": row["uid"], "original_name": row["summary"], "already_processed": already_processed}
                 try:
-                    item = self._parsed(row, parser)
+                    item = await self._display_parsed(self._parsed(row, parser), self._settings["target_list_id"])
                     resolution = await self._database.async_preview_alexa_item(
                         self._settings["target_list_id"], item.name, item.description,
                         item.quantity, match_products=self._settings["match_products"],
                         has_unit=item.has_unit,
                     )
+                    if resolution.get("product_id") and resolution.get("product_name"):
+                        item = replace(item, name=resolution["product_name"])
                     result.update(name=item.name, quantity=item.quantity, description=item.description,
                                   has_unit=item.has_unit, resolution=resolution)
                 except ValueError as error:
@@ -353,7 +432,12 @@ class AlexaInboxManager:
                             self._hass.bus.async_fire(EVENT_ITEMS_CHANGED, {"list_id": self._settings["target_list_id"]})
                     except Exception as error:
                         errors.append(str(error) or str(text("alexa.processing_failed")))
-                # Source cleanup is deliberately a separate step after the commit.
+                if not (self._settings["mode"] == "coupled" and self._local_debounce):
+                    errors.extend(await self._sync.async_reconcile(
+                        entry.id, entry.entity_id, self._settings["target_list_id"], rows,
+                        self._settings, lambda: self._check_generation(generation), self._read_source))
+                # Cloud changes follow durable local writes, and each retry
+                # keeps its own UID rather than importing a second time.
                 errors.extend(await self._cleanup_pending(generation))
                 self._check_generation(generation)
                 now = datetime.now(UTC).isoformat()
@@ -392,6 +476,8 @@ class AlexaInboxManager:
         for receipt in pending[:10]:
             self._check_generation(generation)
             self._cleanup_cursor = (receipt["source_id"], receipt["uid"])
+            if receipt["cleanup_action"] not in {"complete", "delete"}:
+                continue
             if receipt["source_id"] in unavailable_sources:
                 continue
             if asyncio.get_running_loop().time() >= deadline:
@@ -421,6 +507,10 @@ class AlexaInboxManager:
                         async with asyncio.timeout(min(10, max(0.01, deadline - asyncio.get_running_loop().time()))):
                             await self._hass.services.async_call("todo", "update_item" if action == "complete" else "remove_item", data, blocking=True)
                 await self._database.async_update_alexa_receipt(receipt["source_id"], receipt["uid"], "done")
+                if receipt["cleanup_action"] == "delete":
+                    # The cloud deletion was acknowledged. Keep only the
+                    # bounded activity record, not an eternal processed UID.
+                    await self._database.async_remove_alexa_links(receipt["source_id"], [receipt["uid"]])
             except Exception as error:
                 self._check_generation(generation)
                 message = str(error) or str(text("alexa.cleanup_failed"))

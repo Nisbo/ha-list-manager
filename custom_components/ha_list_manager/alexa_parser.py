@@ -17,6 +17,8 @@ _MAX_MAPPING_LINES = 1_000
 _MAX_PHRASE_SIZE = 200
 _LANGUAGE_DIRECTORY = Path(__file__).with_name("alexa_languages")
 _UNIT_PATTERN = re.compile(r"[^\W\d_][\wµμ²³/%°.-]{0,19}", re.UNICODE)
+_NUMBER_HYPHENS = "-\u2010\u2011"
+_NUMBER_SEPARATORS = re.compile(r"[\s\-\u2010\u2011]+")
 
 
 class AlexaParseError(ValueError):
@@ -50,6 +52,11 @@ def _normalize(value: str) -> str:
     return " ".join(unicodedata.normalize("NFKC", value).casefold().split())
 
 
+def _number_key(value: str) -> str:
+    """Compare shipped number words without enumerating separator variants."""
+    return _NUMBER_SEPARATORS.sub("", _normalize(value))
+
+
 @lru_cache(maxsize=1)
 def _language_catalog() -> dict[str, _LanguageRules]:
     """Discover shipped recognition data once; UI translations remain in HA."""
@@ -78,7 +85,7 @@ def _language_catalog() -> dict[str, _LanguageRules]:
                     valid = type(value) is int and 1 <= value <= MAX_QUANTITY
                 else:
                     valid = isinstance(value, str) and bool(_UNIT_PATTERN.fullmatch(value))
-                normalized = _normalize(phrase)
+                normalized = _number_key(phrase) if kind == "numbers" else _normalize(phrase)
                 if not valid or (normalized in aliases and aliases[normalized][0] != value):
                     raise ValueError(f"Invalid Alexa {kind} resource: {path.name}")
                 aliases.setdefault(normalized, (value, phrase.strip()))
@@ -97,7 +104,7 @@ def _language_catalog() -> dict[str, _LanguageRules]:
 
 
 def available_alexa_languages() -> list[dict[str, Any]]:
-    """Describe delivered rule sets; counts include every recognized alias."""
+    """Describe shipped rules without counting separator variants separately."""
     return [{"code": code, "number_min": min(row[0] for row in rules.numbers),
              "number_max": max(row[0] for row in rules.numbers),
              "number_count": len(rules.numbers), "unit_count": len(rules.units)}
@@ -128,9 +135,11 @@ def alexa_language_rules(language: str, kind: str, query: str = "", offset: int 
         raise AlexaParseError("alexa.settings_invalid")
     limit = min(limit, 50)
     query = _normalize(query)
+    compact_query = _number_key(query) if kind == "numbers" else ""
     rules = getattr(catalog[language], kind)
     matches = [(value, phrase) for value, phrase in rules
-               if not query or query in str(value).casefold() or query in _normalize(phrase)]
+               if not query or query in str(value).casefold() or query in _normalize(phrase)
+               or (compact_query and compact_query in _number_key(phrase))]
     return {"items": [{"value": value, "phrase": phrase} for value, phrase in matches[offset:offset + limit]],
             "total": len(matches), "offset": offset, "limit": limit, "language": language, "kind": kind}
 
@@ -138,7 +147,7 @@ def alexa_language_rules(language: str, kind: str, query: str = "", offset: int 
 @lru_cache(maxsize=16)
 def _builtin_numbers(languages: tuple[str, ...]) -> dict[str, int]:
     catalog = _language_catalog()
-    return {_normalize(phrase): value for language in languages for value, phrase in catalog[language].numbers}
+    return {_number_key(phrase): value for language in languages for value, phrase in catalog[language].numbers}
 
 
 def _builtin_units(languages: tuple[str, ...]) -> dict[str, str]:
@@ -188,8 +197,8 @@ class AlexaParser:
                 or any(not isinstance(language, str) or language not in catalog for language in languages)):
             raise AlexaParseError("alexa.invalid_languages")
         languages = tuple(sorted(set(languages)))
-        self._numbers = {**_builtin_numbers(languages),
-                         **_custom_mapping(settings.get("number_mappings", ""), unit=False)}
+        self._numbers = _builtin_numbers(languages)
+        self._custom_numbers = _custom_mapping(settings.get("number_mappings", ""), unit=False)
         self._units = {**_builtin_units(languages),
                        **_custom_mapping(settings.get("unit_mappings", ""), unit=True)}
         exceptions = _mapping_lines(settings.get("exceptions", ""), "exceptions")
@@ -213,25 +222,66 @@ class AlexaParser:
                 return mapping[phrase], text[tokens[length].start():]
         return None
 
+    def _number_prefix(self, text: str) -> tuple[int, str, bool] | None:
+        tokens = list(re.finditer(r"\S+", text))
+        parts = [_normalize(token.group()) for token in tokens]
+        # Keep the longest expression and cut only at the original boundary.
+        # Exact custom expressions win that candidate without becoming fuzzy.
+        for length in range(len(parts) - 1, 0, -1):
+            phrase = " ".join(parts[:length])
+            if phrase in self._custom_numbers:
+                return self._custom_numbers[phrase], text[tokens[length].start():], True
+            if phrase[0] in _NUMBER_HYPHENS or phrase[-1] in _NUMBER_HYPHENS:
+                continue
+            key = _number_key(phrase)
+            if key in self._numbers:
+                return self._numbers[key], text[tokens[length].start():], False
+        return None
+
+    def _unsupported_number_tail(self, name: str) -> bool:
+        """Do not shorten an unsupported larger number into a smaller order."""
+        token = _normalize(name).split()[0]
+        compact = _number_key(token)
+        if token[0] in _NUMBER_HYPHENS and compact in self._numbers:
+            return True
+        # Covers split/compound tails such as hundred-thousand, three-thousand
+        # and point-five, without treating a product like Seven-Up as a number.
+        for continuation in self._number_continuations:
+            start = compact.find(continuation)
+            if start < 0:
+                continue
+            before, after = compact[:start], compact[start + len(continuation):]
+            if ((not before or before in self._numbers)
+                    and (not after or after in self._numbers or after in self._number_continuations)):
+                return True
+        # A hyphen is accepted inside a number, not between a number and unit.
+        # If that boundary is missing, retaining the whole entry is safer than
+        # ordering 500 of an invented article named twenty-three-grams flour.
+        parts = _NUMBER_SEPARATORS.split(token)
+        return any(_number_key(" ".join(parts[:cut])) in self._numbers
+                   and " ".join(parts[cut:]) in self._units
+                   for cut in range(1, len(parts)))
+
     def parse(self, text: str) -> ParsedAlexaItem:
         """Return free entry fields, preserving unrecognized complete names."""
         original = text.strip()
         fallback = ParsedAlexaItem(original)
         if not self._recognize_numbers or _normalize(original) in self._exceptions:
             return fallback
-        number = self._prefix(original, self._numbers)
+        number = self._number_prefix(original)
         if number is None:
             match = re.match(r"(\S+)\s+(\S.*)$", original, re.DOTALL)
             digits = _normalize(match[1]) if match else ""
             if not re.fullmatch(r"[1-9][0-9]{0,6}", digits) or int(digits) > MAX_QUANTITY:
                 return fallback
-            number = (int(digits), match[2])
-        quantity, name = number
+            number = (int(digits), match[2], False)
+        quantity, name, custom = number
         if not name.strip():
             return fallback
         # An unsupported longer number must not become a smaller quantity
         # followed by an invented article such as "thousand cucumbers".
-        if _normalize(name).split()[0] in self._number_continuations:
+        if (_normalize(name).split()[0] in self._number_continuations
+                or (not custom and self._unsupported_number_tail(name))):
             return fallback
         if self._recognize_units:
             unit = self._prefix(name, self._units)

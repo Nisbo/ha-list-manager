@@ -124,6 +124,8 @@ class ExternalListManager:
         async with self._lock(list_id):
             record = await self._require_bring_list(list_id)
             before = await self._fetch_items(record)
+            if record.capitalize_first_letter and not product_id:
+                name = name[:1].upper() + name[1:]
             remote_description = self._description_for_quantity(quantity, description)
             await self._call_todo(
                 "add_item",
@@ -170,6 +172,9 @@ class ExternalListManager:
 
             before = await self._fetch_items(list_record)
             name = str(updates["name"])
+            if list_record.capitalize_first_letter and not updates.get("product_id", existing.product_id):
+                name = name[:1].upper() + name[1:]
+                updates["name"] = name
             quantity = int(updates["quantity"])
             description = self._description_for_quantity(
                 quantity, updates.get("description")
