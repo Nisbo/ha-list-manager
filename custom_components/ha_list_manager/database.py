@@ -525,6 +525,29 @@ class HaListManagerDatabase:
         """Return active source links with their restart-safe synchronization journal."""
         return await self._async_run(self._list_alexa_links, source_id)
 
+    async def async_list_alexa_outbox(
+        self, source_id: str | None = None, target_list_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Return durable local-create jobs, including uncertain cloud requests."""
+        return await self._async_run(self._list_alexa_outbox, source_id, target_list_id)
+
+    async def async_update_alexa_outbox(
+        self, job_id: str, state: str, payload: dict[str, Any] | None = None,
+        expected_state: str | None = None,
+    ) -> dict[str, Any] | None:
+        """Persist a cloud intent before attempting a non-idempotent create."""
+        return await self._async_run(self._update_alexa_outbox, job_id, state, payload, expected_state)
+
+    async def async_remove_alexa_outbox(self, job_id: str) -> None:
+        """Remove a job that never sent or whose remote identity is accounted for."""
+        await self._async_run(self._remove_alexa_outbox, job_id)
+
+    async def async_bind_alexa_outbox(
+        self, job_id: str, uid: str, summary: str, status: str,
+    ) -> bool:
+        """Link a created Alexa ID without importing it or adding its quantity."""
+        return await self._async_run(self._bind_alexa_outbox, job_id, uid, summary, status)
+
     async def async_update_alexa_link(
         self, source_id: str, uid: str, sync: dict[str, Any],
         original_name: str | None = None, *, cleanup_action: str | None = None,
@@ -566,22 +589,24 @@ class HaListManagerDatabase:
         original_name: str, *, include_existing: bool = False,
         source_entity_id: str | None = None,
         match_products: bool = False, has_unit: bool = False,
+        product_id: str | None = None,
     ) -> dict[str, Any]:
         """Commit an item and its source receipt in the same transaction."""
         return await self._async_run(
             self._accept_alexa_item, source_id, uid, target_list_id, name,
             description, quantity, cleanup_action, original_name,
-            include_existing, source_entity_id, match_products, has_unit,
+            include_existing, source_entity_id, match_products, has_unit, product_id,
         )
 
     async def async_preview_alexa_item(
         self, target_list_id: str | None, name: str, description: str | None,
         quantity: int, *, match_products: bool = False, has_unit: bool = False,
+        product_id: str | None = None,
     ) -> dict[str, Any]:
         """Resolve an incoming item without adding it or reserving its source ID."""
         return await self._async_run(
             self._preview_alexa_item, target_list_id, name, description,
-            quantity, match_products, has_unit,
+            quantity, match_products, has_unit, product_id,
         )
 
     async def async_update_alexa_receipt(
@@ -1033,6 +1058,10 @@ class HaListManagerDatabase:
     async def async_list_recent_products(self, limit: int = 100) -> list[ProductRecord]:
         """Return the most recently updated products."""
         return await self._async_run(self._list_recent_products, limit)
+
+    async def async_get_products_by_ids(self, product_ids: list[str]) -> list[ProductRecord]:
+        """Resolve referenced products without loading the entire product catalog."""
+        return await self._async_run(self._get_products_by_ids, product_ids)
 
     async def async_list_products_page(
         self,
@@ -1881,7 +1910,7 @@ class HaListManagerDatabase:
                         "The existing database has no supported schema metadata"
                     )
                 version = self._read_schema_version(connection)
-                if version not in (1, 2, DATABASE_SCHEMA_VERSION):
+                if version not in (1, 2, 3, DATABASE_SCHEMA_VERSION):
                     raise UnsupportedSchemaVersionError(
                         f"Database schema {version} is not supported; "
                         f"expected {DATABASE_SCHEMA_VERSION}"
@@ -1906,13 +1935,15 @@ class HaListManagerDatabase:
                 connection.execute("BEGIN IMMEDIATE")
                 if version == 1:
                     self._create_alexa_schema(connection)
-                connection.execute("ALTER TABLE lists ADD COLUMN capitalize_first_letter "
-                                   "INTEGER NOT NULL DEFAULT 0 CHECK(capitalize_first_letter IN (0,1))")
-                if version == 2:
-                    connection.execute("ALTER TABLE alexa_receipts ADD COLUMN sync_json TEXT NOT NULL DEFAULT '{}'")
-                self._create_alexa_history_schema(connection)
-                self._create_alexa_tombstone_schema(connection)
-                self._seed_alexa_history(connection)
+                if version < 3:
+                    connection.execute("ALTER TABLE lists ADD COLUMN capitalize_first_letter "
+                                       "INTEGER NOT NULL DEFAULT 0 CHECK(capitalize_first_letter IN (0,1))")
+                    if version == 2:
+                        connection.execute("ALTER TABLE alexa_receipts ADD COLUMN sync_json TEXT NOT NULL DEFAULT '{}'")
+                    self._create_alexa_history_schema(connection)
+                    self._create_alexa_tombstone_schema(connection)
+                    self._seed_alexa_history(connection)
+                self._create_alexa_outbox_schema(connection)
                 connection.execute(
                     "UPDATE schema_metadata SET value = ? WHERE key = 'schema_version'",
                     (str(DATABASE_SCHEMA_VERSION),),
@@ -2436,6 +2467,7 @@ CREATE UNIQUE INDEX chips_list_name_unique ON chips(list_id, priority_name) WHER
         self._create_inventory_restock_transfers_schema(connection)
         self._create_list_scripts_schema(connection)
         self._create_alexa_schema(connection)
+        self._create_alexa_outbox_schema(connection)
 
     @staticmethod
     def _create_alexa_schema(connection: sqlite3.Connection) -> None:
@@ -2477,6 +2509,49 @@ CREATE UNIQUE INDEX chips_list_name_unique ON chips(list_id, priority_name) WHER
             source_id TEXT NOT NULL, uid_hash TEXT NOT NULL, expires_at TEXT NOT NULL,
             PRIMARY KEY(source_id,uid_hash))""")
         connection.execute("CREATE INDEX IF NOT EXISTS alexa_tombstone_expiry ON alexa_tombstones(expires_at)")
+
+    @staticmethod
+    def _create_alexa_outbox_schema(connection: sqlite3.Connection) -> None:
+        """Queue new local rows in their original transaction, never backfill."""
+        # Keep attempted jobs after local deletion: a lost cloud response may
+        # still need a remote ID attached before its orphan can be removed.
+        connection.execute("""CREATE TABLE IF NOT EXISTS alexa_outbox (
+            id TEXT PRIMARY KEY, source_id TEXT NOT NULL, source_entity_id TEXT NOT NULL,
+            target_list_id TEXT NOT NULL, item_id TEXT NOT NULL,
+            state TEXT NOT NULL DEFAULT 'queued'
+                CHECK(state IN ('queued','attempted','uncertain','cancelled')),
+            payload_json TEXT NOT NULL DEFAULT '{}',
+            created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+            UNIQUE(source_id,target_list_id,item_id))""")
+        connection.execute("CREATE INDEX IF NOT EXISTS alexa_outbox_source ON alexa_outbox(source_id,target_list_id,state)")
+        # This covers card, API, backend, scanner and transfer inserts equally.
+        # Alexa intake commits its receipt in the same transaction, allowing
+        # that transient queue row to be removed before any sender sees it.
+        connection.execute("""CREATE TRIGGER IF NOT EXISTS alexa_outbox_item_created
+AFTER INSERT ON list_items
+WHEN NEW.completed=0 AND NEW.external_uid IS NULL
+BEGIN
+    INSERT OR IGNORE INTO alexa_outbox(
+        id,source_id,source_entity_id,target_list_id,item_id,payload_json,created_at,updated_at)
+    SELECT lower(hex(randomblob(16))),json_extract(settings_json,'$.source_registry_id'),
+        json_extract(settings_json,'$.source_entity_id'),NEW.list_id,NEW.id,
+        json_object('local',json_object('id',NEW.id,'name',NEW.name,'description',NEW.description,
+            'quantity',NEW.quantity,'completed',json('false'),'updated_at',NEW.updated_at)),
+        NEW.created_at,NEW.created_at
+    FROM alexa_inbox JOIN lists ON lists.id=NEW.list_id
+    WHERE alexa_inbox.id=1 AND lists.provider='local' AND lists.list_type='shopping'
+        AND lists.enabled=1 AND json_extract(settings_json,'$.enabled')=1
+        AND json_extract(settings_json,'$.mode')='coupled'
+        AND json_extract(settings_json,'$.send_local_items')=1
+        AND json_extract(settings_json,'$.target_list_id')=NEW.list_id
+        AND length(json_extract(settings_json,'$.source_registry_id'))>0
+        AND length(json_extract(settings_json,'$.source_entity_id'))>0;
+END""")
+        connection.execute("""CREATE TRIGGER IF NOT EXISTS alexa_outbox_item_deleted
+AFTER DELETE ON list_items
+BEGIN
+    DELETE FROM alexa_outbox WHERE item_id=OLD.id AND state='queued';
+END""")
 
     @staticmethod
     def _prune_alexa_tombstones_in(connection: sqlite3.Connection, now: str) -> int:
@@ -4050,6 +4125,18 @@ WHERE registry_entry_id IS NOT NULL;
                 "settings_json=excluded.settings_json,updated_at=excluded.updated_at",
                 (encoded, self._now()),
             )
+            # Never backfill or resume unsent rows after an option/mapping is
+            # disabled. Attempted creates remain durable until accounted for.
+            eligible = (settings.get("enabled") is True and settings.get("mode") == "coupled"
+                        and settings.get("send_local_items") is True)
+            if eligible:
+                connection.execute(
+                    "DELETE FROM alexa_outbox WHERE state='queued' AND "
+                    "(source_id!=? OR target_list_id!=?)",
+                    (settings.get("source_registry_id") or "", settings.get("target_list_id") or ""),
+                )
+            else:
+                connection.execute("DELETE FROM alexa_outbox WHERE state='queued'")
         return self._get_alexa_state()
 
     def _update_alexa_status(self, status: dict[str, Any]) -> None:
@@ -4099,6 +4186,92 @@ WHERE registry_entry_id IS NOT NULL;
             record["sync"] = json.loads(record.pop("sync_json"))
             result.append(record)
         return result
+
+    @staticmethod
+    def _alexa_outbox_record(row) -> dict[str, Any]:
+        result = dict(row)
+        result["payload"] = json.loads(result.pop("payload_json"))
+        return result
+
+    def _list_alexa_outbox(self, source_id=None, target_list_id=None) -> list[dict[str, Any]]:
+        predicates, parameters = [], []
+        for column, value in (("source_id", source_id), ("target_list_id", target_list_id)):
+            if value is not None:
+                predicates.append(f"{column}=?")
+                parameters.append(value)
+        where = " WHERE " + " AND ".join(predicates) if predicates else ""
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM alexa_outbox" + where + " ORDER BY created_at,id", parameters,
+            ).fetchall()
+        return [self._alexa_outbox_record(row) for row in rows]
+
+    def _update_alexa_outbox(self, job_id, state, payload=None, expected_state=None):
+        allowed = {"queued", "attempted", "uncertain", "cancelled"}
+        if state not in allowed or expected_state is not None and expected_state not in allowed:
+            raise ValueError("Invalid Alexa outbox state")
+        if payload is not None and not isinstance(payload, dict):
+            raise TypeError("Alexa outbox payload must be a mapping")
+        encoded = json.dumps(payload, ensure_ascii=False, allow_nan=False) if payload is not None else None
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute("SELECT * FROM alexa_outbox WHERE id=?", (job_id,)).fetchone()
+            if row is None or expected_state is not None and row["state"] != expected_state:
+                return None
+            # Once a request may have reached Alexa, it must never become a
+            # fresh create automatically after a retry, restart or old callback.
+            if state == "queued" and row["state"] != "queued":
+                raise ValueError("Attempted Alexa create cannot be queued again")
+            connection.execute(
+                "UPDATE alexa_outbox SET state=?,payload_json=COALESCE(?,payload_json),updated_at=? WHERE id=?",
+                (state, encoded, self._now(), job_id),
+            )
+            return self._alexa_outbox_record(connection.execute(
+                "SELECT * FROM alexa_outbox WHERE id=?", (job_id,),
+            ).fetchone())
+
+    def _remove_alexa_outbox(self, job_id: str) -> None:
+        with self._connect() as connection:
+            connection.execute("DELETE FROM alexa_outbox WHERE id=?", (job_id,))
+
+    def _bind_alexa_outbox(self, job_id, uid, summary, status) -> bool:
+        if (not isinstance(uid, str) or not uid or len(uid) > 1000
+                or not isinstance(summary, str) or not summary.strip() or len(summary) > 2000
+                or status not in {"needs_action", "completed"}):
+            raise ValueError("Invalid Alexa create acknowledgement")
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute("SELECT * FROM alexa_outbox WHERE id=?", (job_id,)).fetchone()
+            if row is None or row["state"] == "queued":
+                return False
+            job = self._alexa_outbox_record(row)
+            if uid in job["payload"].get("before_uids", []):
+                return False
+            # Never attach a guessed UID that is already consumed elsewhere.
+            if (connection.execute("SELECT 1 FROM alexa_receipts WHERE source_id=? AND uid=?", (row["source_id"], uid)).fetchone()
+                    or connection.execute("SELECT 1 FROM alexa_history WHERE source_id=? AND uid=?", (row["source_id"], uid)).fetchone()
+                    or connection.execute("SELECT 1 FROM alexa_tombstones WHERE source_id=? AND uid_hash=? AND expires_at>?",
+                        (row["source_id"], sha256(uid.encode("utf-8")).hexdigest(), self._now())).fetchone()):
+                return False
+            local = job["payload"].get("local")
+            if not isinstance(local, dict) or local.get("id") != row["item_id"]:
+                raise ValueError("Alexa outbox has no matching local snapshot")
+            # todo.add_item creates an open position. A completed observation
+            # already represents a later user action and must reach normal
+            # reconciliation rather than being swallowed into its baseline.
+            sync = {"local": local, "remote": {"summary": summary, "status": "needs_action"}}
+            connection.execute(
+                "INSERT INTO alexa_receipts(source_id,uid,source_entity_id,target_list_id,item_id,"
+                "original_name,name,description,quantity,cleanup_action,cleanup_status,created_at,sync_json) "
+                "VALUES(?,?,?,?,?,?,?,?,?,'keep','kept',?,?)",
+                (row["source_id"], uid, row["source_entity_id"], row["target_list_id"], row["item_id"],
+                 summary, local.get("name"), local.get("description"), local.get("quantity"), self._now(),
+                 json.dumps(sync, ensure_ascii=False, allow_nan=False)),
+            )
+            connection.execute("DELETE FROM alexa_outbox WHERE id=?", (job_id,))
+        # No list-item mutation, script event, or inbound activity count: this
+        # is an acknowledgement for an item that was already locally stored.
+        return True
 
     def _update_alexa_link(
         self, source_id: str, uid: str, sync: dict[str, Any],
@@ -4187,11 +4360,20 @@ WHERE registry_entry_id IS NOT NULL;
     def _resolve_alexa_product(
         self, connection: sqlite3.Connection, name: str,
         match_products: bool, has_unit: bool,
+        product_id: str | None = None,
     ) -> dict[str, Any]:
         resolution = {
             "product_id": None, "product_name": None,
             "reason": "unit" if has_unit else "disabled", "match_count": 0,
         }
+        if product_id is not None:
+            product = connection.execute("SELECT id,name FROM products WHERE id=?", (product_id,)).fetchone()
+            if product is None:
+                raise ValueError(localized_text("alexa.alias_product_missing"))
+            resolution.update(product_id=None if has_unit else product["id"],
+                              product_name=product["name"], match_count=1,
+                              reason="unit" if has_unit else "alias_product")
+            return resolution
         if match_products and not has_unit:
             key = self._alexa_match_text(unicodedata.normalize("NFKC", name))
             products = [row for row in connection.execute("SELECT id,name FROM products")
@@ -4207,12 +4389,15 @@ WHERE registry_entry_id IS NOT NULL;
         self, connection: sqlite3.Connection, target_list_id: str,
         name: str, description: str | None, quantity: int,
         match_products: bool, has_unit: bool,
+        product_id: str | None = None,
     ) -> tuple[dict[str, Any], sqlite3.Row | None]:
         self._require_list(connection, target_list_id)
         target = connection.execute("SELECT * FROM lists WHERE id=?", (target_list_id,)).fetchone()
         if target["list_type"] != "shopping" or target["provider"] != "local" or not target["enabled"]:
             raise ValueError(localized_text("backend.local_shopping_target_required"))
-        resolution = self._resolve_alexa_product(connection, name, match_products, has_unit)
+        resolution = self._resolve_alexa_product(connection, name, match_products, has_unit, product_id)
+        if product_id is not None:
+            name = resolution["product_name"]
         name = self._format_list_item_name(connection, target_list_id, name, resolution["product_id"])
         match = None
         if resolution["product_id"] is not None:
@@ -4222,7 +4407,9 @@ WHERE registry_entry_id IS NOT NULL;
                 "ORDER BY position,created_at,id", (target_list_id, resolution["product_id"]),
             ).fetchall()
             if len(linked) > 1:
-                resolution.update(product_id=None, product_name=None, reason="multiple_items")
+                resolution.update(product_id=None,
+                                  product_name=resolution["product_name"] if product_id is not None else None,
+                                  reason="multiple_items")
             else:
                 match = linked[0] if linked else None
         if resolution["product_id"] is None:
@@ -4244,12 +4431,14 @@ WHERE registry_entry_id IS NOT NULL;
             action=("product" if resolution["product_id"] else "free") + ("_increase" if match else "_add"),
             item_id=match["id"] if match else None,
             quantity=quantity, result_quantity=total, target_missing=False,
+            name=resolution["product_name"] if resolution["product_id"] else name,
         )
         return resolution, match
 
     def _preview_alexa_item(
         self, target_list_id: str | None, name: str, description: str | None,
         quantity: int, match_products: bool = False, has_unit: bool = False,
+        product_id: str | None = None,
     ) -> dict[str, Any]:
         name, description = self._validate_alexa_item_input(name, description, quantity)
         with self._connect() as connection:
@@ -4257,12 +4446,13 @@ WHERE registry_entry_id IS NOT NULL;
             # reserving a source ID while the user inspects the preview.
             connection.execute("BEGIN")
             if target_list_id is None:
-                resolution = self._resolve_alexa_product(connection, name, match_products, has_unit)
-                resolution.update(action="target_required", target_missing=True, quantity=quantity)
+                resolution = self._resolve_alexa_product(connection, name, match_products, has_unit, product_id)
+                resolution.update(action="target_required", target_missing=True, quantity=quantity,
+                                  name=resolution["product_name"] or name)
             else:
                 resolution, _ = self._resolve_alexa_item(
                     connection, target_list_id, name, description, quantity,
-                    match_products, has_unit,
+                    match_products, has_unit, product_id,
                 )
         return resolution
 
@@ -4272,6 +4462,7 @@ WHERE registry_entry_id IS NOT NULL;
         original_name: str, include_existing: bool = False,
         source_entity_id: str | None = None,
         match_products: bool = False, has_unit: bool = False,
+        product_id: str | None = None,
     ) -> dict[str, Any]:
         if (not isinstance(source_id, str) or not source_id or len(source_id) > 1000
             or not isinstance(uid, str) or not uid or len(uid) > 1000):
@@ -4308,8 +4499,9 @@ WHERE registry_entry_id IS NOT NULL;
 
             resolution, match = self._resolve_alexa_item(
                 connection, target_list_id, name, description, quantity,
-                match_products, has_unit,
+                match_products, has_unit, product_id,
             )
+            name = resolution["name"]
             if match:
                 before = self._item_record_from_row(
                     match, self._labels_for(connection, "list_item_labels", "item_id", match["id"], target_list_id)
@@ -4352,6 +4544,10 @@ WHERE registry_entry_id IS NOT NULL;
                 "cleanup_status=excluded.cleanup_status,created_at=excluded.created_at,cleaned_at=NULL,last_error=NULL",
                 (source_id, uid, source_entity_id, target_list_id, item_id, original_name,
                  name, description, quantity, cleanup_action, cleanup_status, now),
+            )
+            connection.execute(
+                "DELETE FROM alexa_outbox WHERE source_id=? AND target_list_id=? AND item_id=? AND state='queued'",
+                (source_id, target_list_id, item_id),
             )
             row = connection.execute("SELECT * FROM list_items WHERE id=?", (item_id,)).fetchone()
             connection.execute(
@@ -5328,6 +5524,19 @@ WHERE registry_entry_id IS NOT NULL;
                 )
                 for row in rows
             ]
+
+    def _get_products_by_ids(self, product_ids: list[str]) -> list[ProductRecord]:
+        if not product_ids:
+            return []
+        with self._connect() as connection:
+            placeholders = ",".join("?" for _ in product_ids)
+            rows = connection.execute(
+                f"SELECT * FROM products WHERE id IN ({placeholders}) ORDER BY name COLLATE NOCASE",
+                product_ids,
+            ).fetchall()
+            return [self._product_record_from_row(
+                row, self._labels_for(connection, "product_labels", "product_id", row["id"]),
+                self._product_category_assignments(connection, row["id"])) for row in rows]
 
     def _list_products_page(
         self,

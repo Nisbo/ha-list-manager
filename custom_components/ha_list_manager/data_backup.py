@@ -94,8 +94,12 @@ def validate(path: Path) -> dict:
                     if connection.execute('PRAGMA integrity_check').fetchone()[0] != 'ok':
                         raise BackupError(text('backup.invalid'))
                     version = int(connection.execute("SELECT value FROM schema_metadata WHERE key='schema_version'").fetchone()[0])
-                    if version not in {1, 2, DATABASE_SCHEMA_VERSION}:
+                    if version not in {1, 2, 3, DATABASE_SCHEMA_VERSION}:
                         raise BackupError(text('backup.version'))
+                    if version < 4:
+                        expected.execute('DROP TRIGGER alexa_outbox_item_created')
+                        expected.execute('DROP TRIGGER alexa_outbox_item_deleted')
+                        expected.execute('DROP TABLE alexa_outbox')
                     if version < 3:
                         expected.execute('DROP TABLE alexa_tombstones')
                         expected.execute('DROP TABLE alexa_history')
@@ -107,6 +111,7 @@ def validate(path: Path) -> dict:
                         expected.execute('DROP TABLE alexa_receipts')
                         expected.execute('DROP TABLE alexa_inbox')
                     expected_tables = {row[0] for row in expected.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+                    allowed_triggers = dict(expected.execute("SELECT name,sql FROM sqlite_master WHERE type='trigger'"))
                     actual_tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
                     if expected_tables != actual_tables:
                         raise BackupError(text('backup.invalid'))

@@ -11,6 +11,8 @@ from homeassistant.core import callback
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.event import async_track_time_interval
 
+from .alexa_aliases import AlexaAliases, validate_aliases
+from .alexa_outbox import AlexaOutboxManager
 from .alexa_parser import (
     AlexaParseError, AlexaParser, alexa_language_rules,
     available_alexa_languages, default_alexa_languages,
@@ -31,10 +33,12 @@ DEFAULT_SETTINGS = {
     "number_mappings": "",
     "unit_mappings": "",
     "exceptions": "",
+    "aliases": [],
     "cleanup_action": "delete",
     "mode": "one_way",
-    "coupled_completion": "complete",
+    "coupled_completion": "delete",
     "sync_quantities": False,
+    "send_local_items": False,
 }
 
 
@@ -60,6 +64,7 @@ class AlexaInboxManager:
         self._cleanup_cursor = None
         self._languages_loaded = False
         self._sync = AlexaSyncManager(hass, database)
+        self._outbox = AlexaOutboxManager(hass, database)
         self._local_debounce = None
 
     async def _warm_languages(self) -> None:
@@ -218,15 +223,19 @@ class AlexaInboxManager:
                 sources.append({"entity_id": candidate.entity_id, "name": (state.attributes.get("friendly_name") if state else None) or candidate.name or candidate.original_name or candidate.entity_id, "available": self._valid_source(candidate) and self._available(candidate.entity_id)})
         targets = [{"id": record.id, "name": record.name} for record in await self._database.async_list_lists() if record.enabled and record.provider == "local" and record.list_type == "shopping"]
         pending = await self._database.async_list_alexa_pending_receipts()
+        alias_products = await self._database.async_get_products_by_ids(list(dict.fromkeys(
+            rule["product_id"] for rule in settings["aliases"] if rule["target_type"] == "product")))
         coupled_pending = await self._sync.async_pending_count(entry.id, settings["target_list_id"]) if entry else 0
+        outbound = await self._outbox.async_status()
         status = {**stored["status"], "enabled": settings["enabled"], "source_available": self._valid_source(entry) and self._available(settings["source_entity_id"]), "target_available": any(target["id"] == settings["target_list_id"] for target in targets), "source_name": next((source["name"] for source in sources if source["entity_id"] == settings["source_entity_id"]), None), "target_name": next((target["name"] for target in targets if target["id"] == settings["target_list_id"]), None), "pending_cleanup": len(pending) + coupled_pending}
-        return {"settings": settings, "languages": available_alexa_languages(), "sources": sorted(sources, key=lambda row: row["name"].casefold()), "targets": targets, "status": status, "receipts": [receipt for receipt in stored["receipts"] if receipt.get("cleanup_status") != "ignored"][:20]}
+        status.update({key: outbound[key] for key in ("pending_outbound", "uncertain_outbound")})
+        return {"settings": settings, "languages": available_alexa_languages(), "sources": sorted(sources, key=lambda row: row["name"].casefold()), "targets": targets, "status": status, "receipts": [receipt for receipt in stored["receipts"] if receipt.get("cleanup_status") != "ignored"][:20], "alias_products": [product.as_dict() for product in alias_products], "outbound_jobs": outbound["outbound_jobs"]}
 
     def _validate_settings(self, values):
         if not isinstance(values, dict) or set(values) - set(DEFAULT_SETTINGS):
             raise AlexaInboxError(text("alexa.settings_invalid"))
         settings = {**DEFAULT_SETTINGS, **values}
-        for key in ("enabled", "recognize_numbers", "recognize_units", "match_products", "sync_quantities"):
+        for key in ("enabled", "recognize_numbers", "recognize_units", "match_products", "sync_quantities", "send_local_items"):
             if type(settings[key]) is not bool:
                 raise AlexaInboxError(text("alexa.settings_invalid"))
         if settings["cleanup_action"] not in {"keep", "complete", "delete"}:
@@ -249,6 +258,7 @@ class AlexaInboxManager:
             settings["languages"] = self._default_languages()
         try:
             AlexaParser(settings)
+            settings["aliases"] = validate_aliases(settings["aliases"])
         except AlexaParseError as error:
             raise AlexaInboxError(text(error.key, **error.placeholders)) from error
         return settings
@@ -256,6 +266,8 @@ class AlexaInboxManager:
     async def async_set(self, values: dict[str, Any]) -> dict[str, Any]:
         await self._warm_languages()
         async with self._lock:
+            if isinstance(values, dict) and "aliases" not in values:
+                values = {**values, "aliases": self._settings["aliases"]}
             settings = self._validate_settings(values)
             if settings["enabled"] and settings["target_list_id"]:
                 await self._require_target(settings["target_list_id"])
@@ -286,13 +298,35 @@ class AlexaInboxManager:
                         await self._database.async_update_alexa_link(entry.id, link["uid"],
                             sync=link["sync"], cleanup_action="keep", cleanup_status="kept")
             if baseline is not None:
-                await self._database.async_ignore_alexa_items(entry.id, [row["uid"] for row in baseline], source_entity_id=entry.entity_id)
+                held = await self._outbox.async_quarantined(entry.id, baseline)
+                await self._database.async_ignore_alexa_items(entry.id,
+                    [row["uid"] for row in baseline if row["uid"] not in held], source_entity_id=entry.entity_id)
             await self._database.async_set_alexa_settings(settings)
             self._settings = settings
             if self._local_debounce:
                 self._local_debounce.cancel()
                 self._local_debounce = None
             self._subscribe_source()
+            self._notify()
+            self._schedule()
+        return await self.async_get()
+
+    async def async_set_aliases(self, aliases, expected_aliases) -> dict[str, Any]:
+        """Save alias edits independently, rejecting an outdated editor snapshot."""
+        async with self._lock:
+            try:
+                aliases = validate_aliases(aliases)
+                expected = validate_aliases(expected_aliases)
+                current = validate_aliases(self._settings["aliases"])
+            except AlexaParseError as error:
+                raise AlexaInboxError(text(error.key, **error.placeholders)) from error
+            if expected != current:
+                raise AlexaInboxError(text("alexa.aliases_changed"))
+            # Preserve connection identifiers and every other saved preference.
+            # Alias edits never reinitialize activation or synchronization state.
+            settings = {**self._settings, "aliases": aliases}
+            await self._database.async_set_alexa_settings(settings)
+            self._settings = settings
             self._notify()
             self._schedule()
         return await self.async_get()
@@ -305,6 +339,30 @@ class AlexaInboxManager:
         if not record.enabled or record.provider != "local" or record.list_type != "shopping":
             raise AlexaInboxError(text("alexa.target_invalid"))
         return record
+
+    async def async_resolve_outbox(self, *, job_id, action, uid=None):
+        """Explicitly attach an uncertain create, or retain its no-resend guard."""
+        generation = self._generation
+        async with self._lock:
+            self._check_generation(generation)
+            jobs = await self._database.async_list_alexa_outbox()
+            job = next((job for job in jobs if job["id"] == job_id), None)
+            if job is None or action not in {"bind", "cancel"}:
+                raise AlexaInboxError(text("alexa.outbox_invalid"))
+            if action == "cancel":
+                await self._outbox.async_cancel(job)
+            else:
+                entry = er.async_get(self._hass).async_get(job["source_id"])
+                if not self._valid_source(entry):
+                    raise AlexaInboxError(text("alexa.source_invalid"))
+                rows = await self._read_source(entry.entity_id)
+                self._check_generation(generation)
+                if not await self._outbox.async_bind(job, uid, rows):
+                    raise AlexaInboxError(text("alexa.outbox_invalid"))
+            self._check_generation(generation)
+            self._notify()
+            self._schedule()
+        return await self.async_get()
 
     async def _read_source(self, entity_id: str) -> list[dict[str, str]]:
         entry = er.async_get(self._hass).async_get(entity_id)
@@ -331,6 +389,20 @@ class AlexaInboxManager:
             raise AlexaInboxError(text("alexa.item_invalid"))
         return item
 
+    def _parsed_alias(self, row, parser, aliases):
+        item = self._parsed(row, parser)
+        alias = aliases.match(item.name)
+        if alias and alias["target_type"] == "name":
+            item = replace(item, name=alias["replacement"])
+        return item, alias
+
+    @staticmethod
+    def _resolved_alias(item, alias, resolution):
+        item = replace(item, name=resolution["name"])
+        if alias and alias["target_type"] == "product":
+            alias = {**alias, "product_name": resolution["product_name"]}
+        return item, alias
+
     async def _display_parsed(self, item, target_id):
         """Apply the list's free-name convention after parsing off quantities."""
         if target_id:
@@ -356,16 +428,16 @@ class AlexaInboxManager:
         values = self._validate_settings(settings)
         if not isinstance(input_text, str) or not input_text.strip() or len(input_text) > 2000:
             raise AlexaInboxError(text("alexa.item_invalid"))
-        item = await self._display_parsed(
-            self._parsed({"summary": input_text}, AlexaParser(values)), values["target_list_id"])
+        item, alias = self._parsed_alias({"summary": input_text}, AlexaParser(values), AlexaAliases(values["aliases"]))
+        item = await self._display_parsed(item, values["target_list_id"])
         resolution = await self._database.async_preview_alexa_item(
             values["target_list_id"], item.name, item.description, item.quantity,
             match_products=values["match_products"], has_unit=item.has_unit,
+            product_id=alias.get("product_id") if alias else None,
         )
-        if resolution.get("product_id") and resolution.get("product_name"):
-            item = replace(item, name=resolution["product_name"])
+        item, alias = self._resolved_alias(item, alias, resolution)
         return {"parsed": {"name": item.name, "quantity": item.quantity,
-            "description": item.description, "has_unit": item.has_unit}, "resolution": resolution}
+            "description": item.description, "has_unit": item.has_unit}, "resolution": resolution, "alias": alias}
 
     async def async_preview(self) -> dict[str, Any]:
         async with self._lock:
@@ -376,7 +448,9 @@ class AlexaInboxManager:
             rows = await self._read_source(entry.entity_id)
             receipts = await self._database.async_get_alexa_receipts(entry.id, [row["uid"] for row in rows])
             processed_uids = await self._database.async_has_alexa_history(entry.id, [row["uid"] for row in rows])
+            held = await self._outbox.async_quarantined(entry.id, rows)
             parser = AlexaParser(self._settings)
+            aliases = AlexaAliases(self._settings["aliases"])
             items = []
             for row in rows:
                 if row["status"] != "needs_action":
@@ -384,17 +458,31 @@ class AlexaInboxManager:
                 receipt = receipts.get(row["uid"])
                 already_processed = bool(receipt and receipt["cleanup_status"] != "ignored") or row["uid"] in processed_uids
                 result = {"uid": row["uid"], "original_name": row["summary"], "already_processed": already_processed}
+                if already_processed:
+                    # Alias edits apply to future intake, not to existing links
+                    # or canonical Alexa names written by coupled mode.
+                    result.update(name=(receipt or {}).get("name") or row["summary"],
+                                  quantity=(receipt or {}).get("quantity") or 1,
+                                  description=(receipt or {}).get("description"), alias=None)
+                    items.append(result)
+                    continue
+                if row["uid"] in held:
+                    result.update(name=row["summary"], quantity=1, description=None, alias=None,
+                                  error=str(text("alexa.outbox_uncertain")), on_hold=True)
+                    items.append(result)
+                    continue
                 try:
-                    item = await self._display_parsed(self._parsed(row, parser), self._settings["target_list_id"])
+                    item, alias = self._parsed_alias(row, parser, aliases)
+                    item = await self._display_parsed(item, self._settings["target_list_id"])
                     resolution = await self._database.async_preview_alexa_item(
                         self._settings["target_list_id"], item.name, item.description,
                         item.quantity, match_products=self._settings["match_products"],
                         has_unit=item.has_unit,
+                        product_id=alias.get("product_id") if alias else None,
                     )
-                    if resolution.get("product_id") and resolution.get("product_name"):
-                        item = replace(item, name=resolution["product_name"])
+                    item, alias = self._resolved_alias(item, alias, resolution)
                     result.update(name=item.name, quantity=item.quantity, description=item.description,
-                                  has_unit=item.has_unit, resolution=resolution)
+                                  has_unit=item.has_unit, resolution=resolution, alias=alias)
                 except ValueError as error:
                     result.update(name=row["summary"], quantity=1, description=None, error=str(error))
                 items.append(result)
@@ -415,18 +503,23 @@ class AlexaInboxManager:
                 self._check_generation(generation)
                 rows = await self._read_source(entry.entity_id)
                 self._check_generation(generation)
+                rows, held, outbound_errors = await self._outbox.async_reconcile(
+                    entry.id, entry.entity_id, self._settings["target_list_id"], rows,
+                    self._settings, lambda: self._check_generation(generation), self._read_source)
+                self._check_generation(generation)
                 receipts = await self._database.async_get_alexa_receipts(entry.id, [row["uid"] for row in rows])
                 self._check_generation(generation)
                 parser = AlexaParser(self._settings)
-                errors = []
+                aliases = AlexaAliases(self._settings["aliases"])
+                errors = outbound_errors
                 for row in rows:
                     self._check_generation(generation)
                     receipt = receipts.get(row["uid"])
-                    if row["status"] != "needs_action" or (receipt and (receipt["cleanup_status"] != "ignored" or not include_existing)):
+                    if row["uid"] in held or row["status"] != "needs_action" or (receipt and (receipt["cleanup_status"] != "ignored" or not include_existing)):
                         continue
                     try:
-                        item = self._parsed(row, parser)
-                        result = await self._database.async_accept_alexa_item(entry.id, row["uid"], self._settings["target_list_id"], item.name, item.description, item.quantity, self._settings["cleanup_action"], row["summary"], source_entity_id=entry.entity_id, include_existing=include_existing, match_products=self._settings["match_products"], has_unit=item.has_unit)
+                        item, alias = self._parsed_alias(row, parser, aliases)
+                        result = await self._database.async_accept_alexa_item(entry.id, row["uid"], self._settings["target_list_id"], item.name, item.description, item.quantity, self._settings["cleanup_action"], row["summary"], source_entity_id=entry.entity_id, include_existing=include_existing, match_products=self._settings["match_products"], has_unit=item.has_unit, product_id=alias.get("product_id") if alias else None)
                         if result["accepted"]:
                             processed += 1
                             self._hass.bus.async_fire(EVENT_ITEMS_CHANGED, {"list_id": self._settings["target_list_id"]})

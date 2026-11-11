@@ -4,9 +4,9 @@ from typing import Final
 
 DOMAIN: Final = "ha_list_manager"
 INTEGRATION_NAME: Final = "HA List Manager"
-VERSION: Final = "1.0.0b11"
+VERSION: Final = "1.0.0b12"
 DATABASE_FILENAME: Final = "ha_list_manager.db"
-DATABASE_SCHEMA_VERSION: Final = 3
+DATABASE_SCHEMA_VERSION: Final = 4
 LIST_TYPES: Final = ("shopping", "todo", "inventory")
 LIST_PROVIDERS: Final = ("local", "bring")
 SCANNER_ACTIONS: Final = ("add", "remove", "register", "correct")

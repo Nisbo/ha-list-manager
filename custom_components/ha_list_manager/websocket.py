@@ -190,6 +190,31 @@ async def websocket_alexa_set(hass, connection, msg) -> None:
 
 
 @websocket_api.require_admin
+@localized_command({
+    probatio.Required("type"): f"{DOMAIN}/alexa/aliases/set",
+    probatio.Required("aliases"): list,
+    probatio.Required("expected_aliases"): list,
+})
+async def websocket_alexa_aliases_set(hass, connection, msg) -> None:
+    """Persist alias CRUD without overwriting settings from other editors."""
+    await _alexa_result(hass, connection, msg, "async_set_aliases",
+                       aliases=msg["aliases"], expected_aliases=msg["expected_aliases"])
+
+
+@websocket_api.require_admin
+@localized_command({
+    probatio.Required("type"): f"{DOMAIN}/alexa/outbox/resolve",
+    probatio.Required("job_id"): str,
+    probatio.Required("action"): probatio.In({"bind", "cancel"}),
+    probatio.Optional("uid"): str,
+})
+async def websocket_alexa_outbox_resolve(hass, connection, msg) -> None:
+    """Resolve a create acknowledgement without retrying the cloud create."""
+    await _alexa_result(hass, connection, msg, "async_resolve_outbox",
+                       job_id=msg["job_id"], action=msg["action"], uid=msg.get("uid"))
+
+
+@websocket_api.require_admin
 @localized_command({probatio.Required("type"): f"{DOMAIN}/alexa/preview"})
 async def websocket_alexa_preview(hass, connection, msg) -> None:
     """Preview existing open entries without importing or cleaning anything."""
@@ -238,6 +263,8 @@ def async_register_websocket_commands(hass: HomeAssistant) -> None:
 
     websocket_api.async_register_command(hass, websocket_alexa_get)
     websocket_api.async_register_command(hass, websocket_alexa_set)
+    websocket_api.async_register_command(hass, websocket_alexa_aliases_set)
+    websocket_api.async_register_command(hass, websocket_alexa_outbox_resolve)
     websocket_api.async_register_command(hass, websocket_alexa_preview)
     websocket_api.async_register_command(hass, websocket_alexa_process)
     websocket_api.async_register_command(hass, websocket_alexa_test)
