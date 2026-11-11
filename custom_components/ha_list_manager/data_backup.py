@@ -70,7 +70,7 @@ def apply_snapshot(source: Path, destination: Path) -> None:
 
 
 def checkpoint(database) -> None:
-    with closing(database._connect()) as connection:
+    with database._connect() as connection:
         if connection.execute('PRAGMA wal_checkpoint(TRUNCATE)').fetchone()[0]:
             raise BackupError(text('backup.busy'))
 
