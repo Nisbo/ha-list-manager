@@ -1979,7 +1979,7 @@
       "package_volume_example": "z. B. 1,25 l",
       "ean_example": "z. B. 4062139025398",
       "dashboard_path_example": "z. B. /dashboard-einkauf/einkaufsliste",
-      "beta": "Beta",
+      "release_live": "Live",
       "label_grouping": "Umschaltbare Label-Gruppierung",
       "label_grouping_disabled": "Deaktiviert",
       "label_grouping_categories": "Aktiviert – zunächst Kategorien",

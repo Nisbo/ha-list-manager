@@ -154,7 +154,7 @@ function inventoryState(entry) {
   return "stock-normal";
 }
 
-const CARD_VERSION = "1.0.0b13";
+const CARD_VERSION = "1.0.0";
 const PICKER_RESULT_LIMIT = 100;
 const MODES = (hass = null) => ({
   add: { label: haListManagerInventoryCardText("ui.stock_in", {}, hass), icon: "mdi:package-variant-plus", color: "var(--success-color,#2e7d32)", help: haListManagerInventoryCardText("inventory.stock_in_activated", {}, hass) },
@@ -516,7 +516,7 @@ class HaListManagerInventoryCard extends HTMLElement {
       this._startPendingScanView(pendingDialog);
     }
   }
-  disconnectedCallback() { this._stopPendingScanView(); this._watchConnection(null); this._loadRequestId += 1; this._loading = false; this._loadingListId = null; clearTimeout(this._undoTimer); clearTimeout(this._undoCountdownTimer); this._lastInventoryBooking = null; this._setExpandedView(false); this._unsubscribes.forEach((unsubscribe) => unsubscribe()); this._unsubscribes = []; this._clearModeTimer(); this._stopCameraScan(); }
+  disconnectedCallback() { this._stopPendingScanView(); this._watchConnection(null); this._loadRequestId += 1; this._loading = false; this._loadingListId = null; clearTimeout(this._undoTimer); clearTimeout(this._undoCountdownTimer); clearTimeout(this._chipLongPressTimer); this._chipLongPressTimer = null; this._lastInventoryBooking = null; this._setExpandedView(false); this._unsubscribes.forEach((unsubscribe) => unsubscribe()); this._unsubscribes = []; this._clearModeTimer(); this._stopCameraScan(); }
   getCardSize() { return this._config.content_display === "large_only" ? 1 : Math.max(3, Math.ceil(this._entries.length * 0.75) + 2); }
 
   _listId() {
@@ -2674,10 +2674,6 @@ class HaListManagerInventoryCard extends HTMLElement {
 
   _stageProductRefresh(draft, product) {
     globalThis.HaListManagerProductEditor.stageRefresh(draft, product);
-  }
-
-  _renderProductRefresh(draft) {
-    return globalThis.HaListManagerProductEditor.renderRefresh(draft, (key, values = {}) => haListManagerInventoryCardText(key, values, this._hass));
   }
 
   _applyProductRefresh(field, selected, draft) {

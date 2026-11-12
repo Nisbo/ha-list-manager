@@ -173,7 +173,8 @@ class EntityHistoryManager:
 
     @callback
     def _entity_registry_updated(self, event: Event) -> None:
-        if event.data.get("action") != "update":
+        # HA may already have queued a callback when its listener is removed.
+        if not self._started or event.data.get("action") != "update":
             return
         old_entity_id = event.data.get("old_entity_id")
         new_entity_id = event.data.get("entity_id")

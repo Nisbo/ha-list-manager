@@ -91,6 +91,8 @@ class ScannerManager:
         self._scan_operations: dict[str, list[Any]] = {}
         self._collaboration_task: asyncio.Task | None = None
         self._offer_tasks: set[asyncio.Task] = set()
+        self._scan_tasks: set[asyncio.Task] = set()
+        self._stopped = False
         self._lease_seconds = 45
         self._collaboration_revision = 0
         self._collaboration_epoch = str(uuid4())
@@ -98,17 +100,31 @@ class ScannerManager:
 
     async def async_start(self) -> None:
         """Start the single backend event listener."""
+        self._stopped = False
         if self._unsubscribe is None:
             self._unsubscribe = self.hass.bus.async_listen(
                 SCANNER_EVENT, self._handle_scanner_event
             )
 
     async def async_stop(self) -> None:
-        """Stop listening for scanner events."""
+        """Stop new scans and finish bookings before clearing their dialogs."""
+        self._stopped = True
         if self._unsubscribe is not None:
             self._unsubscribe()
             self._unsubscribe = None
 
+        cancelled = None
+        if self._scan_tasks:
+            # Cancelling after a booking commits can leave its history pending.
+            # Drain first so any newly created offers join the cleanup below.
+            drained = asyncio.gather(*tuple(self._scan_tasks), return_exceptions=True)
+            while True:
+                try:
+                    await asyncio.shield(drained)
+                    break
+                except asyncio.CancelledError as error:
+                    cancelled = error
+        self._scan_tasks.clear()
         tasks = [task for task in [self._collaboration_task, *self._offer_tasks] if task]
         for task in tasks:
             task.cancel()
@@ -123,6 +139,8 @@ class ScannerManager:
             if subscriptions.get(key) is callback:
                 subscriptions.pop(key, None)
         self._scan_connection_callbacks.clear()
+        if cancelled is not None:
+            raise cancelled
 
     @asynccontextmanager
     async def _scan_operation(self, scan_id: str):
@@ -339,14 +357,18 @@ class ScannerManager:
 
     @callback
     def _handle_scanner_event(self, event: Event) -> None:
+        if self._stopped:
+            return
         data = event.data or {}
-        self.hass.async_create_task(
+        task = self.hass.async_create_task(
             self.async_process_scan(
                 ean=data.get("code"),
                 address=data.get("address"),
                 source=str(data.get("source") or SCANNER_EVENT),
             )
         )
+        self._scan_tasks.add(task)
+        task.add_done_callback(self._scan_tasks.discard)
 
     def _product_name(
         self, original_name: str, brand: str | None, quantity: str | None

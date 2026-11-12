@@ -1979,7 +1979,7 @@
       "package_volume_example": "e.g. 1.25 l",
       "ean_example": "e.g. 4062139025398",
       "dashboard_path_example": "e.g. /dashboard-groceries/groceries",
-      "beta": "Beta",
+      "release_live": "Live",
       "label_grouping": "Switchable label grouping",
       "label_grouping_disabled": "Disabled",
       "label_grouping_categories": "Enabled – initially categories",
