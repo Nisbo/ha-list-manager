@@ -11,6 +11,7 @@ from homeassistant.core import HomeAssistant
 
 from .const import DATABASE_FILENAME, DOMAIN
 from .alexa import AlexaInboxManager
+from .completed_cleanup import CompletedCleanupManager
 from .localization import configure as configure_localization
 from .backup_http import DataBackupView
 from .database import HaListManagerDatabase
@@ -61,6 +62,8 @@ async def async_setup_entry(
 
         runtime.alexa = AlexaInboxManager(hass, database)
         await runtime.alexa.async_start()
+        runtime.cleanup = CompletedCleanupManager(hass, database, entry)
+        await runtime.cleanup.async_start()
 
         if not hass.data.get(f"{DOMAIN}_backup_view_registered"):
             hass.http.register_view(DataBackupView())
@@ -92,7 +95,7 @@ async def _async_cleanup_failed_setup(
             await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
         except BaseException:
             _LOGGER.exception("Could not unload platforms after setup failure")
-    for name in ("alexa", "scripts", "scanner", "notifications", "external_lists", "entity_history"):
+    for name in ("cleanup", "alexa", "scripts", "scanner", "notifications", "external_lists", "entity_history"):
         manager = getattr(runtime, name)
         if manager is not None:
             try:
@@ -118,6 +121,8 @@ async def async_unload_entry(
     if not unloaded:
         return False
     runtime = hass.data.get(DOMAIN)
+    if runtime and runtime.cleanup:
+        await runtime.cleanup.async_stop()
     if runtime and runtime.alexa:
         await runtime.alexa.async_stop()
     if runtime and runtime.scripts:

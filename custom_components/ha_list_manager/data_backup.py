@@ -94,8 +94,17 @@ def validate(path: Path) -> dict:
                     if connection.execute('PRAGMA integrity_check').fetchone()[0] != 'ok':
                         raise BackupError(text('backup.invalid'))
                     version = int(connection.execute("SELECT value FROM schema_metadata WHERE key='schema_version'").fetchone()[0])
-                    if version not in {1, 2, 3, DATABASE_SCHEMA_VERSION}:
+                    if version not in {1, 2, 3, 4, 5, DATABASE_SCHEMA_VERSION}:
                         raise BackupError(text('backup.version'))
+                    if version < 6:
+                        expected.execute('DROP TRIGGER completed_cleanup_changed')
+                        expected.execute('DROP TRIGGER completed_cleanup_disabled')
+                        expected.execute('DROP INDEX list_items_cleanup_due')
+                        expected.execute('ALTER TABLE list_items DROP COLUMN completed_delete_at')
+                        for column in ('auto_delete_completed','auto_delete_delay_minutes','auto_delete_confirm'):
+                            expected.execute(f'ALTER TABLE lists DROP COLUMN {column}')
+                    if version < 5:
+                        expected.execute('DROP TABLE user_label_filters')
                     if version < 4:
                         expected.execute('DROP TRIGGER alexa_outbox_item_created')
                         expected.execute('DROP TRIGGER alexa_outbox_item_deleted')

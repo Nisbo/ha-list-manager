@@ -214,6 +214,18 @@ class HaListManagerDatabase:
         """Return aggregate values used by the administration overview."""
         return await self._async_run(self._overview_statistics)
 
+    async def async_list_label_filters(self, user_id, list_id):
+        """Return only the current user's saved filters for this list."""
+        return await self._async_run(self._list_label_filters, user_id, list_id)
+
+    async def async_save_label_filter(self, user_id, list_id, filter_id, name,
+                                     label_ids, include_unlabeled, revision=None):
+        return await self._async_run(self._save_label_filter, user_id, list_id,
+                                    filter_id, name, label_ids, include_unlabeled, revision)
+
+    async def async_delete_label_filter(self, user_id, list_id, filter_id, revision):
+        await self._async_run(self._delete_label_filter, user_id, list_id, filter_id, revision)
+
     async def async_list_user_favorites(self, user_id: str) -> list[dict[str, Any]]:
         """Return navigation favorites belonging to one Home Assistant user."""
         return await self._async_run(self._list_user_favorites, user_id)
@@ -401,6 +413,9 @@ class HaListManagerDatabase:
         tandoor_excluded_units: str = "",
         tandoor_result_limit: int = 100,
         capitalize_first_letter: bool = False,
+        auto_delete_completed: bool = False,
+        auto_delete_delay_minutes: int = 0,
+        auto_delete_confirm: bool = False,
     ) -> ListRecord:
         """Create and return a list."""
         return await self._async_run(
@@ -413,6 +428,7 @@ class HaListManagerDatabase:
             tandoor_include_ingredients, tandoor_excluded_units,
             tandoor_result_limit,
             capitalize_first_letter,
+            auto_delete_completed, auto_delete_delay_minutes, auto_delete_confirm,
         )
 
     async def async_get_list(self, list_id: str) -> ListRecord:
@@ -443,6 +459,9 @@ class HaListManagerDatabase:
         tandoor_result_limit: int | None = None,
         confirm_scope_changes: bool = False,
         capitalize_first_letter: bool | None = None,
+        auto_delete_completed: bool | None = None,
+        auto_delete_delay_minutes: int | None = None,
+        auto_delete_confirm: bool | None = None,
     ) -> ListRecord:
         """Update and return a list."""
         return await self._async_run(
@@ -468,6 +487,7 @@ class HaListManagerDatabase:
             tandoor_excluded_units,
             tandoor_result_limit,
             capitalize_first_letter,
+            auto_delete_completed, auto_delete_delay_minutes, auto_delete_confirm,
         )
 
     async def async_preview_list_scope_changes(
@@ -1734,6 +1754,9 @@ class HaListManagerDatabase:
             # A cancellation cannot undo the SQLite commit. Publish its one
             # mutation before propagating cancellation, just like bookings.
             self._fire_item_mutated(result.pop("_before"), result.pop("_after"))
+        if target.__name__ == "_delete_due_completed_items":
+            for before in result["items"]:
+                self._fire_item_mutated(before, None)
         if cancelled is not None:
             raise cancelled
         return result
@@ -1927,7 +1950,7 @@ class HaListManagerDatabase:
                         "The existing database has no supported schema metadata"
                     )
                 version = self._read_schema_version(connection)
-                if version not in (1, 2, 3, DATABASE_SCHEMA_VERSION):
+                if version not in (1, 2, 3, 4, 5, DATABASE_SCHEMA_VERSION):
                     raise UnsupportedSchemaVersionError(
                         f"Database schema {version} is not supported; "
                         f"expected {DATABASE_SCHEMA_VERSION}"
@@ -1960,12 +1983,61 @@ class HaListManagerDatabase:
                     self._create_alexa_history_schema(connection)
                     self._create_alexa_tombstone_schema(connection)
                     self._seed_alexa_history(connection)
-                self._create_alexa_outbox_schema(connection)
+                if version < 4:
+                    self._create_alexa_outbox_schema(connection)
+                if version < 5:
+                    self._create_label_filters_schema(connection)
+                self._create_completed_cleanup_schema(connection)
                 connection.execute(
                     "UPDATE schema_metadata SET value = ? WHERE key = 'schema_version'",
                     (str(DATABASE_SCHEMA_VERSION),),
                 )
             self._prune_alexa_tombstones_in(connection, self._now())
+
+    @staticmethod
+    def _create_completed_cleanup_schema(connection):
+        connection.execute("ALTER TABLE lists ADD COLUMN auto_delete_completed INTEGER NOT NULL DEFAULT 0 CHECK(auto_delete_completed IN (0,1))")
+        connection.execute("ALTER TABLE lists ADD COLUMN auto_delete_delay_minutes INTEGER NOT NULL DEFAULT 0 CHECK(auto_delete_delay_minutes BETWEEN 0 AND 525600)")
+        connection.execute("ALTER TABLE lists ADD COLUMN auto_delete_confirm INTEGER NOT NULL DEFAULT 0 CHECK(auto_delete_confirm IN (0,1))")
+        connection.execute("ALTER TABLE list_items ADD COLUMN completed_delete_at TEXT")
+        connection.execute("CREATE INDEX list_items_cleanup_due ON list_items(completed_delete_at) WHERE completed_delete_at IS NOT NULL")
+        # Every producer (cards, Alexa, automation) uses the same atomic transition.
+        # Inserts and repeated completed=1 writes intentionally do not schedule old imports.
+        connection.execute("""CREATE TRIGGER completed_cleanup_changed AFTER UPDATE OF completed ON list_items
+          WHEN NEW.completed != OLD.completed BEGIN
+          UPDATE list_items SET completed_delete_at = CASE WHEN NEW.completed=1 AND EXISTS(
+            SELECT 1 FROM lists WHERE id=NEW.list_id AND list_type='shopping' AND provider='local'
+            AND enabled=1 AND auto_delete_completed=1)
+            THEN strftime('%Y-%m-%dT%H:%M:%fZ','now',printf('+%d minutes',
+              (SELECT auto_delete_delay_minutes FROM lists WHERE id=NEW.list_id))) ELSE NULL END
+          WHERE id=NEW.id; END""")
+        connection.execute("""CREATE TRIGGER completed_cleanup_disabled AFTER UPDATE OF auto_delete_completed,enabled ON lists
+          WHEN NEW.auto_delete_completed=0 OR NEW.enabled=0 BEGIN
+          UPDATE list_items SET completed_delete_at=NULL WHERE list_id=NEW.id AND completed_delete_at IS NOT NULL; END""")
+
+    @staticmethod
+    def _validate_completed_cleanup(list_type, provider, enabled, minutes, confirm):
+        if (type(minutes) is not int or not 0 <= minutes <= 525600 or
+                (list_type != "shopping" or provider != "local") and (enabled or confirm or minutes)):
+            raise ValueError(localized_text("cleanup.invalid"))
+
+    async def async_delete_due_completed_items(self):
+        """Commit due deletions and publish mutations before releasing cancellation."""
+        return await self._async_run(self._delete_due_completed_items)
+
+    def _delete_due_completed_items(self):
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            rows = connection.execute("""SELECT i.* FROM list_items i JOIN lists l ON l.id=i.list_id
+              WHERE i.completed=1 AND i.completed_delete_at IS NOT NULL AND julianday(i.completed_delete_at)<=julianday(?)
+              AND l.list_type='shopping' AND l.provider='local' AND l.enabled=1 AND l.auto_delete_completed=1
+              ORDER BY i.completed_delete_at LIMIT 100""",(self._now(),)).fetchall()
+            records = [self._item_record_from_row(row,self._labels_for(connection,"list_item_labels","item_id",row["id"],row["list_id"])) for row in rows]
+            connection.executemany("DELETE FROM list_items WHERE id=?",[(row["id"],) for row in rows])
+            deadline = connection.execute("""SELECT MIN(i.completed_delete_at) FROM list_items i JOIN lists l ON l.id=i.list_id
+              WHERE i.completed=1 AND julianday(i.completed_delete_at) IS NOT NULL AND l.auto_delete_completed=1
+              AND l.enabled=1 AND l.provider='local' AND l.list_type='shopping'""").fetchone()[0]
+        return {"items": records, "next_deadline": deadline}
 
     def _create_schema(self, connection: sqlite3.Connection) -> None:
         """Create the complete current schema for a first installation."""
@@ -2485,6 +2557,21 @@ CREATE UNIQUE INDEX chips_list_name_unique ON chips(list_id, priority_name) WHER
         self._create_list_scripts_schema(connection)
         self._create_alexa_schema(connection)
         self._create_alexa_outbox_schema(connection)
+        self._create_label_filters_schema(connection)
+        self._create_completed_cleanup_schema(connection)
+
+    @staticmethod
+    def _create_label_filters_schema(connection: sqlite3.Connection) -> None:
+        connection.execute("""CREATE TABLE IF NOT EXISTS user_label_filters (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            list_id TEXT NOT NULL REFERENCES lists(id) ON DELETE CASCADE,
+            name TEXT NOT NULL COLLATE NOCASE,
+            label_ids_json TEXT NOT NULL,
+            include_unlabeled INTEGER NOT NULL CHECK(include_unlabeled IN (0,1)),
+            revision INTEGER NOT NULL DEFAULT 1,
+            UNIQUE(user_id, list_id, name)
+        )""")
 
     @staticmethod
     def _create_alexa_schema(connection: sqlite3.Connection) -> None:
@@ -3338,6 +3425,73 @@ WHERE registry_entry_id IS NOT NULL;
         with self._connect() as connection:
             return self._read_schema_version(connection)
 
+    @staticmethod
+    def _label_filter_record(row):
+        return {"id": row["id"], "name": row["name"],
+                "label_ids": json.loads(row["label_ids_json"]),
+                "include_unlabeled": bool(row["include_unlabeled"]),
+                "revision": row["revision"]}
+
+    def _list_label_filters(self, user_id, list_id):
+        self._get_list(list_id)
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM user_label_filters WHERE user_id=? AND list_id=? "
+                "ORDER BY name COLLATE NOCASE, id", (user_id, list_id)).fetchall()
+        return [self._label_filter_record(row) for row in rows]
+
+    def _save_label_filter(self, user_id, list_id, filter_id, name,
+                           label_ids, include_unlabeled, revision=None):
+        # Keep ownership in every SQL predicate, including requests from admins.
+        if not user_id or self._get_list(list_id).list_type not in ("shopping", "bring", "inventory", "todo"):
+            raise ValueError(localized_text("filters.supported_lists"))
+        name = str(name).strip()
+        if not name or len(name) > 80:
+            raise ValueError(localized_text("filters.name_required"))
+        if not isinstance(label_ids, list) or len(label_ids) > 100 or any(not isinstance(x, str) for x in label_ids):
+            raise ValueError(localized_text("filters.invalid_labels"))
+        label_ids = list(dict.fromkeys(label_ids))
+        available = {label.id for label in self._list_labels(list_id)}
+        if not set(label_ids) <= available:
+            raise ValueError(localized_text("filters.invalid_labels"))
+        if not label_ids and not include_unlabeled:
+            raise ValueError(localized_text("filters.choose_labels"))
+        updating = bool(filter_id)
+        with self._connect() as connection:
+            if updating:
+                row = connection.execute(
+                    "SELECT * FROM user_label_filters WHERE id=? AND user_id=? AND list_id=?",
+                    (filter_id, user_id, list_id)).fetchone()
+                if row is None or row["revision"] != revision:
+                    raise ValueError(localized_text("filters.changed_elsewhere"))
+            else:
+                if connection.execute("SELECT COUNT(*) FROM user_label_filters WHERE user_id=? AND list_id=?",
+                                      (user_id, list_id)).fetchone()[0] >= 50:
+                    raise ValueError(localized_text("filters.limit"))
+                filter_id = str(uuid4())
+            try:
+                if updating:
+                    result = connection.execute("UPDATE user_label_filters SET name=?, label_ids_json=?, "
+                                       "include_unlabeled=?, revision=revision+1 WHERE id=? AND user_id=? AND list_id=? AND revision=?",
+                                       (name, json.dumps(label_ids), int(include_unlabeled), filter_id, user_id, list_id, revision))
+                    if not result.rowcount:
+                        raise ValueError(localized_text("filters.changed_elsewhere"))
+                else:
+                    connection.execute("INSERT INTO user_label_filters "
+                                       "(id,user_id,list_id,name,label_ids_json,include_unlabeled) VALUES(?,?,?,?,?,?)",
+                                       (filter_id, user_id, list_id, name, json.dumps(label_ids), int(include_unlabeled)))
+            except sqlite3.IntegrityError as error:
+                raise ValueError(localized_text("filters.duplicate_name")) from error
+            row = connection.execute("SELECT * FROM user_label_filters WHERE id=?", (filter_id,)).fetchone()
+        return self._label_filter_record(row)
+
+    def _delete_label_filter(self, user_id, list_id, filter_id, revision):
+        with self._connect() as connection:
+            result = connection.execute("DELETE FROM user_label_filters WHERE id=? AND user_id=? "
+                                        "AND list_id=? AND revision=?", (filter_id, user_id, list_id, revision))
+            if not result.rowcount:
+                raise ValueError(localized_text("filters.changed_elsewhere"))
+
     def _list_user_favorites(self, user_id: str) -> list[dict[str, Any]]:
         with self._connect() as connection:
             rows = connection.execute(
@@ -3534,6 +3688,7 @@ WHERE registry_entry_id IS NOT NULL;
                        use_tandoor, tandoor_skip_small_units,
                        tandoor_include_ingredients, tandoor_excluded_units,
                        tandoor_result_limit, capitalize_first_letter,
+                       auto_delete_completed, auto_delete_delay_minutes, auto_delete_confirm,
                        enabled, created_at, updated_at
                 FROM lists
                 ORDER BY name COLLATE NOCASE
@@ -3778,12 +3933,16 @@ WHERE registry_entry_id IS NOT NULL;
         tandoor_excluded_units: str = "",
         tandoor_result_limit: int = 100,
         capitalize_first_letter: bool = False,
+        auto_delete_completed: bool = False,
+        auto_delete_delay_minutes: int = 0,
+        auto_delete_confirm: bool = False,
     ) -> ListRecord:
         self._validate_list_type(list_type)
         self._validate_list_provider(list_type, provider, external_entity_id)
         self._validate_label_conflict_policy(label_conflict_policy)
         if tandoor_result_limit not in {10, 25, 50, 100}:
             raise ValueError(localized_text("backend.tandoor_limit_invalid"))
+        self._validate_completed_cleanup(list_type, provider, auto_delete_completed, auto_delete_delay_minutes, auto_delete_confirm)
         now = self._now()
         record = ListRecord(
             id=str(uuid4()),
@@ -3810,6 +3969,9 @@ WHERE registry_entry_id IS NOT NULL;
             created_at=now,
             updated_at=now,
             capitalize_first_letter=capitalize_first_letter,
+            auto_delete_completed=auto_delete_completed,
+            auto_delete_delay_minutes=auto_delete_delay_minutes,
+            auto_delete_confirm=auto_delete_confirm,
         )
         try:
             with self._connect() as connection:
@@ -3854,6 +4016,8 @@ WHERE registry_entry_id IS NOT NULL;
                         record.updated_at,
                     ),
                 )
+                connection.execute("UPDATE lists SET auto_delete_completed=?,auto_delete_delay_minutes=?,auto_delete_confirm=? WHERE id=?",
+                                   (int(auto_delete_completed),auto_delete_delay_minutes,int(auto_delete_confirm),record.id))
         except sqlite3.IntegrityError as error:
             if "lists.name" in str(error) or "lists_name_unique" in str(error):
                 raise DuplicateListNameError(name) from error
@@ -3885,6 +4049,9 @@ WHERE registry_entry_id IS NOT NULL;
         tandoor_excluded_units: str | None = None,
         tandoor_result_limit: int | None = None,
         capitalize_first_letter: bool | None = None,
+        auto_delete_completed: bool | None = None,
+        auto_delete_delay_minutes: int | None = None,
+        auto_delete_confirm: bool | None = None,
     ) -> ListRecord:
         with self._connect() as connection:
             existing = connection.execute(
@@ -3893,6 +4060,10 @@ WHERE registry_entry_id IS NOT NULL;
             if existing is None:
                 raise ListNotFoundError(list_id)
 
+            cleanup = (existing["auto_delete_completed"] if auto_delete_completed is None else int(auto_delete_completed),
+                       existing["auto_delete_delay_minutes"] if auto_delete_delay_minutes is None else auto_delete_delay_minutes,
+                       existing["auto_delete_confirm"] if auto_delete_confirm is None else int(auto_delete_confirm))
+            self._validate_completed_cleanup(existing["list_type"], existing["provider"], *cleanup)
             next_name = name if name is not None else existing["name"]
             next_capitalize = (int(capitalize_first_letter) if capitalize_first_letter is not None
                                else existing["capitalize_first_letter"])
@@ -4053,6 +4224,7 @@ WHERE registry_entry_id IS NOT NULL;
                     raise ValueError(localized_text("backend.bring_already_linked")) from error
                 raise
 
+            connection.execute("UPDATE lists SET auto_delete_completed=?,auto_delete_delay_minutes=?,auto_delete_confirm=? WHERE id=?", (*cleanup,list_id))
             row = connection.execute(
                 "SELECT * FROM lists WHERE id = ?", (list_id,)
             ).fetchone()
@@ -4083,7 +4255,7 @@ WHERE registry_entry_id IS NOT NULL;
                 """
                 SELECT id, list_id, product_id, external_uid, name, description, quantity, category_id, category,
                        due_at, recurrence_interval, recurrence_unit, completed, position,
-                       inventory_source_type, inventory_source_id, created_at, updated_at, offer_only
+                       inventory_source_type, inventory_source_id, created_at, updated_at, offer_only, completed_delete_at
                 FROM list_items
                 WHERE list_id = ?
                 ORDER BY completed, position, created_at
@@ -7460,6 +7632,7 @@ WHERE registry_entry_id IS NOT NULL;
                        use_tandoor, tandoor_skip_small_units,
                        tandoor_include_ingredients, tandoor_excluded_units,
                        tandoor_result_limit, capitalize_first_letter,
+                       auto_delete_completed, auto_delete_delay_minutes, auto_delete_confirm,
                        enabled,
                        created_at, updated_at
                 FROM lists
@@ -9406,6 +9579,9 @@ WHERE registry_entry_id IS NOT NULL;
             created_at=row["created_at"],
             updated_at=row["updated_at"],
             capitalize_first_letter=bool(row["capitalize_first_letter"]),
+            auto_delete_completed=bool(row["auto_delete_completed"]),
+            auto_delete_delay_minutes=int(row["auto_delete_delay_minutes"]),
+            auto_delete_confirm=bool(row["auto_delete_confirm"]),
         )
 
     @staticmethod
@@ -9559,6 +9735,7 @@ WHERE registry_entry_id IS NOT NULL;
                 row["inventory_source_id"] if "inventory_source_id" in keys else None
             ),
             offer_only=bool(row["offer_only"]) if "offer_only" in keys else False,
+            completed_delete_at=row["completed_delete_at"] if "completed_delete_at" in keys else None,
             labels=labels,
         )
 

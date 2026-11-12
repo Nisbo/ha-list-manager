@@ -328,6 +328,9 @@ def async_register_websocket_commands(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, websocket_update_dish)
     websocket_api.async_register_command(hass, websocket_delete_dish)
     websocket_api.async_register_command(hass, websocket_add_dish_to_list)
+    websocket_api.async_register_command(hass, websocket_list_label_filters)
+    websocket_api.async_register_command(hass, websocket_save_label_filter)
+    websocket_api.async_register_command(hass, websocket_delete_label_filter)
     websocket_api.async_register_command(hass, websocket_list_important_chips)
     websocket_api.async_register_command(hass, websocket_set_important_chip)
     websocket_api.async_register_command(hass, websocket_list_inventory_lists)
@@ -490,6 +493,9 @@ async def websocket_subscribe(
     """Subscribe cards to their own updates without exposing the HA event bus."""
     @callback
     def forward_event(event) -> None:
+        data = event.as_dict().get("data", {})
+        if data.get("label_filters") and data.get("user_id") != connection.user.id:
+            return
         connection.send_message(websocket_api.event_message(msg["id"], event.as_dict()))
 
     connection.subscriptions[msg["id"]] = hass.bus.async_listen(
@@ -1169,6 +1175,9 @@ async def websocket_list_lists(
         probatio.Optional("tandoor_include_ingredients", default=True): bool,
         probatio.Optional("tandoor_excluded_units", default=""): str,
         probatio.Optional("tandoor_result_limit", default=100): probatio.In({10, 25, 50, 100}),
+        probatio.Optional("auto_delete_completed"): bool,
+        probatio.Optional("auto_delete_delay_minutes"): probatio.All(int, probatio.Range(min=0,max=525600)),
+        probatio.Optional("auto_delete_confirm"): bool,
     }
 )
 async def websocket_create_list(
@@ -1192,6 +1201,9 @@ async def websocket_create_list(
             msg.get("tandoor_excluded_units"), maximum=500, required=False
         ) or ""
         record = await _runtime(hass).database.async_create_list(
+            auto_delete_completed=msg.get("auto_delete_completed", False),
+            auto_delete_delay_minutes=msg.get("auto_delete_delay_minutes", 0),
+            auto_delete_confirm=msg.get("auto_delete_confirm", False),
             name=name,
             list_type=list_type,
             icon=icon,
@@ -1253,6 +1265,9 @@ async def websocket_create_list(
         probatio.Optional("tandoor_excluded_units"): str,
         probatio.Optional("tandoor_result_limit"): probatio.In({10, 25, 50, 100}),
         probatio.Optional("confirm_scope_changes", default=False): bool,
+        probatio.Optional("auto_delete_completed"): bool,
+        probatio.Optional("auto_delete_delay_minutes"): probatio.All(int, probatio.Range(min=0,max=525600)),
+        probatio.Optional("auto_delete_confirm"): bool,
     }
 )
 async def websocket_update_list(
@@ -1273,6 +1288,9 @@ async def websocket_update_list(
             if "tandoor_excluded_units" in msg else None
         )
         updates: dict[str, Any] = {
+            "auto_delete_completed": msg.get("auto_delete_completed"),
+            "auto_delete_delay_minutes": msg.get("auto_delete_delay_minutes"),
+            "auto_delete_confirm": msg.get("auto_delete_confirm"),
             "name": name,
             "icon": icon,
             "enabled": msg.get("enabled"),
@@ -3329,6 +3347,62 @@ async def websocket_add_dish_to_list(
         return
     _fire_items_changed(hass, msg["list_id"])
     connection.send_result(msg["id"], result)
+
+
+@localized_command({
+    probatio.Required("type"): f"{DOMAIN}/label_filters/list",
+    probatio.Required("list_id"): str,
+})
+async def websocket_list_label_filters(hass, connection, msg) -> None:
+    try:
+        filters = await _runtime(hass).database.async_list_label_filters(connection.user.id, msg["list_id"])
+    except ListNotFoundError:
+        _send_error(connection, msg["id"], websocket_api.ERR_NOT_FOUND, localized_text("backend.list_not_found"))
+        return
+    connection.send_result(msg["id"], {"filters": filters})
+
+
+@localized_command({
+    probatio.Required("type"): f"{DOMAIN}/label_filters/save",
+    probatio.Required("list_id"): str,
+    probatio.Optional("filter_id"): str,
+    probatio.Required("name"): str,
+    probatio.Required("label_ids"): [str],
+    probatio.Required("include_unlabeled"): bool,
+    probatio.Optional("revision"): int,
+})
+async def websocket_save_label_filter(hass, connection, msg) -> None:
+    try:
+        record = await _runtime(hass).database.async_save_label_filter(
+            connection.user.id, msg["list_id"], msg.get("filter_id"), msg["name"],
+            msg["label_ids"], msg["include_unlabeled"], msg.get("revision"))
+    except ListNotFoundError:
+        _send_error(connection, msg["id"], websocket_api.ERR_NOT_FOUND, localized_text("backend.list_not_found"))
+        return
+    except ValueError as error:
+        _send_input_error(connection, msg, error)
+        return
+    hass.bus.async_fire(EVENT_LISTS_CHANGED, {"list_id": msg["list_id"],
+                        "user_id": connection.user.id, "label_filters": True})
+    connection.send_result(msg["id"], {"filter": record})
+
+
+@localized_command({
+    probatio.Required("type"): f"{DOMAIN}/label_filters/delete",
+    probatio.Required("list_id"): str,
+    probatio.Required("filter_id"): str,
+    probatio.Required("revision"): int,
+})
+async def websocket_delete_label_filter(hass, connection, msg) -> None:
+    try:
+        await _runtime(hass).database.async_delete_label_filter(
+            connection.user.id, msg["list_id"], msg["filter_id"], msg["revision"])
+    except ValueError as error:
+        _send_input_error(connection, msg, error)
+        return
+    hass.bus.async_fire(EVENT_LISTS_CHANGED, {"list_id": msg["list_id"],
+                        "user_id": connection.user.id, "label_filters": True})
+    connection.send_result(msg["id"])
 
 
 @localized_command(

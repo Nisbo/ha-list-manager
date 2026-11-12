@@ -34,6 +34,9 @@ class ListRecord:
     created_at: str
     updated_at: str
     capitalize_first_letter: bool = False
+    auto_delete_completed: bool = False
+    auto_delete_delay_minutes: int = 0
+    auto_delete_confirm: bool = False
 
     def as_dict(self) -> dict[str, Any]:
         """Return a JSON-serializable representation."""
@@ -69,6 +72,7 @@ class ListItemRecord:
     offer_only: bool = False
     inventory_source_type: str | None = None
     inventory_source_id: str | None = None
+    completed_delete_at: str | None = None
     labels: tuple["LabelRecord", ...] = ()
 
     def as_dict(self) -> dict[str, Any]:

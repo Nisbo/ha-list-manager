@@ -72,7 +72,7 @@ function haListManagerPanelTextRequest(hass, message) {
   return hass.callWS(message.type?.startsWith("ha_list_manager/") ? { ...message, language: haListManagerPanelTextLanguage(hass) } : message);
 }
 
-const PANEL_VERSION = "1.0.1";
+const PANEL_VERSION = "1.1.0b1";
 const GROUP_PICKER_RESULT_LIMIT = 100;
 const API = "ha_list_manager";
 const ITEMS_EVENT = "ha_list_manager_items_changed";
@@ -1102,7 +1102,7 @@ class HaListManagerPanel extends HTMLElement {
       <div class="page">
         <header class="page-header">
           <div class="title-wrap"><ha-icon icon="mdi:cart-variant"></ha-icon><div><h1>HA List Manager</h1><p>${haListManagerPanelText("ui.backend_management", {}, this._hass)} <span class="version">v${PANEL_VERSION}</span></p></div></div>
-          <span class="release-stage">${haListManagerPanelText("ui.release_live", {}, this._hass)}</span>
+          <span class="release-stage">${haListManagerPanelText("ui.release_beta", {}, this._hass)}</span>
         </header>
         <div class="layout"><nav aria-label="${haListManagerPanelText("ui.administration", {}, this._hass)}">${navigation}</nav><main>${this._renderPageFavorite()}${content}</main></div>
       </div>
@@ -3560,6 +3560,10 @@ class HaListManagerPanel extends HTMLElement {
       </section></div>`;
     }
     if (this._dialog.kind === "list-script") return this._renderListScriptDialog();
+    if (this._dialog.kind === "complete-cleanup") {
+      const {record,list}=this._dialog;const minutes=Number(list.auto_delete_delay_minutes || 0);
+      return `<div class="dialog-backdrop"><section class="dialog confirmation-dialog" role="alertdialog" aria-modal="true">${this._dialogHeader(haListManagerPanelText("cleanup.confirm_title",{},this._hass))}<p>${haListManagerPanelText(minutes ? "cleanup.confirm_delayed" : "cleanup.confirm_now",{name:this._escape(record.name),minutes},this._hass)}</p><div class="dialog-actions"><button class="ha-button danger" data-confirm-cleanup>${haListManagerPanelText("cleanup.confirm_action",{},this._hass)}</button><button class="ha-button" data-cancel-dialog>${haListManagerPanelText("ui.cancel",{},this._hass)}</button></div></section></div>`;
+    }
     if (this._dialog.kind === "list-editor") return this._renderListDialog();
     if (this._dialog.kind === "list-scope-toggle") return this._renderListScopeToggleDialog();
     if (this._dialog.kind === "product-editor") return this._renderProductDialog();
@@ -3935,6 +3939,15 @@ class HaListManagerPanel extends HTMLElement {
     return `<div class="dialog-backdrop" data-close-dialog><section class="dialog scanner-dialog" role="dialog" aria-modal="true" data-dialog-panel>${this._dialogHeader(this._dialog.record ? haListManagerPanelText("scanner.edit", {}, this._hass) : haListManagerPanelText("ui.create_scanner", {}, this._hass))}<label class="field"><span>${haListManagerPanelText("ui.name", {}, this._hass)}</span><input type="text" maxlength="100" data-scanner-name value="${this._escape(draft.name)}" placeholder="${haListManagerPanelText("scanner.name_example", {}, this._hass)}"></label><label class="field"><span>${haListManagerPanelText("ui.address", {}, this._hass)}</span><input type="text" maxlength="100" data-scanner-address value="${this._escape(draft.address)}" placeholder="AA:FC:87:59:04:38"></label><label class="setting-row compact-setting"><ha-checkbox data-scanner-enabled></ha-checkbox><span><strong>${haListManagerPanelText("ui.scanner_enabled", {}, this._hass)}</strong><small>${haListManagerPanelText("help.disabled_scanner_events", {}, this._hass)}</small></span></label><ha-select class="selector-field" data-scanner-routing></ha-select>${draft.routing === "fixed" ? `<div class="field-grid scanner-route-fields"><ha-select data-scanner-list></ha-select><ha-select data-scanner-action></ha-select></div>` : `<p class="field-help">${haListManagerPanelText("help.active_inventory_target", {}, this._hass)}</p>`}${this._dialogError()}<div class="dialog-actions"><button class="ha-button primary" data-save-scanner ${this._busy ? "disabled" : ""}>${this._busy ? haListManagerPanelText("ui.save_pending", {}, this._hass) : haListManagerPanelText("ui.save", {}, this._hass)}</button><button class="ha-button" data-cancel-dialog>${haListManagerPanelText("ui.cancel", {}, this._hass)}</button></div></section></div>`;
   }
 
+  _renderCompletedCleanupSettings(draft) {
+    if (draft.list_type !== "shopping") return "";
+    const t=(key)=>haListManagerPanelText(`cleanup.${key}`,{},this._hass);
+    return `<fieldset class="option-group" data-cleanup-settings><legend>${t("title")}</legend>
+      <div class="setting-row compact-setting checkbox-only"><ha-checkbox data-list-auto-delete-completed></ha-checkbox><span><strong>${t("enabled")}</strong><small>${t("help")}</small></span></div>
+      <label class="field"><span>${t("delay")}</span><input type="number" min="0" max="525600" step="1" data-list-auto-delete-delay value="${draft.auto_delete_delay_minutes || ""}" placeholder="0"></label><p class="field-help">${t("delay_help")}</p>
+      <div class="setting-row compact-setting checkbox-only"><ha-checkbox data-list-auto-delete-confirm></ha-checkbox><span><strong>${t("confirm")}</strong><small>${t("confirm_help")}</small></span></div>
+      <p class="field-help">${t("existing")}</p><p class="alexa-warning">${t("alexa_override")}</p></fieldset>`;
+  }
   _renderListDialog() {
     const draft = this._dialog.draft;
     const impact = this._dialog.scope_confirmation;
@@ -3952,6 +3965,7 @@ class HaListManagerPanel extends HTMLElement {
         <label class="setting-row compact-setting"><ha-checkbox data-list-use-type-categories></ha-checkbox><span><strong>${haListManagerPanelText("ui.categories_this_list_type", {}, this._hass)}</strong><small>${haListManagerPanelText("help.include_list_type_definitions", {}, this._hass)}</small></span></label>
         <p class="field-help">${haListManagerPanelText("help.category_scope_priority", {}, this._hass)}</p>
       </fieldset>
+      ${this._renderCompletedCleanupSettings(draft)}
       <fieldset class="option-group"><legend>${haListManagerPanelText("ui.available_labels", {}, this._hass)}</legend>
         <label class="setting-row compact-setting"><ha-checkbox data-list-use-global-labels></ha-checkbox><span><strong>${haListManagerPanelText("ui.global_labels", {}, this._hass)}</strong><small>${haListManagerPanelText("help.show_global_labels", {}, this._hass)}</small></span></label>
         <label class="setting-row compact-setting"><ha-checkbox data-list-use-type-labels></ha-checkbox><span><strong>${haListManagerPanelText("labels.for_list_type", {}, this._hass)}</strong><small>${haListManagerPanelText("ui.offer_named_in_list", {p0:(draft.list_type === "todo" ? haListManagerPanelText("ui.todo_labels", {}, this._hass) : draft.list_type === "inventory" ? haListManagerPanelText("ui.inventory_labels", {}, this._hass) : haListManagerPanelText("ui.shopping_list_labels", {}, this._hass))}, this._hass)}</small></span></label>
@@ -4576,6 +4590,7 @@ class HaListManagerPanel extends HTMLElement {
     this.shadowRoot.querySelector("[data-admin-show-grouped]")?.addEventListener("change", (event) => { this._inventoryGroupShowGrouped = event.target.checked; this._refreshInventoryGroupDialog("[data-admin-show-grouped]"); });
     this.shadowRoot.querySelectorAll("[data-cancel-dialog]:not([data-backup-dialog] [data-cancel-dialog])").forEach((button) => button.addEventListener("click", () => this._closeDialog()));
     this.shadowRoot.querySelectorAll("[data-dialog-panel]").forEach((panel) => panel.addEventListener("click", (event) => event.stopPropagation()));
+    this.shadowRoot.querySelector("[data-confirm-cleanup]")?.addEventListener("click", () => {const id=this._dialog.record.id;this._dialog=null;this._render();this._toggleItem(id,true);});
     this.shadowRoot.querySelector("[data-save-list]")?.addEventListener("click", () => this._saveList());
     this.shadowRoot.querySelector("[data-save-item]")?.addEventListener("click", () => this._saveItem());
     this.shadowRoot.querySelector("[data-save-dynamic-category]")?.addEventListener("click", () => this._openDynamicCategoryDialog());
@@ -4978,6 +4993,8 @@ class HaListManagerPanel extends HTMLElement {
       }
       for (const [selector, key] of [
         ["[data-list-capitalize-first-letter]", "capitalize_first_letter"],
+        ["[data-list-auto-delete-completed]", "auto_delete_completed"],
+        ["[data-list-auto-delete-confirm]", "auto_delete_confirm"],
         ["[data-list-use-global-categories]", "use_global_categories"],
         ["[data-list-use-type-categories]", "use_type_categories"],
         ["[data-list-use-global-labels]", "use_global_labels"],
@@ -4995,6 +5012,8 @@ class HaListManagerPanel extends HTMLElement {
           checkbox.addEventListener("change", () => { this._dialog.draft[key] = checkbox.checked; });
         }
       }
+      const cleanupDelay = this.shadowRoot.querySelector("[data-list-auto-delete-delay]");
+      if (cleanupDelay) cleanupDelay.addEventListener("input", () => { this._dialog.draft.auto_delete_delay_minutes = cleanupDelay.value === "" ? 0 : Number(cleanupDelay.value); });
       const excludedUnits = this.shadowRoot.querySelector("[data-list-tandoor-excluded-units]");
       if (excludedUnits) excludedUnits.addEventListener("input", () => { this._dialog.draft.tandoor_excluded_units = excludedUnits.value; });
       const resultLimit = this.shadowRoot.querySelector("[data-list-tandoor-result-limit]");
@@ -5268,6 +5287,9 @@ class HaListManagerPanel extends HTMLElement {
       name: record?.name || "", list_type: record?.list_type || "shopping",
       external_entity_id: record?.external_entity_id || "", icon: record?.icon || "",
       capitalize_first_letter: record?.capitalize_first_letter === true,
+      auto_delete_completed: record?.auto_delete_completed === true,
+      auto_delete_delay_minutes: record?.auto_delete_delay_minutes || 0,
+      auto_delete_confirm: record?.auto_delete_confirm === true,
       use_global_categories: record?.use_global_categories !== false,
       use_type_categories: record?.use_type_categories !== false,
       use_global_labels: record?.use_global_labels !== false,
@@ -7229,6 +7251,11 @@ class HaListManagerPanel extends HTMLElement {
     await this._runDialogAction(async () => {
       const payload = { type: `${API}/lists/${record ? "update" : "create"}`, name: draft.name, icon: draft.icon || null };
       if (draft.list_type !== "inventory") payload.capitalize_first_letter = Boolean(draft.capitalize_first_letter);
+      if (draft.list_type === "shopping") {
+        payload.auto_delete_completed = Boolean(draft.auto_delete_completed);
+        payload.auto_delete_delay_minutes = draft.auto_delete_delay_minutes || 0;
+        payload.auto_delete_confirm = Boolean(draft.auto_delete_confirm);
+      }
       payload.use_global_categories = Boolean(draft.use_global_categories);
       payload.use_type_categories = Boolean(draft.use_type_categories);
       payload.use_global_labels = Boolean(draft.use_global_labels);
@@ -7321,9 +7348,11 @@ class HaListManagerPanel extends HTMLElement {
     });
   }
 
-  async _toggleItem(itemId) {
+  async _toggleItem(itemId, confirmed = false) {
     const item = this._findItem(itemId);
     if (!item) return;
+    const list=this._findList(item.list_id || this._selectedListId);
+    if (!confirmed && !item.completed && list?.provider !== "bring" && list?.auto_delete_completed && list.auto_delete_confirm) {this._dialog={kind:"complete-cleanup",record:item,list};this._render();return;}
     try {
       await haListManagerPanelTextRequest(this._hass, { type: `${API}/items/set_completed`, item_id: item.id, completed: !item.completed });
       await this._loadItems();
