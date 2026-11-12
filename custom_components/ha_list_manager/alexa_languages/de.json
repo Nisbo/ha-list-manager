@@ -1,0 +1,4091 @@
+{
+  "schema_version": 1,
+  "code": "de",
+  "numbers": [
+    {
+      "value": 1,
+      "phrase": "ein"
+    },
+    {
+      "value": 1,
+      "phrase": "eine"
+    },
+    {
+      "value": 1,
+      "phrase": "einem"
+    },
+    {
+      "value": 1,
+      "phrase": "einen"
+    },
+    {
+      "value": 1,
+      "phrase": "einer"
+    },
+    {
+      "value": 1,
+      "phrase": "eins"
+    },
+    {
+      "value": 2,
+      "phrase": "zwei"
+    },
+    {
+      "value": 3,
+      "phrase": "drei"
+    },
+    {
+      "value": 4,
+      "phrase": "vier"
+    },
+    {
+      "value": 5,
+      "phrase": "fünf"
+    },
+    {
+      "value": 6,
+      "phrase": "sechs"
+    },
+    {
+      "value": 7,
+      "phrase": "sieben"
+    },
+    {
+      "value": 8,
+      "phrase": "acht"
+    },
+    {
+      "value": 9,
+      "phrase": "neun"
+    },
+    {
+      "value": 10,
+      "phrase": "zehn"
+    },
+    {
+      "value": 11,
+      "phrase": "elf"
+    },
+    {
+      "value": 12,
+      "phrase": "zwölf"
+    },
+    {
+      "value": 13,
+      "phrase": "dreizehn"
+    },
+    {
+      "value": 14,
+      "phrase": "vierzehn"
+    },
+    {
+      "value": 15,
+      "phrase": "fünfzehn"
+    },
+    {
+      "value": 16,
+      "phrase": "sechzehn"
+    },
+    {
+      "value": 17,
+      "phrase": "siebzehn"
+    },
+    {
+      "value": 18,
+      "phrase": "achtzehn"
+    },
+    {
+      "value": 19,
+      "phrase": "neunzehn"
+    },
+    {
+      "value": 20,
+      "phrase": "zwanzig"
+    },
+    {
+      "value": 21,
+      "phrase": "einundzwanzig"
+    },
+    {
+      "value": 22,
+      "phrase": "zweiundzwanzig"
+    },
+    {
+      "value": 23,
+      "phrase": "dreiundzwanzig"
+    },
+    {
+      "value": 24,
+      "phrase": "vierundzwanzig"
+    },
+    {
+      "value": 25,
+      "phrase": "fünfundzwanzig"
+    },
+    {
+      "value": 26,
+      "phrase": "sechsundzwanzig"
+    },
+    {
+      "value": 27,
+      "phrase": "siebenundzwanzig"
+    },
+    {
+      "value": 28,
+      "phrase": "achtundzwanzig"
+    },
+    {
+      "value": 29,
+      "phrase": "neunundzwanzig"
+    },
+    {
+      "value": 30,
+      "phrase": "dreißig"
+    },
+    {
+      "value": 31,
+      "phrase": "einunddreißig"
+    },
+    {
+      "value": 32,
+      "phrase": "zweiunddreißig"
+    },
+    {
+      "value": 33,
+      "phrase": "dreiunddreißig"
+    },
+    {
+      "value": 34,
+      "phrase": "vierunddreißig"
+    },
+    {
+      "value": 35,
+      "phrase": "fünfunddreißig"
+    },
+    {
+      "value": 36,
+      "phrase": "sechsunddreißig"
+    },
+    {
+      "value": 37,
+      "phrase": "siebenunddreißig"
+    },
+    {
+      "value": 38,
+      "phrase": "achtunddreißig"
+    },
+    {
+      "value": 39,
+      "phrase": "neununddreißig"
+    },
+    {
+      "value": 40,
+      "phrase": "vierzig"
+    },
+    {
+      "value": 41,
+      "phrase": "einundvierzig"
+    },
+    {
+      "value": 42,
+      "phrase": "zweiundvierzig"
+    },
+    {
+      "value": 43,
+      "phrase": "dreiundvierzig"
+    },
+    {
+      "value": 44,
+      "phrase": "vierundvierzig"
+    },
+    {
+      "value": 45,
+      "phrase": "fünfundvierzig"
+    },
+    {
+      "value": 46,
+      "phrase": "sechsundvierzig"
+    },
+    {
+      "value": 47,
+      "phrase": "siebenundvierzig"
+    },
+    {
+      "value": 48,
+      "phrase": "achtundvierzig"
+    },
+    {
+      "value": 49,
+      "phrase": "neunundvierzig"
+    },
+    {
+      "value": 50,
+      "phrase": "fünfzig"
+    },
+    {
+      "value": 51,
+      "phrase": "einundfünfzig"
+    },
+    {
+      "value": 52,
+      "phrase": "zweiundfünfzig"
+    },
+    {
+      "value": 53,
+      "phrase": "dreiundfünfzig"
+    },
+    {
+      "value": 54,
+      "phrase": "vierundfünfzig"
+    },
+    {
+      "value": 55,
+      "phrase": "fünfundfünfzig"
+    },
+    {
+      "value": 56,
+      "phrase": "sechsundfünfzig"
+    },
+    {
+      "value": 57,
+      "phrase": "siebenundfünfzig"
+    },
+    {
+      "value": 58,
+      "phrase": "achtundfünfzig"
+    },
+    {
+      "value": 59,
+      "phrase": "neunundfünfzig"
+    },
+    {
+      "value": 60,
+      "phrase": "sechzig"
+    },
+    {
+      "value": 61,
+      "phrase": "einundsechzig"
+    },
+    {
+      "value": 62,
+      "phrase": "zweiundsechzig"
+    },
+    {
+      "value": 63,
+      "phrase": "dreiundsechzig"
+    },
+    {
+      "value": 64,
+      "phrase": "vierundsechzig"
+    },
+    {
+      "value": 65,
+      "phrase": "fünfundsechzig"
+    },
+    {
+      "value": 66,
+      "phrase": "sechsundsechzig"
+    },
+    {
+      "value": 67,
+      "phrase": "siebenundsechzig"
+    },
+    {
+      "value": 68,
+      "phrase": "achtundsechzig"
+    },
+    {
+      "value": 69,
+      "phrase": "neunundsechzig"
+    },
+    {
+      "value": 70,
+      "phrase": "siebzig"
+    },
+    {
+      "value": 71,
+      "phrase": "einundsiebzig"
+    },
+    {
+      "value": 72,
+      "phrase": "zweiundsiebzig"
+    },
+    {
+      "value": 73,
+      "phrase": "dreiundsiebzig"
+    },
+    {
+      "value": 74,
+      "phrase": "vierundsiebzig"
+    },
+    {
+      "value": 75,
+      "phrase": "fünfundsiebzig"
+    },
+    {
+      "value": 76,
+      "phrase": "sechsundsiebzig"
+    },
+    {
+      "value": 77,
+      "phrase": "siebenundsiebzig"
+    },
+    {
+      "value": 78,
+      "phrase": "achtundsiebzig"
+    },
+    {
+      "value": 79,
+      "phrase": "neunundsiebzig"
+    },
+    {
+      "value": 80,
+      "phrase": "achtzig"
+    },
+    {
+      "value": 81,
+      "phrase": "einundachtzig"
+    },
+    {
+      "value": 82,
+      "phrase": "zweiundachtzig"
+    },
+    {
+      "value": 83,
+      "phrase": "dreiundachtzig"
+    },
+    {
+      "value": 84,
+      "phrase": "vierundachtzig"
+    },
+    {
+      "value": 85,
+      "phrase": "fünfundachtzig"
+    },
+    {
+      "value": 86,
+      "phrase": "sechsundachtzig"
+    },
+    {
+      "value": 87,
+      "phrase": "siebenundachtzig"
+    },
+    {
+      "value": 88,
+      "phrase": "achtundachtzig"
+    },
+    {
+      "value": 89,
+      "phrase": "neunundachtzig"
+    },
+    {
+      "value": 90,
+      "phrase": "neunzig"
+    },
+    {
+      "value": 91,
+      "phrase": "einundneunzig"
+    },
+    {
+      "value": 92,
+      "phrase": "zweiundneunzig"
+    },
+    {
+      "value": 93,
+      "phrase": "dreiundneunzig"
+    },
+    {
+      "value": 94,
+      "phrase": "vierundneunzig"
+    },
+    {
+      "value": 95,
+      "phrase": "fünfundneunzig"
+    },
+    {
+      "value": 96,
+      "phrase": "sechsundneunzig"
+    },
+    {
+      "value": 97,
+      "phrase": "siebenundneunzig"
+    },
+    {
+      "value": 98,
+      "phrase": "achtundneunzig"
+    },
+    {
+      "value": 99,
+      "phrase": "neunundneunzig"
+    },
+    {
+      "value": 100,
+      "phrase": "einhundert"
+    },
+    {
+      "value": 100,
+      "phrase": "hundert"
+    },
+    {
+      "value": 101,
+      "phrase": "einhundert ein"
+    },
+    {
+      "value": 102,
+      "phrase": "einhundert zwei"
+    },
+    {
+      "value": 103,
+      "phrase": "einhundert drei"
+    },
+    {
+      "value": 104,
+      "phrase": "einhundert vier"
+    },
+    {
+      "value": 105,
+      "phrase": "einhundert fünf"
+    },
+    {
+      "value": 106,
+      "phrase": "einhundert sechs"
+    },
+    {
+      "value": 107,
+      "phrase": "einhundert sieben"
+    },
+    {
+      "value": 108,
+      "phrase": "einhundert acht"
+    },
+    {
+      "value": 109,
+      "phrase": "einhundert neun"
+    },
+    {
+      "value": 110,
+      "phrase": "einhundert zehn"
+    },
+    {
+      "value": 111,
+      "phrase": "einhundert elf"
+    },
+    {
+      "value": 112,
+      "phrase": "einhundert zwölf"
+    },
+    {
+      "value": 113,
+      "phrase": "einhundert dreizehn"
+    },
+    {
+      "value": 114,
+      "phrase": "einhundert vierzehn"
+    },
+    {
+      "value": 115,
+      "phrase": "einhundert fünfzehn"
+    },
+    {
+      "value": 116,
+      "phrase": "einhundert sechzehn"
+    },
+    {
+      "value": 117,
+      "phrase": "einhundert siebzehn"
+    },
+    {
+      "value": 118,
+      "phrase": "einhundert achtzehn"
+    },
+    {
+      "value": 119,
+      "phrase": "einhundert neunzehn"
+    },
+    {
+      "value": 120,
+      "phrase": "einhundert zwanzig"
+    },
+    {
+      "value": 121,
+      "phrase": "einhundert einundzwanzig"
+    },
+    {
+      "value": 122,
+      "phrase": "einhundert zweiundzwanzig"
+    },
+    {
+      "value": 123,
+      "phrase": "einhundert dreiundzwanzig"
+    },
+    {
+      "value": 124,
+      "phrase": "einhundert vierundzwanzig"
+    },
+    {
+      "value": 125,
+      "phrase": "einhundert fünfundzwanzig"
+    },
+    {
+      "value": 126,
+      "phrase": "einhundert sechsundzwanzig"
+    },
+    {
+      "value": 127,
+      "phrase": "einhundert siebenundzwanzig"
+    },
+    {
+      "value": 128,
+      "phrase": "einhundert achtundzwanzig"
+    },
+    {
+      "value": 129,
+      "phrase": "einhundert neunundzwanzig"
+    },
+    {
+      "value": 130,
+      "phrase": "einhundert dreißig"
+    },
+    {
+      "value": 131,
+      "phrase": "einhundert einunddreißig"
+    },
+    {
+      "value": 132,
+      "phrase": "einhundert zweiunddreißig"
+    },
+    {
+      "value": 133,
+      "phrase": "einhundert dreiunddreißig"
+    },
+    {
+      "value": 134,
+      "phrase": "einhundert vierunddreißig"
+    },
+    {
+      "value": 135,
+      "phrase": "einhundert fünfunddreißig"
+    },
+    {
+      "value": 136,
+      "phrase": "einhundert sechsunddreißig"
+    },
+    {
+      "value": 137,
+      "phrase": "einhundert siebenunddreißig"
+    },
+    {
+      "value": 138,
+      "phrase": "einhundert achtunddreißig"
+    },
+    {
+      "value": 139,
+      "phrase": "einhundert neununddreißig"
+    },
+    {
+      "value": 140,
+      "phrase": "einhundert vierzig"
+    },
+    {
+      "value": 141,
+      "phrase": "einhundert einundvierzig"
+    },
+    {
+      "value": 142,
+      "phrase": "einhundert zweiundvierzig"
+    },
+    {
+      "value": 143,
+      "phrase": "einhundert dreiundvierzig"
+    },
+    {
+      "value": 144,
+      "phrase": "einhundert vierundvierzig"
+    },
+    {
+      "value": 145,
+      "phrase": "einhundert fünfundvierzig"
+    },
+    {
+      "value": 146,
+      "phrase": "einhundert sechsundvierzig"
+    },
+    {
+      "value": 147,
+      "phrase": "einhundert siebenundvierzig"
+    },
+    {
+      "value": 148,
+      "phrase": "einhundert achtundvierzig"
+    },
+    {
+      "value": 149,
+      "phrase": "einhundert neunundvierzig"
+    },
+    {
+      "value": 150,
+      "phrase": "einhundert fünfzig"
+    },
+    {
+      "value": 151,
+      "phrase": "einhundert einundfünfzig"
+    },
+    {
+      "value": 152,
+      "phrase": "einhundert zweiundfünfzig"
+    },
+    {
+      "value": 153,
+      "phrase": "einhundert dreiundfünfzig"
+    },
+    {
+      "value": 154,
+      "phrase": "einhundert vierundfünfzig"
+    },
+    {
+      "value": 155,
+      "phrase": "einhundert fünfundfünfzig"
+    },
+    {
+      "value": 156,
+      "phrase": "einhundert sechsundfünfzig"
+    },
+    {
+      "value": 157,
+      "phrase": "einhundert siebenundfünfzig"
+    },
+    {
+      "value": 158,
+      "phrase": "einhundert achtundfünfzig"
+    },
+    {
+      "value": 159,
+      "phrase": "einhundert neunundfünfzig"
+    },
+    {
+      "value": 160,
+      "phrase": "einhundert sechzig"
+    },
+    {
+      "value": 161,
+      "phrase": "einhundert einundsechzig"
+    },
+    {
+      "value": 162,
+      "phrase": "einhundert zweiundsechzig"
+    },
+    {
+      "value": 163,
+      "phrase": "einhundert dreiundsechzig"
+    },
+    {
+      "value": 164,
+      "phrase": "einhundert vierundsechzig"
+    },
+    {
+      "value": 165,
+      "phrase": "einhundert fünfundsechzig"
+    },
+    {
+      "value": 166,
+      "phrase": "einhundert sechsundsechzig"
+    },
+    {
+      "value": 167,
+      "phrase": "einhundert siebenundsechzig"
+    },
+    {
+      "value": 168,
+      "phrase": "einhundert achtundsechzig"
+    },
+    {
+      "value": 169,
+      "phrase": "einhundert neunundsechzig"
+    },
+    {
+      "value": 170,
+      "phrase": "einhundert siebzig"
+    },
+    {
+      "value": 171,
+      "phrase": "einhundert einundsiebzig"
+    },
+    {
+      "value": 172,
+      "phrase": "einhundert zweiundsiebzig"
+    },
+    {
+      "value": 173,
+      "phrase": "einhundert dreiundsiebzig"
+    },
+    {
+      "value": 174,
+      "phrase": "einhundert vierundsiebzig"
+    },
+    {
+      "value": 175,
+      "phrase": "einhundert fünfundsiebzig"
+    },
+    {
+      "value": 176,
+      "phrase": "einhundert sechsundsiebzig"
+    },
+    {
+      "value": 177,
+      "phrase": "einhundert siebenundsiebzig"
+    },
+    {
+      "value": 178,
+      "phrase": "einhundert achtundsiebzig"
+    },
+    {
+      "value": 179,
+      "phrase": "einhundert neunundsiebzig"
+    },
+    {
+      "value": 180,
+      "phrase": "einhundert achtzig"
+    },
+    {
+      "value": 181,
+      "phrase": "einhundert einundachtzig"
+    },
+    {
+      "value": 182,
+      "phrase": "einhundert zweiundachtzig"
+    },
+    {
+      "value": 183,
+      "phrase": "einhundert dreiundachtzig"
+    },
+    {
+      "value": 184,
+      "phrase": "einhundert vierundachtzig"
+    },
+    {
+      "value": 185,
+      "phrase": "einhundert fünfundachtzig"
+    },
+    {
+      "value": 186,
+      "phrase": "einhundert sechsundachtzig"
+    },
+    {
+      "value": 187,
+      "phrase": "einhundert siebenundachtzig"
+    },
+    {
+      "value": 188,
+      "phrase": "einhundert achtundachtzig"
+    },
+    {
+      "value": 189,
+      "phrase": "einhundert neunundachtzig"
+    },
+    {
+      "value": 190,
+      "phrase": "einhundert neunzig"
+    },
+    {
+      "value": 191,
+      "phrase": "einhundert einundneunzig"
+    },
+    {
+      "value": 192,
+      "phrase": "einhundert zweiundneunzig"
+    },
+    {
+      "value": 193,
+      "phrase": "einhundert dreiundneunzig"
+    },
+    {
+      "value": 194,
+      "phrase": "einhundert vierundneunzig"
+    },
+    {
+      "value": 195,
+      "phrase": "einhundert fünfundneunzig"
+    },
+    {
+      "value": 196,
+      "phrase": "einhundert sechsundneunzig"
+    },
+    {
+      "value": 197,
+      "phrase": "einhundert siebenundneunzig"
+    },
+    {
+      "value": 198,
+      "phrase": "einhundert achtundneunzig"
+    },
+    {
+      "value": 199,
+      "phrase": "einhundert neunundneunzig"
+    },
+    {
+      "value": 200,
+      "phrase": "zweihundert"
+    },
+    {
+      "value": 201,
+      "phrase": "zweihundert ein"
+    },
+    {
+      "value": 202,
+      "phrase": "zweihundert zwei"
+    },
+    {
+      "value": 203,
+      "phrase": "zweihundert drei"
+    },
+    {
+      "value": 204,
+      "phrase": "zweihundert vier"
+    },
+    {
+      "value": 205,
+      "phrase": "zweihundert fünf"
+    },
+    {
+      "value": 206,
+      "phrase": "zweihundert sechs"
+    },
+    {
+      "value": 207,
+      "phrase": "zweihundert sieben"
+    },
+    {
+      "value": 208,
+      "phrase": "zweihundert acht"
+    },
+    {
+      "value": 209,
+      "phrase": "zweihundert neun"
+    },
+    {
+      "value": 210,
+      "phrase": "zweihundert zehn"
+    },
+    {
+      "value": 211,
+      "phrase": "zweihundert elf"
+    },
+    {
+      "value": 212,
+      "phrase": "zweihundert zwölf"
+    },
+    {
+      "value": 213,
+      "phrase": "zweihundert dreizehn"
+    },
+    {
+      "value": 214,
+      "phrase": "zweihundert vierzehn"
+    },
+    {
+      "value": 215,
+      "phrase": "zweihundert fünfzehn"
+    },
+    {
+      "value": 216,
+      "phrase": "zweihundert sechzehn"
+    },
+    {
+      "value": 217,
+      "phrase": "zweihundert siebzehn"
+    },
+    {
+      "value": 218,
+      "phrase": "zweihundert achtzehn"
+    },
+    {
+      "value": 219,
+      "phrase": "zweihundert neunzehn"
+    },
+    {
+      "value": 220,
+      "phrase": "zweihundert zwanzig"
+    },
+    {
+      "value": 221,
+      "phrase": "zweihundert einundzwanzig"
+    },
+    {
+      "value": 222,
+      "phrase": "zweihundert zweiundzwanzig"
+    },
+    {
+      "value": 223,
+      "phrase": "zweihundert dreiundzwanzig"
+    },
+    {
+      "value": 224,
+      "phrase": "zweihundert vierundzwanzig"
+    },
+    {
+      "value": 225,
+      "phrase": "zweihundert fünfundzwanzig"
+    },
+    {
+      "value": 226,
+      "phrase": "zweihundert sechsundzwanzig"
+    },
+    {
+      "value": 227,
+      "phrase": "zweihundert siebenundzwanzig"
+    },
+    {
+      "value": 228,
+      "phrase": "zweihundert achtundzwanzig"
+    },
+    {
+      "value": 229,
+      "phrase": "zweihundert neunundzwanzig"
+    },
+    {
+      "value": 230,
+      "phrase": "zweihundert dreißig"
+    },
+    {
+      "value": 231,
+      "phrase": "zweihundert einunddreißig"
+    },
+    {
+      "value": 232,
+      "phrase": "zweihundert zweiunddreißig"
+    },
+    {
+      "value": 233,
+      "phrase": "zweihundert dreiunddreißig"
+    },
+    {
+      "value": 234,
+      "phrase": "zweihundert vierunddreißig"
+    },
+    {
+      "value": 235,
+      "phrase": "zweihundert fünfunddreißig"
+    },
+    {
+      "value": 236,
+      "phrase": "zweihundert sechsunddreißig"
+    },
+    {
+      "value": 237,
+      "phrase": "zweihundert siebenunddreißig"
+    },
+    {
+      "value": 238,
+      "phrase": "zweihundert achtunddreißig"
+    },
+    {
+      "value": 239,
+      "phrase": "zweihundert neununddreißig"
+    },
+    {
+      "value": 240,
+      "phrase": "zweihundert vierzig"
+    },
+    {
+      "value": 241,
+      "phrase": "zweihundert einundvierzig"
+    },
+    {
+      "value": 242,
+      "phrase": "zweihundert zweiundvierzig"
+    },
+    {
+      "value": 243,
+      "phrase": "zweihundert dreiundvierzig"
+    },
+    {
+      "value": 244,
+      "phrase": "zweihundert vierundvierzig"
+    },
+    {
+      "value": 245,
+      "phrase": "zweihundert fünfundvierzig"
+    },
+    {
+      "value": 246,
+      "phrase": "zweihundert sechsundvierzig"
+    },
+    {
+      "value": 247,
+      "phrase": "zweihundert siebenundvierzig"
+    },
+    {
+      "value": 248,
+      "phrase": "zweihundert achtundvierzig"
+    },
+    {
+      "value": 249,
+      "phrase": "zweihundert neunundvierzig"
+    },
+    {
+      "value": 250,
+      "phrase": "zweihundert fünfzig"
+    },
+    {
+      "value": 251,
+      "phrase": "zweihundert einundfünfzig"
+    },
+    {
+      "value": 252,
+      "phrase": "zweihundert zweiundfünfzig"
+    },
+    {
+      "value": 253,
+      "phrase": "zweihundert dreiundfünfzig"
+    },
+    {
+      "value": 254,
+      "phrase": "zweihundert vierundfünfzig"
+    },
+    {
+      "value": 255,
+      "phrase": "zweihundert fünfundfünfzig"
+    },
+    {
+      "value": 256,
+      "phrase": "zweihundert sechsundfünfzig"
+    },
+    {
+      "value": 257,
+      "phrase": "zweihundert siebenundfünfzig"
+    },
+    {
+      "value": 258,
+      "phrase": "zweihundert achtundfünfzig"
+    },
+    {
+      "value": 259,
+      "phrase": "zweihundert neunundfünfzig"
+    },
+    {
+      "value": 260,
+      "phrase": "zweihundert sechzig"
+    },
+    {
+      "value": 261,
+      "phrase": "zweihundert einundsechzig"
+    },
+    {
+      "value": 262,
+      "phrase": "zweihundert zweiundsechzig"
+    },
+    {
+      "value": 263,
+      "phrase": "zweihundert dreiundsechzig"
+    },
+    {
+      "value": 264,
+      "phrase": "zweihundert vierundsechzig"
+    },
+    {
+      "value": 265,
+      "phrase": "zweihundert fünfundsechzig"
+    },
+    {
+      "value": 266,
+      "phrase": "zweihundert sechsundsechzig"
+    },
+    {
+      "value": 267,
+      "phrase": "zweihundert siebenundsechzig"
+    },
+    {
+      "value": 268,
+      "phrase": "zweihundert achtundsechzig"
+    },
+    {
+      "value": 269,
+      "phrase": "zweihundert neunundsechzig"
+    },
+    {
+      "value": 270,
+      "phrase": "zweihundert siebzig"
+    },
+    {
+      "value": 271,
+      "phrase": "zweihundert einundsiebzig"
+    },
+    {
+      "value": 272,
+      "phrase": "zweihundert zweiundsiebzig"
+    },
+    {
+      "value": 273,
+      "phrase": "zweihundert dreiundsiebzig"
+    },
+    {
+      "value": 274,
+      "phrase": "zweihundert vierundsiebzig"
+    },
+    {
+      "value": 275,
+      "phrase": "zweihundert fünfundsiebzig"
+    },
+    {
+      "value": 276,
+      "phrase": "zweihundert sechsundsiebzig"
+    },
+    {
+      "value": 277,
+      "phrase": "zweihundert siebenundsiebzig"
+    },
+    {
+      "value": 278,
+      "phrase": "zweihundert achtundsiebzig"
+    },
+    {
+      "value": 279,
+      "phrase": "zweihundert neunundsiebzig"
+    },
+    {
+      "value": 280,
+      "phrase": "zweihundert achtzig"
+    },
+    {
+      "value": 281,
+      "phrase": "zweihundert einundachtzig"
+    },
+    {
+      "value": 282,
+      "phrase": "zweihundert zweiundachtzig"
+    },
+    {
+      "value": 283,
+      "phrase": "zweihundert dreiundachtzig"
+    },
+    {
+      "value": 284,
+      "phrase": "zweihundert vierundachtzig"
+    },
+    {
+      "value": 285,
+      "phrase": "zweihundert fünfundachtzig"
+    },
+    {
+      "value": 286,
+      "phrase": "zweihundert sechsundachtzig"
+    },
+    {
+      "value": 287,
+      "phrase": "zweihundert siebenundachtzig"
+    },
+    {
+      "value": 288,
+      "phrase": "zweihundert achtundachtzig"
+    },
+    {
+      "value": 289,
+      "phrase": "zweihundert neunundachtzig"
+    },
+    {
+      "value": 290,
+      "phrase": "zweihundert neunzig"
+    },
+    {
+      "value": 291,
+      "phrase": "zweihundert einundneunzig"
+    },
+    {
+      "value": 292,
+      "phrase": "zweihundert zweiundneunzig"
+    },
+    {
+      "value": 293,
+      "phrase": "zweihundert dreiundneunzig"
+    },
+    {
+      "value": 294,
+      "phrase": "zweihundert vierundneunzig"
+    },
+    {
+      "value": 295,
+      "phrase": "zweihundert fünfundneunzig"
+    },
+    {
+      "value": 296,
+      "phrase": "zweihundert sechsundneunzig"
+    },
+    {
+      "value": 297,
+      "phrase": "zweihundert siebenundneunzig"
+    },
+    {
+      "value": 298,
+      "phrase": "zweihundert achtundneunzig"
+    },
+    {
+      "value": 299,
+      "phrase": "zweihundert neunundneunzig"
+    },
+    {
+      "value": 300,
+      "phrase": "dreihundert"
+    },
+    {
+      "value": 301,
+      "phrase": "dreihundert ein"
+    },
+    {
+      "value": 302,
+      "phrase": "dreihundert zwei"
+    },
+    {
+      "value": 303,
+      "phrase": "dreihundert drei"
+    },
+    {
+      "value": 304,
+      "phrase": "dreihundert vier"
+    },
+    {
+      "value": 305,
+      "phrase": "dreihundert fünf"
+    },
+    {
+      "value": 306,
+      "phrase": "dreihundert sechs"
+    },
+    {
+      "value": 307,
+      "phrase": "dreihundert sieben"
+    },
+    {
+      "value": 308,
+      "phrase": "dreihundert acht"
+    },
+    {
+      "value": 309,
+      "phrase": "dreihundert neun"
+    },
+    {
+      "value": 310,
+      "phrase": "dreihundert zehn"
+    },
+    {
+      "value": 311,
+      "phrase": "dreihundert elf"
+    },
+    {
+      "value": 312,
+      "phrase": "dreihundert zwölf"
+    },
+    {
+      "value": 313,
+      "phrase": "dreihundert dreizehn"
+    },
+    {
+      "value": 314,
+      "phrase": "dreihundert vierzehn"
+    },
+    {
+      "value": 315,
+      "phrase": "dreihundert fünfzehn"
+    },
+    {
+      "value": 316,
+      "phrase": "dreihundert sechzehn"
+    },
+    {
+      "value": 317,
+      "phrase": "dreihundert siebzehn"
+    },
+    {
+      "value": 318,
+      "phrase": "dreihundert achtzehn"
+    },
+    {
+      "value": 319,
+      "phrase": "dreihundert neunzehn"
+    },
+    {
+      "value": 320,
+      "phrase": "dreihundert zwanzig"
+    },
+    {
+      "value": 321,
+      "phrase": "dreihundert einundzwanzig"
+    },
+    {
+      "value": 322,
+      "phrase": "dreihundert zweiundzwanzig"
+    },
+    {
+      "value": 323,
+      "phrase": "dreihundert dreiundzwanzig"
+    },
+    {
+      "value": 324,
+      "phrase": "dreihundert vierundzwanzig"
+    },
+    {
+      "value": 325,
+      "phrase": "dreihundert fünfundzwanzig"
+    },
+    {
+      "value": 326,
+      "phrase": "dreihundert sechsundzwanzig"
+    },
+    {
+      "value": 327,
+      "phrase": "dreihundert siebenundzwanzig"
+    },
+    {
+      "value": 328,
+      "phrase": "dreihundert achtundzwanzig"
+    },
+    {
+      "value": 329,
+      "phrase": "dreihundert neunundzwanzig"
+    },
+    {
+      "value": 330,
+      "phrase": "dreihundert dreißig"
+    },
+    {
+      "value": 331,
+      "phrase": "dreihundert einunddreißig"
+    },
+    {
+      "value": 332,
+      "phrase": "dreihundert zweiunddreißig"
+    },
+    {
+      "value": 333,
+      "phrase": "dreihundert dreiunddreißig"
+    },
+    {
+      "value": 334,
+      "phrase": "dreihundert vierunddreißig"
+    },
+    {
+      "value": 335,
+      "phrase": "dreihundert fünfunddreißig"
+    },
+    {
+      "value": 336,
+      "phrase": "dreihundert sechsunddreißig"
+    },
+    {
+      "value": 337,
+      "phrase": "dreihundert siebenunddreißig"
+    },
+    {
+      "value": 338,
+      "phrase": "dreihundert achtunddreißig"
+    },
+    {
+      "value": 339,
+      "phrase": "dreihundert neununddreißig"
+    },
+    {
+      "value": 340,
+      "phrase": "dreihundert vierzig"
+    },
+    {
+      "value": 341,
+      "phrase": "dreihundert einundvierzig"
+    },
+    {
+      "value": 342,
+      "phrase": "dreihundert zweiundvierzig"
+    },
+    {
+      "value": 343,
+      "phrase": "dreihundert dreiundvierzig"
+    },
+    {
+      "value": 344,
+      "phrase": "dreihundert vierundvierzig"
+    },
+    {
+      "value": 345,
+      "phrase": "dreihundert fünfundvierzig"
+    },
+    {
+      "value": 346,
+      "phrase": "dreihundert sechsundvierzig"
+    },
+    {
+      "value": 347,
+      "phrase": "dreihundert siebenundvierzig"
+    },
+    {
+      "value": 348,
+      "phrase": "dreihundert achtundvierzig"
+    },
+    {
+      "value": 349,
+      "phrase": "dreihundert neunundvierzig"
+    },
+    {
+      "value": 350,
+      "phrase": "dreihundert fünfzig"
+    },
+    {
+      "value": 351,
+      "phrase": "dreihundert einundfünfzig"
+    },
+    {
+      "value": 352,
+      "phrase": "dreihundert zweiundfünfzig"
+    },
+    {
+      "value": 353,
+      "phrase": "dreihundert dreiundfünfzig"
+    },
+    {
+      "value": 354,
+      "phrase": "dreihundert vierundfünfzig"
+    },
+    {
+      "value": 355,
+      "phrase": "dreihundert fünfundfünfzig"
+    },
+    {
+      "value": 356,
+      "phrase": "dreihundert sechsundfünfzig"
+    },
+    {
+      "value": 357,
+      "phrase": "dreihundert siebenundfünfzig"
+    },
+    {
+      "value": 358,
+      "phrase": "dreihundert achtundfünfzig"
+    },
+    {
+      "value": 359,
+      "phrase": "dreihundert neunundfünfzig"
+    },
+    {
+      "value": 360,
+      "phrase": "dreihundert sechzig"
+    },
+    {
+      "value": 361,
+      "phrase": "dreihundert einundsechzig"
+    },
+    {
+      "value": 362,
+      "phrase": "dreihundert zweiundsechzig"
+    },
+    {
+      "value": 363,
+      "phrase": "dreihundert dreiundsechzig"
+    },
+    {
+      "value": 364,
+      "phrase": "dreihundert vierundsechzig"
+    },
+    {
+      "value": 365,
+      "phrase": "dreihundert fünfundsechzig"
+    },
+    {
+      "value": 366,
+      "phrase": "dreihundert sechsundsechzig"
+    },
+    {
+      "value": 367,
+      "phrase": "dreihundert siebenundsechzig"
+    },
+    {
+      "value": 368,
+      "phrase": "dreihundert achtundsechzig"
+    },
+    {
+      "value": 369,
+      "phrase": "dreihundert neunundsechzig"
+    },
+    {
+      "value": 370,
+      "phrase": "dreihundert siebzig"
+    },
+    {
+      "value": 371,
+      "phrase": "dreihundert einundsiebzig"
+    },
+    {
+      "value": 372,
+      "phrase": "dreihundert zweiundsiebzig"
+    },
+    {
+      "value": 373,
+      "phrase": "dreihundert dreiundsiebzig"
+    },
+    {
+      "value": 374,
+      "phrase": "dreihundert vierundsiebzig"
+    },
+    {
+      "value": 375,
+      "phrase": "dreihundert fünfundsiebzig"
+    },
+    {
+      "value": 376,
+      "phrase": "dreihundert sechsundsiebzig"
+    },
+    {
+      "value": 377,
+      "phrase": "dreihundert siebenundsiebzig"
+    },
+    {
+      "value": 378,
+      "phrase": "dreihundert achtundsiebzig"
+    },
+    {
+      "value": 379,
+      "phrase": "dreihundert neunundsiebzig"
+    },
+    {
+      "value": 380,
+      "phrase": "dreihundert achtzig"
+    },
+    {
+      "value": 381,
+      "phrase": "dreihundert einundachtzig"
+    },
+    {
+      "value": 382,
+      "phrase": "dreihundert zweiundachtzig"
+    },
+    {
+      "value": 383,
+      "phrase": "dreihundert dreiundachtzig"
+    },
+    {
+      "value": 384,
+      "phrase": "dreihundert vierundachtzig"
+    },
+    {
+      "value": 385,
+      "phrase": "dreihundert fünfundachtzig"
+    },
+    {
+      "value": 386,
+      "phrase": "dreihundert sechsundachtzig"
+    },
+    {
+      "value": 387,
+      "phrase": "dreihundert siebenundachtzig"
+    },
+    {
+      "value": 388,
+      "phrase": "dreihundert achtundachtzig"
+    },
+    {
+      "value": 389,
+      "phrase": "dreihundert neunundachtzig"
+    },
+    {
+      "value": 390,
+      "phrase": "dreihundert neunzig"
+    },
+    {
+      "value": 391,
+      "phrase": "dreihundert einundneunzig"
+    },
+    {
+      "value": 392,
+      "phrase": "dreihundert zweiundneunzig"
+    },
+    {
+      "value": 393,
+      "phrase": "dreihundert dreiundneunzig"
+    },
+    {
+      "value": 394,
+      "phrase": "dreihundert vierundneunzig"
+    },
+    {
+      "value": 395,
+      "phrase": "dreihundert fünfundneunzig"
+    },
+    {
+      "value": 396,
+      "phrase": "dreihundert sechsundneunzig"
+    },
+    {
+      "value": 397,
+      "phrase": "dreihundert siebenundneunzig"
+    },
+    {
+      "value": 398,
+      "phrase": "dreihundert achtundneunzig"
+    },
+    {
+      "value": 399,
+      "phrase": "dreihundert neunundneunzig"
+    },
+    {
+      "value": 400,
+      "phrase": "vierhundert"
+    },
+    {
+      "value": 401,
+      "phrase": "vierhundert ein"
+    },
+    {
+      "value": 402,
+      "phrase": "vierhundert zwei"
+    },
+    {
+      "value": 403,
+      "phrase": "vierhundert drei"
+    },
+    {
+      "value": 404,
+      "phrase": "vierhundert vier"
+    },
+    {
+      "value": 405,
+      "phrase": "vierhundert fünf"
+    },
+    {
+      "value": 406,
+      "phrase": "vierhundert sechs"
+    },
+    {
+      "value": 407,
+      "phrase": "vierhundert sieben"
+    },
+    {
+      "value": 408,
+      "phrase": "vierhundert acht"
+    },
+    {
+      "value": 409,
+      "phrase": "vierhundert neun"
+    },
+    {
+      "value": 410,
+      "phrase": "vierhundert zehn"
+    },
+    {
+      "value": 411,
+      "phrase": "vierhundert elf"
+    },
+    {
+      "value": 412,
+      "phrase": "vierhundert zwölf"
+    },
+    {
+      "value": 413,
+      "phrase": "vierhundert dreizehn"
+    },
+    {
+      "value": 414,
+      "phrase": "vierhundert vierzehn"
+    },
+    {
+      "value": 415,
+      "phrase": "vierhundert fünfzehn"
+    },
+    {
+      "value": 416,
+      "phrase": "vierhundert sechzehn"
+    },
+    {
+      "value": 417,
+      "phrase": "vierhundert siebzehn"
+    },
+    {
+      "value": 418,
+      "phrase": "vierhundert achtzehn"
+    },
+    {
+      "value": 419,
+      "phrase": "vierhundert neunzehn"
+    },
+    {
+      "value": 420,
+      "phrase": "vierhundert zwanzig"
+    },
+    {
+      "value": 421,
+      "phrase": "vierhundert einundzwanzig"
+    },
+    {
+      "value": 422,
+      "phrase": "vierhundert zweiundzwanzig"
+    },
+    {
+      "value": 423,
+      "phrase": "vierhundert dreiundzwanzig"
+    },
+    {
+      "value": 424,
+      "phrase": "vierhundert vierundzwanzig"
+    },
+    {
+      "value": 425,
+      "phrase": "vierhundert fünfundzwanzig"
+    },
+    {
+      "value": 426,
+      "phrase": "vierhundert sechsundzwanzig"
+    },
+    {
+      "value": 427,
+      "phrase": "vierhundert siebenundzwanzig"
+    },
+    {
+      "value": 428,
+      "phrase": "vierhundert achtundzwanzig"
+    },
+    {
+      "value": 429,
+      "phrase": "vierhundert neunundzwanzig"
+    },
+    {
+      "value": 430,
+      "phrase": "vierhundert dreißig"
+    },
+    {
+      "value": 431,
+      "phrase": "vierhundert einunddreißig"
+    },
+    {
+      "value": 432,
+      "phrase": "vierhundert zweiunddreißig"
+    },
+    {
+      "value": 433,
+      "phrase": "vierhundert dreiunddreißig"
+    },
+    {
+      "value": 434,
+      "phrase": "vierhundert vierunddreißig"
+    },
+    {
+      "value": 435,
+      "phrase": "vierhundert fünfunddreißig"
+    },
+    {
+      "value": 436,
+      "phrase": "vierhundert sechsunddreißig"
+    },
+    {
+      "value": 437,
+      "phrase": "vierhundert siebenunddreißig"
+    },
+    {
+      "value": 438,
+      "phrase": "vierhundert achtunddreißig"
+    },
+    {
+      "value": 439,
+      "phrase": "vierhundert neununddreißig"
+    },
+    {
+      "value": 440,
+      "phrase": "vierhundert vierzig"
+    },
+    {
+      "value": 441,
+      "phrase": "vierhundert einundvierzig"
+    },
+    {
+      "value": 442,
+      "phrase": "vierhundert zweiundvierzig"
+    },
+    {
+      "value": 443,
+      "phrase": "vierhundert dreiundvierzig"
+    },
+    {
+      "value": 444,
+      "phrase": "vierhundert vierundvierzig"
+    },
+    {
+      "value": 445,
+      "phrase": "vierhundert fünfundvierzig"
+    },
+    {
+      "value": 446,
+      "phrase": "vierhundert sechsundvierzig"
+    },
+    {
+      "value": 447,
+      "phrase": "vierhundert siebenundvierzig"
+    },
+    {
+      "value": 448,
+      "phrase": "vierhundert achtundvierzig"
+    },
+    {
+      "value": 449,
+      "phrase": "vierhundert neunundvierzig"
+    },
+    {
+      "value": 450,
+      "phrase": "vierhundert fünfzig"
+    },
+    {
+      "value": 451,
+      "phrase": "vierhundert einundfünfzig"
+    },
+    {
+      "value": 452,
+      "phrase": "vierhundert zweiundfünfzig"
+    },
+    {
+      "value": 453,
+      "phrase": "vierhundert dreiundfünfzig"
+    },
+    {
+      "value": 454,
+      "phrase": "vierhundert vierundfünfzig"
+    },
+    {
+      "value": 455,
+      "phrase": "vierhundert fünfundfünfzig"
+    },
+    {
+      "value": 456,
+      "phrase": "vierhundert sechsundfünfzig"
+    },
+    {
+      "value": 457,
+      "phrase": "vierhundert siebenundfünfzig"
+    },
+    {
+      "value": 458,
+      "phrase": "vierhundert achtundfünfzig"
+    },
+    {
+      "value": 459,
+      "phrase": "vierhundert neunundfünfzig"
+    },
+    {
+      "value": 460,
+      "phrase": "vierhundert sechzig"
+    },
+    {
+      "value": 461,
+      "phrase": "vierhundert einundsechzig"
+    },
+    {
+      "value": 462,
+      "phrase": "vierhundert zweiundsechzig"
+    },
+    {
+      "value": 463,
+      "phrase": "vierhundert dreiundsechzig"
+    },
+    {
+      "value": 464,
+      "phrase": "vierhundert vierundsechzig"
+    },
+    {
+      "value": 465,
+      "phrase": "vierhundert fünfundsechzig"
+    },
+    {
+      "value": 466,
+      "phrase": "vierhundert sechsundsechzig"
+    },
+    {
+      "value": 467,
+      "phrase": "vierhundert siebenundsechzig"
+    },
+    {
+      "value": 468,
+      "phrase": "vierhundert achtundsechzig"
+    },
+    {
+      "value": 469,
+      "phrase": "vierhundert neunundsechzig"
+    },
+    {
+      "value": 470,
+      "phrase": "vierhundert siebzig"
+    },
+    {
+      "value": 471,
+      "phrase": "vierhundert einundsiebzig"
+    },
+    {
+      "value": 472,
+      "phrase": "vierhundert zweiundsiebzig"
+    },
+    {
+      "value": 473,
+      "phrase": "vierhundert dreiundsiebzig"
+    },
+    {
+      "value": 474,
+      "phrase": "vierhundert vierundsiebzig"
+    },
+    {
+      "value": 475,
+      "phrase": "vierhundert fünfundsiebzig"
+    },
+    {
+      "value": 476,
+      "phrase": "vierhundert sechsundsiebzig"
+    },
+    {
+      "value": 477,
+      "phrase": "vierhundert siebenundsiebzig"
+    },
+    {
+      "value": 478,
+      "phrase": "vierhundert achtundsiebzig"
+    },
+    {
+      "value": 479,
+      "phrase": "vierhundert neunundsiebzig"
+    },
+    {
+      "value": 480,
+      "phrase": "vierhundert achtzig"
+    },
+    {
+      "value": 481,
+      "phrase": "vierhundert einundachtzig"
+    },
+    {
+      "value": 482,
+      "phrase": "vierhundert zweiundachtzig"
+    },
+    {
+      "value": 483,
+      "phrase": "vierhundert dreiundachtzig"
+    },
+    {
+      "value": 484,
+      "phrase": "vierhundert vierundachtzig"
+    },
+    {
+      "value": 485,
+      "phrase": "vierhundert fünfundachtzig"
+    },
+    {
+      "value": 486,
+      "phrase": "vierhundert sechsundachtzig"
+    },
+    {
+      "value": 487,
+      "phrase": "vierhundert siebenundachtzig"
+    },
+    {
+      "value": 488,
+      "phrase": "vierhundert achtundachtzig"
+    },
+    {
+      "value": 489,
+      "phrase": "vierhundert neunundachtzig"
+    },
+    {
+      "value": 490,
+      "phrase": "vierhundert neunzig"
+    },
+    {
+      "value": 491,
+      "phrase": "vierhundert einundneunzig"
+    },
+    {
+      "value": 492,
+      "phrase": "vierhundert zweiundneunzig"
+    },
+    {
+      "value": 493,
+      "phrase": "vierhundert dreiundneunzig"
+    },
+    {
+      "value": 494,
+      "phrase": "vierhundert vierundneunzig"
+    },
+    {
+      "value": 495,
+      "phrase": "vierhundert fünfundneunzig"
+    },
+    {
+      "value": 496,
+      "phrase": "vierhundert sechsundneunzig"
+    },
+    {
+      "value": 497,
+      "phrase": "vierhundert siebenundneunzig"
+    },
+    {
+      "value": 498,
+      "phrase": "vierhundert achtundneunzig"
+    },
+    {
+      "value": 499,
+      "phrase": "vierhundert neunundneunzig"
+    },
+    {
+      "value": 500,
+      "phrase": "fünfhundert"
+    },
+    {
+      "value": 501,
+      "phrase": "fünfhundert ein"
+    },
+    {
+      "value": 502,
+      "phrase": "fünfhundert zwei"
+    },
+    {
+      "value": 503,
+      "phrase": "fünfhundert drei"
+    },
+    {
+      "value": 504,
+      "phrase": "fünfhundert vier"
+    },
+    {
+      "value": 505,
+      "phrase": "fünfhundert fünf"
+    },
+    {
+      "value": 506,
+      "phrase": "fünfhundert sechs"
+    },
+    {
+      "value": 507,
+      "phrase": "fünfhundert sieben"
+    },
+    {
+      "value": 508,
+      "phrase": "fünfhundert acht"
+    },
+    {
+      "value": 509,
+      "phrase": "fünfhundert neun"
+    },
+    {
+      "value": 510,
+      "phrase": "fünfhundert zehn"
+    },
+    {
+      "value": 511,
+      "phrase": "fünfhundert elf"
+    },
+    {
+      "value": 512,
+      "phrase": "fünfhundert zwölf"
+    },
+    {
+      "value": 513,
+      "phrase": "fünfhundert dreizehn"
+    },
+    {
+      "value": 514,
+      "phrase": "fünfhundert vierzehn"
+    },
+    {
+      "value": 515,
+      "phrase": "fünfhundert fünfzehn"
+    },
+    {
+      "value": 516,
+      "phrase": "fünfhundert sechzehn"
+    },
+    {
+      "value": 517,
+      "phrase": "fünfhundert siebzehn"
+    },
+    {
+      "value": 518,
+      "phrase": "fünfhundert achtzehn"
+    },
+    {
+      "value": 519,
+      "phrase": "fünfhundert neunzehn"
+    },
+    {
+      "value": 520,
+      "phrase": "fünfhundert zwanzig"
+    },
+    {
+      "value": 521,
+      "phrase": "fünfhundert einundzwanzig"
+    },
+    {
+      "value": 522,
+      "phrase": "fünfhundert zweiundzwanzig"
+    },
+    {
+      "value": 523,
+      "phrase": "fünfhundert dreiundzwanzig"
+    },
+    {
+      "value": 524,
+      "phrase": "fünfhundert vierundzwanzig"
+    },
+    {
+      "value": 525,
+      "phrase": "fünfhundert fünfundzwanzig"
+    },
+    {
+      "value": 526,
+      "phrase": "fünfhundert sechsundzwanzig"
+    },
+    {
+      "value": 527,
+      "phrase": "fünfhundert siebenundzwanzig"
+    },
+    {
+      "value": 528,
+      "phrase": "fünfhundert achtundzwanzig"
+    },
+    {
+      "value": 529,
+      "phrase": "fünfhundert neunundzwanzig"
+    },
+    {
+      "value": 530,
+      "phrase": "fünfhundert dreißig"
+    },
+    {
+      "value": 531,
+      "phrase": "fünfhundert einunddreißig"
+    },
+    {
+      "value": 532,
+      "phrase": "fünfhundert zweiunddreißig"
+    },
+    {
+      "value": 533,
+      "phrase": "fünfhundert dreiunddreißig"
+    },
+    {
+      "value": 534,
+      "phrase": "fünfhundert vierunddreißig"
+    },
+    {
+      "value": 535,
+      "phrase": "fünfhundert fünfunddreißig"
+    },
+    {
+      "value": 536,
+      "phrase": "fünfhundert sechsunddreißig"
+    },
+    {
+      "value": 537,
+      "phrase": "fünfhundert siebenunddreißig"
+    },
+    {
+      "value": 538,
+      "phrase": "fünfhundert achtunddreißig"
+    },
+    {
+      "value": 539,
+      "phrase": "fünfhundert neununddreißig"
+    },
+    {
+      "value": 540,
+      "phrase": "fünfhundert vierzig"
+    },
+    {
+      "value": 541,
+      "phrase": "fünfhundert einundvierzig"
+    },
+    {
+      "value": 542,
+      "phrase": "fünfhundert zweiundvierzig"
+    },
+    {
+      "value": 543,
+      "phrase": "fünfhundert dreiundvierzig"
+    },
+    {
+      "value": 544,
+      "phrase": "fünfhundert vierundvierzig"
+    },
+    {
+      "value": 545,
+      "phrase": "fünfhundert fünfundvierzig"
+    },
+    {
+      "value": 546,
+      "phrase": "fünfhundert sechsundvierzig"
+    },
+    {
+      "value": 547,
+      "phrase": "fünfhundert siebenundvierzig"
+    },
+    {
+      "value": 548,
+      "phrase": "fünfhundert achtundvierzig"
+    },
+    {
+      "value": 549,
+      "phrase": "fünfhundert neunundvierzig"
+    },
+    {
+      "value": 550,
+      "phrase": "fünfhundert fünfzig"
+    },
+    {
+      "value": 551,
+      "phrase": "fünfhundert einundfünfzig"
+    },
+    {
+      "value": 552,
+      "phrase": "fünfhundert zweiundfünfzig"
+    },
+    {
+      "value": 553,
+      "phrase": "fünfhundert dreiundfünfzig"
+    },
+    {
+      "value": 554,
+      "phrase": "fünfhundert vierundfünfzig"
+    },
+    {
+      "value": 555,
+      "phrase": "fünfhundert fünfundfünfzig"
+    },
+    {
+      "value": 556,
+      "phrase": "fünfhundert sechsundfünfzig"
+    },
+    {
+      "value": 557,
+      "phrase": "fünfhundert siebenundfünfzig"
+    },
+    {
+      "value": 558,
+      "phrase": "fünfhundert achtundfünfzig"
+    },
+    {
+      "value": 559,
+      "phrase": "fünfhundert neunundfünfzig"
+    },
+    {
+      "value": 560,
+      "phrase": "fünfhundert sechzig"
+    },
+    {
+      "value": 561,
+      "phrase": "fünfhundert einundsechzig"
+    },
+    {
+      "value": 562,
+      "phrase": "fünfhundert zweiundsechzig"
+    },
+    {
+      "value": 563,
+      "phrase": "fünfhundert dreiundsechzig"
+    },
+    {
+      "value": 564,
+      "phrase": "fünfhundert vierundsechzig"
+    },
+    {
+      "value": 565,
+      "phrase": "fünfhundert fünfundsechzig"
+    },
+    {
+      "value": 566,
+      "phrase": "fünfhundert sechsundsechzig"
+    },
+    {
+      "value": 567,
+      "phrase": "fünfhundert siebenundsechzig"
+    },
+    {
+      "value": 568,
+      "phrase": "fünfhundert achtundsechzig"
+    },
+    {
+      "value": 569,
+      "phrase": "fünfhundert neunundsechzig"
+    },
+    {
+      "value": 570,
+      "phrase": "fünfhundert siebzig"
+    },
+    {
+      "value": 571,
+      "phrase": "fünfhundert einundsiebzig"
+    },
+    {
+      "value": 572,
+      "phrase": "fünfhundert zweiundsiebzig"
+    },
+    {
+      "value": 573,
+      "phrase": "fünfhundert dreiundsiebzig"
+    },
+    {
+      "value": 574,
+      "phrase": "fünfhundert vierundsiebzig"
+    },
+    {
+      "value": 575,
+      "phrase": "fünfhundert fünfundsiebzig"
+    },
+    {
+      "value": 576,
+      "phrase": "fünfhundert sechsundsiebzig"
+    },
+    {
+      "value": 577,
+      "phrase": "fünfhundert siebenundsiebzig"
+    },
+    {
+      "value": 578,
+      "phrase": "fünfhundert achtundsiebzig"
+    },
+    {
+      "value": 579,
+      "phrase": "fünfhundert neunundsiebzig"
+    },
+    {
+      "value": 580,
+      "phrase": "fünfhundert achtzig"
+    },
+    {
+      "value": 581,
+      "phrase": "fünfhundert einundachtzig"
+    },
+    {
+      "value": 582,
+      "phrase": "fünfhundert zweiundachtzig"
+    },
+    {
+      "value": 583,
+      "phrase": "fünfhundert dreiundachtzig"
+    },
+    {
+      "value": 584,
+      "phrase": "fünfhundert vierundachtzig"
+    },
+    {
+      "value": 585,
+      "phrase": "fünfhundert fünfundachtzig"
+    },
+    {
+      "value": 586,
+      "phrase": "fünfhundert sechsundachtzig"
+    },
+    {
+      "value": 587,
+      "phrase": "fünfhundert siebenundachtzig"
+    },
+    {
+      "value": 588,
+      "phrase": "fünfhundert achtundachtzig"
+    },
+    {
+      "value": 589,
+      "phrase": "fünfhundert neunundachtzig"
+    },
+    {
+      "value": 590,
+      "phrase": "fünfhundert neunzig"
+    },
+    {
+      "value": 591,
+      "phrase": "fünfhundert einundneunzig"
+    },
+    {
+      "value": 592,
+      "phrase": "fünfhundert zweiundneunzig"
+    },
+    {
+      "value": 593,
+      "phrase": "fünfhundert dreiundneunzig"
+    },
+    {
+      "value": 594,
+      "phrase": "fünfhundert vierundneunzig"
+    },
+    {
+      "value": 595,
+      "phrase": "fünfhundert fünfundneunzig"
+    },
+    {
+      "value": 596,
+      "phrase": "fünfhundert sechsundneunzig"
+    },
+    {
+      "value": 597,
+      "phrase": "fünfhundert siebenundneunzig"
+    },
+    {
+      "value": 598,
+      "phrase": "fünfhundert achtundneunzig"
+    },
+    {
+      "value": 599,
+      "phrase": "fünfhundert neunundneunzig"
+    },
+    {
+      "value": 600,
+      "phrase": "sechshundert"
+    },
+    {
+      "value": 601,
+      "phrase": "sechshundert ein"
+    },
+    {
+      "value": 602,
+      "phrase": "sechshundert zwei"
+    },
+    {
+      "value": 603,
+      "phrase": "sechshundert drei"
+    },
+    {
+      "value": 604,
+      "phrase": "sechshundert vier"
+    },
+    {
+      "value": 605,
+      "phrase": "sechshundert fünf"
+    },
+    {
+      "value": 606,
+      "phrase": "sechshundert sechs"
+    },
+    {
+      "value": 607,
+      "phrase": "sechshundert sieben"
+    },
+    {
+      "value": 608,
+      "phrase": "sechshundert acht"
+    },
+    {
+      "value": 609,
+      "phrase": "sechshundert neun"
+    },
+    {
+      "value": 610,
+      "phrase": "sechshundert zehn"
+    },
+    {
+      "value": 611,
+      "phrase": "sechshundert elf"
+    },
+    {
+      "value": 612,
+      "phrase": "sechshundert zwölf"
+    },
+    {
+      "value": 613,
+      "phrase": "sechshundert dreizehn"
+    },
+    {
+      "value": 614,
+      "phrase": "sechshundert vierzehn"
+    },
+    {
+      "value": 615,
+      "phrase": "sechshundert fünfzehn"
+    },
+    {
+      "value": 616,
+      "phrase": "sechshundert sechzehn"
+    },
+    {
+      "value": 617,
+      "phrase": "sechshundert siebzehn"
+    },
+    {
+      "value": 618,
+      "phrase": "sechshundert achtzehn"
+    },
+    {
+      "value": 619,
+      "phrase": "sechshundert neunzehn"
+    },
+    {
+      "value": 620,
+      "phrase": "sechshundert zwanzig"
+    },
+    {
+      "value": 621,
+      "phrase": "sechshundert einundzwanzig"
+    },
+    {
+      "value": 622,
+      "phrase": "sechshundert zweiundzwanzig"
+    },
+    {
+      "value": 623,
+      "phrase": "sechshundert dreiundzwanzig"
+    },
+    {
+      "value": 624,
+      "phrase": "sechshundert vierundzwanzig"
+    },
+    {
+      "value": 625,
+      "phrase": "sechshundert fünfundzwanzig"
+    },
+    {
+      "value": 626,
+      "phrase": "sechshundert sechsundzwanzig"
+    },
+    {
+      "value": 627,
+      "phrase": "sechshundert siebenundzwanzig"
+    },
+    {
+      "value": 628,
+      "phrase": "sechshundert achtundzwanzig"
+    },
+    {
+      "value": 629,
+      "phrase": "sechshundert neunundzwanzig"
+    },
+    {
+      "value": 630,
+      "phrase": "sechshundert dreißig"
+    },
+    {
+      "value": 631,
+      "phrase": "sechshundert einunddreißig"
+    },
+    {
+      "value": 632,
+      "phrase": "sechshundert zweiunddreißig"
+    },
+    {
+      "value": 633,
+      "phrase": "sechshundert dreiunddreißig"
+    },
+    {
+      "value": 634,
+      "phrase": "sechshundert vierunddreißig"
+    },
+    {
+      "value": 635,
+      "phrase": "sechshundert fünfunddreißig"
+    },
+    {
+      "value": 636,
+      "phrase": "sechshundert sechsunddreißig"
+    },
+    {
+      "value": 637,
+      "phrase": "sechshundert siebenunddreißig"
+    },
+    {
+      "value": 638,
+      "phrase": "sechshundert achtunddreißig"
+    },
+    {
+      "value": 639,
+      "phrase": "sechshundert neununddreißig"
+    },
+    {
+      "value": 640,
+      "phrase": "sechshundert vierzig"
+    },
+    {
+      "value": 641,
+      "phrase": "sechshundert einundvierzig"
+    },
+    {
+      "value": 642,
+      "phrase": "sechshundert zweiundvierzig"
+    },
+    {
+      "value": 643,
+      "phrase": "sechshundert dreiundvierzig"
+    },
+    {
+      "value": 644,
+      "phrase": "sechshundert vierundvierzig"
+    },
+    {
+      "value": 645,
+      "phrase": "sechshundert fünfundvierzig"
+    },
+    {
+      "value": 646,
+      "phrase": "sechshundert sechsundvierzig"
+    },
+    {
+      "value": 647,
+      "phrase": "sechshundert siebenundvierzig"
+    },
+    {
+      "value": 648,
+      "phrase": "sechshundert achtundvierzig"
+    },
+    {
+      "value": 649,
+      "phrase": "sechshundert neunundvierzig"
+    },
+    {
+      "value": 650,
+      "phrase": "sechshundert fünfzig"
+    },
+    {
+      "value": 651,
+      "phrase": "sechshundert einundfünfzig"
+    },
+    {
+      "value": 652,
+      "phrase": "sechshundert zweiundfünfzig"
+    },
+    {
+      "value": 653,
+      "phrase": "sechshundert dreiundfünfzig"
+    },
+    {
+      "value": 654,
+      "phrase": "sechshundert vierundfünfzig"
+    },
+    {
+      "value": 655,
+      "phrase": "sechshundert fünfundfünfzig"
+    },
+    {
+      "value": 656,
+      "phrase": "sechshundert sechsundfünfzig"
+    },
+    {
+      "value": 657,
+      "phrase": "sechshundert siebenundfünfzig"
+    },
+    {
+      "value": 658,
+      "phrase": "sechshundert achtundfünfzig"
+    },
+    {
+      "value": 659,
+      "phrase": "sechshundert neunundfünfzig"
+    },
+    {
+      "value": 660,
+      "phrase": "sechshundert sechzig"
+    },
+    {
+      "value": 661,
+      "phrase": "sechshundert einundsechzig"
+    },
+    {
+      "value": 662,
+      "phrase": "sechshundert zweiundsechzig"
+    },
+    {
+      "value": 663,
+      "phrase": "sechshundert dreiundsechzig"
+    },
+    {
+      "value": 664,
+      "phrase": "sechshundert vierundsechzig"
+    },
+    {
+      "value": 665,
+      "phrase": "sechshundert fünfundsechzig"
+    },
+    {
+      "value": 666,
+      "phrase": "sechshundert sechsundsechzig"
+    },
+    {
+      "value": 667,
+      "phrase": "sechshundert siebenundsechzig"
+    },
+    {
+      "value": 668,
+      "phrase": "sechshundert achtundsechzig"
+    },
+    {
+      "value": 669,
+      "phrase": "sechshundert neunundsechzig"
+    },
+    {
+      "value": 670,
+      "phrase": "sechshundert siebzig"
+    },
+    {
+      "value": 671,
+      "phrase": "sechshundert einundsiebzig"
+    },
+    {
+      "value": 672,
+      "phrase": "sechshundert zweiundsiebzig"
+    },
+    {
+      "value": 673,
+      "phrase": "sechshundert dreiundsiebzig"
+    },
+    {
+      "value": 674,
+      "phrase": "sechshundert vierundsiebzig"
+    },
+    {
+      "value": 675,
+      "phrase": "sechshundert fünfundsiebzig"
+    },
+    {
+      "value": 676,
+      "phrase": "sechshundert sechsundsiebzig"
+    },
+    {
+      "value": 677,
+      "phrase": "sechshundert siebenundsiebzig"
+    },
+    {
+      "value": 678,
+      "phrase": "sechshundert achtundsiebzig"
+    },
+    {
+      "value": 679,
+      "phrase": "sechshundert neunundsiebzig"
+    },
+    {
+      "value": 680,
+      "phrase": "sechshundert achtzig"
+    },
+    {
+      "value": 681,
+      "phrase": "sechshundert einundachtzig"
+    },
+    {
+      "value": 682,
+      "phrase": "sechshundert zweiundachtzig"
+    },
+    {
+      "value": 683,
+      "phrase": "sechshundert dreiundachtzig"
+    },
+    {
+      "value": 684,
+      "phrase": "sechshundert vierundachtzig"
+    },
+    {
+      "value": 685,
+      "phrase": "sechshundert fünfundachtzig"
+    },
+    {
+      "value": 686,
+      "phrase": "sechshundert sechsundachtzig"
+    },
+    {
+      "value": 687,
+      "phrase": "sechshundert siebenundachtzig"
+    },
+    {
+      "value": 688,
+      "phrase": "sechshundert achtundachtzig"
+    },
+    {
+      "value": 689,
+      "phrase": "sechshundert neunundachtzig"
+    },
+    {
+      "value": 690,
+      "phrase": "sechshundert neunzig"
+    },
+    {
+      "value": 691,
+      "phrase": "sechshundert einundneunzig"
+    },
+    {
+      "value": 692,
+      "phrase": "sechshundert zweiundneunzig"
+    },
+    {
+      "value": 693,
+      "phrase": "sechshundert dreiundneunzig"
+    },
+    {
+      "value": 694,
+      "phrase": "sechshundert vierundneunzig"
+    },
+    {
+      "value": 695,
+      "phrase": "sechshundert fünfundneunzig"
+    },
+    {
+      "value": 696,
+      "phrase": "sechshundert sechsundneunzig"
+    },
+    {
+      "value": 697,
+      "phrase": "sechshundert siebenundneunzig"
+    },
+    {
+      "value": 698,
+      "phrase": "sechshundert achtundneunzig"
+    },
+    {
+      "value": 699,
+      "phrase": "sechshundert neunundneunzig"
+    },
+    {
+      "value": 700,
+      "phrase": "siebenhundert"
+    },
+    {
+      "value": 701,
+      "phrase": "siebenhundert ein"
+    },
+    {
+      "value": 702,
+      "phrase": "siebenhundert zwei"
+    },
+    {
+      "value": 703,
+      "phrase": "siebenhundert drei"
+    },
+    {
+      "value": 704,
+      "phrase": "siebenhundert vier"
+    },
+    {
+      "value": 705,
+      "phrase": "siebenhundert fünf"
+    },
+    {
+      "value": 706,
+      "phrase": "siebenhundert sechs"
+    },
+    {
+      "value": 707,
+      "phrase": "siebenhundert sieben"
+    },
+    {
+      "value": 708,
+      "phrase": "siebenhundert acht"
+    },
+    {
+      "value": 709,
+      "phrase": "siebenhundert neun"
+    },
+    {
+      "value": 710,
+      "phrase": "siebenhundert zehn"
+    },
+    {
+      "value": 711,
+      "phrase": "siebenhundert elf"
+    },
+    {
+      "value": 712,
+      "phrase": "siebenhundert zwölf"
+    },
+    {
+      "value": 713,
+      "phrase": "siebenhundert dreizehn"
+    },
+    {
+      "value": 714,
+      "phrase": "siebenhundert vierzehn"
+    },
+    {
+      "value": 715,
+      "phrase": "siebenhundert fünfzehn"
+    },
+    {
+      "value": 716,
+      "phrase": "siebenhundert sechzehn"
+    },
+    {
+      "value": 717,
+      "phrase": "siebenhundert siebzehn"
+    },
+    {
+      "value": 718,
+      "phrase": "siebenhundert achtzehn"
+    },
+    {
+      "value": 719,
+      "phrase": "siebenhundert neunzehn"
+    },
+    {
+      "value": 720,
+      "phrase": "siebenhundert zwanzig"
+    },
+    {
+      "value": 721,
+      "phrase": "siebenhundert einundzwanzig"
+    },
+    {
+      "value": 722,
+      "phrase": "siebenhundert zweiundzwanzig"
+    },
+    {
+      "value": 723,
+      "phrase": "siebenhundert dreiundzwanzig"
+    },
+    {
+      "value": 724,
+      "phrase": "siebenhundert vierundzwanzig"
+    },
+    {
+      "value": 725,
+      "phrase": "siebenhundert fünfundzwanzig"
+    },
+    {
+      "value": 726,
+      "phrase": "siebenhundert sechsundzwanzig"
+    },
+    {
+      "value": 727,
+      "phrase": "siebenhundert siebenundzwanzig"
+    },
+    {
+      "value": 728,
+      "phrase": "siebenhundert achtundzwanzig"
+    },
+    {
+      "value": 729,
+      "phrase": "siebenhundert neunundzwanzig"
+    },
+    {
+      "value": 730,
+      "phrase": "siebenhundert dreißig"
+    },
+    {
+      "value": 731,
+      "phrase": "siebenhundert einunddreißig"
+    },
+    {
+      "value": 732,
+      "phrase": "siebenhundert zweiunddreißig"
+    },
+    {
+      "value": 733,
+      "phrase": "siebenhundert dreiunddreißig"
+    },
+    {
+      "value": 734,
+      "phrase": "siebenhundert vierunddreißig"
+    },
+    {
+      "value": 735,
+      "phrase": "siebenhundert fünfunddreißig"
+    },
+    {
+      "value": 736,
+      "phrase": "siebenhundert sechsunddreißig"
+    },
+    {
+      "value": 737,
+      "phrase": "siebenhundert siebenunddreißig"
+    },
+    {
+      "value": 738,
+      "phrase": "siebenhundert achtunddreißig"
+    },
+    {
+      "value": 739,
+      "phrase": "siebenhundert neununddreißig"
+    },
+    {
+      "value": 740,
+      "phrase": "siebenhundert vierzig"
+    },
+    {
+      "value": 741,
+      "phrase": "siebenhundert einundvierzig"
+    },
+    {
+      "value": 742,
+      "phrase": "siebenhundert zweiundvierzig"
+    },
+    {
+      "value": 743,
+      "phrase": "siebenhundert dreiundvierzig"
+    },
+    {
+      "value": 744,
+      "phrase": "siebenhundert vierundvierzig"
+    },
+    {
+      "value": 745,
+      "phrase": "siebenhundert fünfundvierzig"
+    },
+    {
+      "value": 746,
+      "phrase": "siebenhundert sechsundvierzig"
+    },
+    {
+      "value": 747,
+      "phrase": "siebenhundert siebenundvierzig"
+    },
+    {
+      "value": 748,
+      "phrase": "siebenhundert achtundvierzig"
+    },
+    {
+      "value": 749,
+      "phrase": "siebenhundert neunundvierzig"
+    },
+    {
+      "value": 750,
+      "phrase": "siebenhundert fünfzig"
+    },
+    {
+      "value": 751,
+      "phrase": "siebenhundert einundfünfzig"
+    },
+    {
+      "value": 752,
+      "phrase": "siebenhundert zweiundfünfzig"
+    },
+    {
+      "value": 753,
+      "phrase": "siebenhundert dreiundfünfzig"
+    },
+    {
+      "value": 754,
+      "phrase": "siebenhundert vierundfünfzig"
+    },
+    {
+      "value": 755,
+      "phrase": "siebenhundert fünfundfünfzig"
+    },
+    {
+      "value": 756,
+      "phrase": "siebenhundert sechsundfünfzig"
+    },
+    {
+      "value": 757,
+      "phrase": "siebenhundert siebenundfünfzig"
+    },
+    {
+      "value": 758,
+      "phrase": "siebenhundert achtundfünfzig"
+    },
+    {
+      "value": 759,
+      "phrase": "siebenhundert neunundfünfzig"
+    },
+    {
+      "value": 760,
+      "phrase": "siebenhundert sechzig"
+    },
+    {
+      "value": 761,
+      "phrase": "siebenhundert einundsechzig"
+    },
+    {
+      "value": 762,
+      "phrase": "siebenhundert zweiundsechzig"
+    },
+    {
+      "value": 763,
+      "phrase": "siebenhundert dreiundsechzig"
+    },
+    {
+      "value": 764,
+      "phrase": "siebenhundert vierundsechzig"
+    },
+    {
+      "value": 765,
+      "phrase": "siebenhundert fünfundsechzig"
+    },
+    {
+      "value": 766,
+      "phrase": "siebenhundert sechsundsechzig"
+    },
+    {
+      "value": 767,
+      "phrase": "siebenhundert siebenundsechzig"
+    },
+    {
+      "value": 768,
+      "phrase": "siebenhundert achtundsechzig"
+    },
+    {
+      "value": 769,
+      "phrase": "siebenhundert neunundsechzig"
+    },
+    {
+      "value": 770,
+      "phrase": "siebenhundert siebzig"
+    },
+    {
+      "value": 771,
+      "phrase": "siebenhundert einundsiebzig"
+    },
+    {
+      "value": 772,
+      "phrase": "siebenhundert zweiundsiebzig"
+    },
+    {
+      "value": 773,
+      "phrase": "siebenhundert dreiundsiebzig"
+    },
+    {
+      "value": 774,
+      "phrase": "siebenhundert vierundsiebzig"
+    },
+    {
+      "value": 775,
+      "phrase": "siebenhundert fünfundsiebzig"
+    },
+    {
+      "value": 776,
+      "phrase": "siebenhundert sechsundsiebzig"
+    },
+    {
+      "value": 777,
+      "phrase": "siebenhundert siebenundsiebzig"
+    },
+    {
+      "value": 778,
+      "phrase": "siebenhundert achtundsiebzig"
+    },
+    {
+      "value": 779,
+      "phrase": "siebenhundert neunundsiebzig"
+    },
+    {
+      "value": 780,
+      "phrase": "siebenhundert achtzig"
+    },
+    {
+      "value": 781,
+      "phrase": "siebenhundert einundachtzig"
+    },
+    {
+      "value": 782,
+      "phrase": "siebenhundert zweiundachtzig"
+    },
+    {
+      "value": 783,
+      "phrase": "siebenhundert dreiundachtzig"
+    },
+    {
+      "value": 784,
+      "phrase": "siebenhundert vierundachtzig"
+    },
+    {
+      "value": 785,
+      "phrase": "siebenhundert fünfundachtzig"
+    },
+    {
+      "value": 786,
+      "phrase": "siebenhundert sechsundachtzig"
+    },
+    {
+      "value": 787,
+      "phrase": "siebenhundert siebenundachtzig"
+    },
+    {
+      "value": 788,
+      "phrase": "siebenhundert achtundachtzig"
+    },
+    {
+      "value": 789,
+      "phrase": "siebenhundert neunundachtzig"
+    },
+    {
+      "value": 790,
+      "phrase": "siebenhundert neunzig"
+    },
+    {
+      "value": 791,
+      "phrase": "siebenhundert einundneunzig"
+    },
+    {
+      "value": 792,
+      "phrase": "siebenhundert zweiundneunzig"
+    },
+    {
+      "value": 793,
+      "phrase": "siebenhundert dreiundneunzig"
+    },
+    {
+      "value": 794,
+      "phrase": "siebenhundert vierundneunzig"
+    },
+    {
+      "value": 795,
+      "phrase": "siebenhundert fünfundneunzig"
+    },
+    {
+      "value": 796,
+      "phrase": "siebenhundert sechsundneunzig"
+    },
+    {
+      "value": 797,
+      "phrase": "siebenhundert siebenundneunzig"
+    },
+    {
+      "value": 798,
+      "phrase": "siebenhundert achtundneunzig"
+    },
+    {
+      "value": 799,
+      "phrase": "siebenhundert neunundneunzig"
+    },
+    {
+      "value": 800,
+      "phrase": "achthundert"
+    },
+    {
+      "value": 801,
+      "phrase": "achthundert ein"
+    },
+    {
+      "value": 802,
+      "phrase": "achthundert zwei"
+    },
+    {
+      "value": 803,
+      "phrase": "achthundert drei"
+    },
+    {
+      "value": 804,
+      "phrase": "achthundert vier"
+    },
+    {
+      "value": 805,
+      "phrase": "achthundert fünf"
+    },
+    {
+      "value": 806,
+      "phrase": "achthundert sechs"
+    },
+    {
+      "value": 807,
+      "phrase": "achthundert sieben"
+    },
+    {
+      "value": 808,
+      "phrase": "achthundert acht"
+    },
+    {
+      "value": 809,
+      "phrase": "achthundert neun"
+    },
+    {
+      "value": 810,
+      "phrase": "achthundert zehn"
+    },
+    {
+      "value": 811,
+      "phrase": "achthundert elf"
+    },
+    {
+      "value": 812,
+      "phrase": "achthundert zwölf"
+    },
+    {
+      "value": 813,
+      "phrase": "achthundert dreizehn"
+    },
+    {
+      "value": 814,
+      "phrase": "achthundert vierzehn"
+    },
+    {
+      "value": 815,
+      "phrase": "achthundert fünfzehn"
+    },
+    {
+      "value": 816,
+      "phrase": "achthundert sechzehn"
+    },
+    {
+      "value": 817,
+      "phrase": "achthundert siebzehn"
+    },
+    {
+      "value": 818,
+      "phrase": "achthundert achtzehn"
+    },
+    {
+      "value": 819,
+      "phrase": "achthundert neunzehn"
+    },
+    {
+      "value": 820,
+      "phrase": "achthundert zwanzig"
+    },
+    {
+      "value": 821,
+      "phrase": "achthundert einundzwanzig"
+    },
+    {
+      "value": 822,
+      "phrase": "achthundert zweiundzwanzig"
+    },
+    {
+      "value": 823,
+      "phrase": "achthundert dreiundzwanzig"
+    },
+    {
+      "value": 824,
+      "phrase": "achthundert vierundzwanzig"
+    },
+    {
+      "value": 825,
+      "phrase": "achthundert fünfundzwanzig"
+    },
+    {
+      "value": 826,
+      "phrase": "achthundert sechsundzwanzig"
+    },
+    {
+      "value": 827,
+      "phrase": "achthundert siebenundzwanzig"
+    },
+    {
+      "value": 828,
+      "phrase": "achthundert achtundzwanzig"
+    },
+    {
+      "value": 829,
+      "phrase": "achthundert neunundzwanzig"
+    },
+    {
+      "value": 830,
+      "phrase": "achthundert dreißig"
+    },
+    {
+      "value": 831,
+      "phrase": "achthundert einunddreißig"
+    },
+    {
+      "value": 832,
+      "phrase": "achthundert zweiunddreißig"
+    },
+    {
+      "value": 833,
+      "phrase": "achthundert dreiunddreißig"
+    },
+    {
+      "value": 834,
+      "phrase": "achthundert vierunddreißig"
+    },
+    {
+      "value": 835,
+      "phrase": "achthundert fünfunddreißig"
+    },
+    {
+      "value": 836,
+      "phrase": "achthundert sechsunddreißig"
+    },
+    {
+      "value": 837,
+      "phrase": "achthundert siebenunddreißig"
+    },
+    {
+      "value": 838,
+      "phrase": "achthundert achtunddreißig"
+    },
+    {
+      "value": 839,
+      "phrase": "achthundert neununddreißig"
+    },
+    {
+      "value": 840,
+      "phrase": "achthundert vierzig"
+    },
+    {
+      "value": 841,
+      "phrase": "achthundert einundvierzig"
+    },
+    {
+      "value": 842,
+      "phrase": "achthundert zweiundvierzig"
+    },
+    {
+      "value": 843,
+      "phrase": "achthundert dreiundvierzig"
+    },
+    {
+      "value": 844,
+      "phrase": "achthundert vierundvierzig"
+    },
+    {
+      "value": 845,
+      "phrase": "achthundert fünfundvierzig"
+    },
+    {
+      "value": 846,
+      "phrase": "achthundert sechsundvierzig"
+    },
+    {
+      "value": 847,
+      "phrase": "achthundert siebenundvierzig"
+    },
+    {
+      "value": 848,
+      "phrase": "achthundert achtundvierzig"
+    },
+    {
+      "value": 849,
+      "phrase": "achthundert neunundvierzig"
+    },
+    {
+      "value": 850,
+      "phrase": "achthundert fünfzig"
+    },
+    {
+      "value": 851,
+      "phrase": "achthundert einundfünfzig"
+    },
+    {
+      "value": 852,
+      "phrase": "achthundert zweiundfünfzig"
+    },
+    {
+      "value": 853,
+      "phrase": "achthundert dreiundfünfzig"
+    },
+    {
+      "value": 854,
+      "phrase": "achthundert vierundfünfzig"
+    },
+    {
+      "value": 855,
+      "phrase": "achthundert fünfundfünfzig"
+    },
+    {
+      "value": 856,
+      "phrase": "achthundert sechsundfünfzig"
+    },
+    {
+      "value": 857,
+      "phrase": "achthundert siebenundfünfzig"
+    },
+    {
+      "value": 858,
+      "phrase": "achthundert achtundfünfzig"
+    },
+    {
+      "value": 859,
+      "phrase": "achthundert neunundfünfzig"
+    },
+    {
+      "value": 860,
+      "phrase": "achthundert sechzig"
+    },
+    {
+      "value": 861,
+      "phrase": "achthundert einundsechzig"
+    },
+    {
+      "value": 862,
+      "phrase": "achthundert zweiundsechzig"
+    },
+    {
+      "value": 863,
+      "phrase": "achthundert dreiundsechzig"
+    },
+    {
+      "value": 864,
+      "phrase": "achthundert vierundsechzig"
+    },
+    {
+      "value": 865,
+      "phrase": "achthundert fünfundsechzig"
+    },
+    {
+      "value": 866,
+      "phrase": "achthundert sechsundsechzig"
+    },
+    {
+      "value": 867,
+      "phrase": "achthundert siebenundsechzig"
+    },
+    {
+      "value": 868,
+      "phrase": "achthundert achtundsechzig"
+    },
+    {
+      "value": 869,
+      "phrase": "achthundert neunundsechzig"
+    },
+    {
+      "value": 870,
+      "phrase": "achthundert siebzig"
+    },
+    {
+      "value": 871,
+      "phrase": "achthundert einundsiebzig"
+    },
+    {
+      "value": 872,
+      "phrase": "achthundert zweiundsiebzig"
+    },
+    {
+      "value": 873,
+      "phrase": "achthundert dreiundsiebzig"
+    },
+    {
+      "value": 874,
+      "phrase": "achthundert vierundsiebzig"
+    },
+    {
+      "value": 875,
+      "phrase": "achthundert fünfundsiebzig"
+    },
+    {
+      "value": 876,
+      "phrase": "achthundert sechsundsiebzig"
+    },
+    {
+      "value": 877,
+      "phrase": "achthundert siebenundsiebzig"
+    },
+    {
+      "value": 878,
+      "phrase": "achthundert achtundsiebzig"
+    },
+    {
+      "value": 879,
+      "phrase": "achthundert neunundsiebzig"
+    },
+    {
+      "value": 880,
+      "phrase": "achthundert achtzig"
+    },
+    {
+      "value": 881,
+      "phrase": "achthundert einundachtzig"
+    },
+    {
+      "value": 882,
+      "phrase": "achthundert zweiundachtzig"
+    },
+    {
+      "value": 883,
+      "phrase": "achthundert dreiundachtzig"
+    },
+    {
+      "value": 884,
+      "phrase": "achthundert vierundachtzig"
+    },
+    {
+      "value": 885,
+      "phrase": "achthundert fünfundachtzig"
+    },
+    {
+      "value": 886,
+      "phrase": "achthundert sechsundachtzig"
+    },
+    {
+      "value": 887,
+      "phrase": "achthundert siebenundachtzig"
+    },
+    {
+      "value": 888,
+      "phrase": "achthundert achtundachtzig"
+    },
+    {
+      "value": 889,
+      "phrase": "achthundert neunundachtzig"
+    },
+    {
+      "value": 890,
+      "phrase": "achthundert neunzig"
+    },
+    {
+      "value": 891,
+      "phrase": "achthundert einundneunzig"
+    },
+    {
+      "value": 892,
+      "phrase": "achthundert zweiundneunzig"
+    },
+    {
+      "value": 893,
+      "phrase": "achthundert dreiundneunzig"
+    },
+    {
+      "value": 894,
+      "phrase": "achthundert vierundneunzig"
+    },
+    {
+      "value": 895,
+      "phrase": "achthundert fünfundneunzig"
+    },
+    {
+      "value": 896,
+      "phrase": "achthundert sechsundneunzig"
+    },
+    {
+      "value": 897,
+      "phrase": "achthundert siebenundneunzig"
+    },
+    {
+      "value": 898,
+      "phrase": "achthundert achtundneunzig"
+    },
+    {
+      "value": 899,
+      "phrase": "achthundert neunundneunzig"
+    },
+    {
+      "value": 900,
+      "phrase": "neunhundert"
+    },
+    {
+      "value": 901,
+      "phrase": "neunhundert ein"
+    },
+    {
+      "value": 902,
+      "phrase": "neunhundert zwei"
+    },
+    {
+      "value": 903,
+      "phrase": "neunhundert drei"
+    },
+    {
+      "value": 904,
+      "phrase": "neunhundert vier"
+    },
+    {
+      "value": 905,
+      "phrase": "neunhundert fünf"
+    },
+    {
+      "value": 906,
+      "phrase": "neunhundert sechs"
+    },
+    {
+      "value": 907,
+      "phrase": "neunhundert sieben"
+    },
+    {
+      "value": 908,
+      "phrase": "neunhundert acht"
+    },
+    {
+      "value": 909,
+      "phrase": "neunhundert neun"
+    },
+    {
+      "value": 910,
+      "phrase": "neunhundert zehn"
+    },
+    {
+      "value": 911,
+      "phrase": "neunhundert elf"
+    },
+    {
+      "value": 912,
+      "phrase": "neunhundert zwölf"
+    },
+    {
+      "value": 913,
+      "phrase": "neunhundert dreizehn"
+    },
+    {
+      "value": 914,
+      "phrase": "neunhundert vierzehn"
+    },
+    {
+      "value": 915,
+      "phrase": "neunhundert fünfzehn"
+    },
+    {
+      "value": 916,
+      "phrase": "neunhundert sechzehn"
+    },
+    {
+      "value": 917,
+      "phrase": "neunhundert siebzehn"
+    },
+    {
+      "value": 918,
+      "phrase": "neunhundert achtzehn"
+    },
+    {
+      "value": 919,
+      "phrase": "neunhundert neunzehn"
+    },
+    {
+      "value": 920,
+      "phrase": "neunhundert zwanzig"
+    },
+    {
+      "value": 921,
+      "phrase": "neunhundert einundzwanzig"
+    },
+    {
+      "value": 922,
+      "phrase": "neunhundert zweiundzwanzig"
+    },
+    {
+      "value": 923,
+      "phrase": "neunhundert dreiundzwanzig"
+    },
+    {
+      "value": 924,
+      "phrase": "neunhundert vierundzwanzig"
+    },
+    {
+      "value": 925,
+      "phrase": "neunhundert fünfundzwanzig"
+    },
+    {
+      "value": 926,
+      "phrase": "neunhundert sechsundzwanzig"
+    },
+    {
+      "value": 927,
+      "phrase": "neunhundert siebenundzwanzig"
+    },
+    {
+      "value": 928,
+      "phrase": "neunhundert achtundzwanzig"
+    },
+    {
+      "value": 929,
+      "phrase": "neunhundert neunundzwanzig"
+    },
+    {
+      "value": 930,
+      "phrase": "neunhundert dreißig"
+    },
+    {
+      "value": 931,
+      "phrase": "neunhundert einunddreißig"
+    },
+    {
+      "value": 932,
+      "phrase": "neunhundert zweiunddreißig"
+    },
+    {
+      "value": 933,
+      "phrase": "neunhundert dreiunddreißig"
+    },
+    {
+      "value": 934,
+      "phrase": "neunhundert vierunddreißig"
+    },
+    {
+      "value": 935,
+      "phrase": "neunhundert fünfunddreißig"
+    },
+    {
+      "value": 936,
+      "phrase": "neunhundert sechsunddreißig"
+    },
+    {
+      "value": 937,
+      "phrase": "neunhundert siebenunddreißig"
+    },
+    {
+      "value": 938,
+      "phrase": "neunhundert achtunddreißig"
+    },
+    {
+      "value": 939,
+      "phrase": "neunhundert neununddreißig"
+    },
+    {
+      "value": 940,
+      "phrase": "neunhundert vierzig"
+    },
+    {
+      "value": 941,
+      "phrase": "neunhundert einundvierzig"
+    },
+    {
+      "value": 942,
+      "phrase": "neunhundert zweiundvierzig"
+    },
+    {
+      "value": 943,
+      "phrase": "neunhundert dreiundvierzig"
+    },
+    {
+      "value": 944,
+      "phrase": "neunhundert vierundvierzig"
+    },
+    {
+      "value": 945,
+      "phrase": "neunhundert fünfundvierzig"
+    },
+    {
+      "value": 946,
+      "phrase": "neunhundert sechsundvierzig"
+    },
+    {
+      "value": 947,
+      "phrase": "neunhundert siebenundvierzig"
+    },
+    {
+      "value": 948,
+      "phrase": "neunhundert achtundvierzig"
+    },
+    {
+      "value": 949,
+      "phrase": "neunhundert neunundvierzig"
+    },
+    {
+      "value": 950,
+      "phrase": "neunhundert fünfzig"
+    },
+    {
+      "value": 951,
+      "phrase": "neunhundert einundfünfzig"
+    },
+    {
+      "value": 952,
+      "phrase": "neunhundert zweiundfünfzig"
+    },
+    {
+      "value": 953,
+      "phrase": "neunhundert dreiundfünfzig"
+    },
+    {
+      "value": 954,
+      "phrase": "neunhundert vierundfünfzig"
+    },
+    {
+      "value": 955,
+      "phrase": "neunhundert fünfundfünfzig"
+    },
+    {
+      "value": 956,
+      "phrase": "neunhundert sechsundfünfzig"
+    },
+    {
+      "value": 957,
+      "phrase": "neunhundert siebenundfünfzig"
+    },
+    {
+      "value": 958,
+      "phrase": "neunhundert achtundfünfzig"
+    },
+    {
+      "value": 959,
+      "phrase": "neunhundert neunundfünfzig"
+    },
+    {
+      "value": 960,
+      "phrase": "neunhundert sechzig"
+    },
+    {
+      "value": 961,
+      "phrase": "neunhundert einundsechzig"
+    },
+    {
+      "value": 962,
+      "phrase": "neunhundert zweiundsechzig"
+    },
+    {
+      "value": 963,
+      "phrase": "neunhundert dreiundsechzig"
+    },
+    {
+      "value": 964,
+      "phrase": "neunhundert vierundsechzig"
+    },
+    {
+      "value": 965,
+      "phrase": "neunhundert fünfundsechzig"
+    },
+    {
+      "value": 966,
+      "phrase": "neunhundert sechsundsechzig"
+    },
+    {
+      "value": 967,
+      "phrase": "neunhundert siebenundsechzig"
+    },
+    {
+      "value": 968,
+      "phrase": "neunhundert achtundsechzig"
+    },
+    {
+      "value": 969,
+      "phrase": "neunhundert neunundsechzig"
+    },
+    {
+      "value": 970,
+      "phrase": "neunhundert siebzig"
+    },
+    {
+      "value": 971,
+      "phrase": "neunhundert einundsiebzig"
+    },
+    {
+      "value": 972,
+      "phrase": "neunhundert zweiundsiebzig"
+    },
+    {
+      "value": 973,
+      "phrase": "neunhundert dreiundsiebzig"
+    },
+    {
+      "value": 974,
+      "phrase": "neunhundert vierundsiebzig"
+    },
+    {
+      "value": 975,
+      "phrase": "neunhundert fünfundsiebzig"
+    },
+    {
+      "value": 976,
+      "phrase": "neunhundert sechsundsiebzig"
+    },
+    {
+      "value": 977,
+      "phrase": "neunhundert siebenundsiebzig"
+    },
+    {
+      "value": 978,
+      "phrase": "neunhundert achtundsiebzig"
+    },
+    {
+      "value": 979,
+      "phrase": "neunhundert neunundsiebzig"
+    },
+    {
+      "value": 980,
+      "phrase": "neunhundert achtzig"
+    },
+    {
+      "value": 981,
+      "phrase": "neunhundert einundachtzig"
+    },
+    {
+      "value": 982,
+      "phrase": "neunhundert zweiundachtzig"
+    },
+    {
+      "value": 983,
+      "phrase": "neunhundert dreiundachtzig"
+    },
+    {
+      "value": 984,
+      "phrase": "neunhundert vierundachtzig"
+    },
+    {
+      "value": 985,
+      "phrase": "neunhundert fünfundachtzig"
+    },
+    {
+      "value": 986,
+      "phrase": "neunhundert sechsundachtzig"
+    },
+    {
+      "value": 987,
+      "phrase": "neunhundert siebenundachtzig"
+    },
+    {
+      "value": 988,
+      "phrase": "neunhundert achtundachtzig"
+    },
+    {
+      "value": 989,
+      "phrase": "neunhundert neunundachtzig"
+    },
+    {
+      "value": 990,
+      "phrase": "neunhundert neunzig"
+    },
+    {
+      "value": 991,
+      "phrase": "neunhundert einundneunzig"
+    },
+    {
+      "value": 992,
+      "phrase": "neunhundert zweiundneunzig"
+    },
+    {
+      "value": 993,
+      "phrase": "neunhundert dreiundneunzig"
+    },
+    {
+      "value": 994,
+      "phrase": "neunhundert vierundneunzig"
+    },
+    {
+      "value": 995,
+      "phrase": "neunhundert fünfundneunzig"
+    },
+    {
+      "value": 996,
+      "phrase": "neunhundert sechsundneunzig"
+    },
+    {
+      "value": 997,
+      "phrase": "neunhundert siebenundneunzig"
+    },
+    {
+      "value": 998,
+      "phrase": "neunhundert achtundneunzig"
+    },
+    {
+      "value": 999,
+      "phrase": "neunhundert neunundneunzig"
+    },
+    {
+      "value": 1000,
+      "phrase": "eintausend"
+    },
+    {
+      "value": 1000,
+      "phrase": "tausend"
+    }
+  ],
+  "units": [
+    {
+      "value": "g",
+      "phrase": "g"
+    },
+    {
+      "value": "g",
+      "phrase": "gramm"
+    },
+    {
+      "value": "kg",
+      "phrase": "kg"
+    },
+    {
+      "value": "kg",
+      "phrase": "kilo"
+    },
+    {
+      "value": "kg",
+      "phrase": "kilogramm"
+    },
+    {
+      "value": "l",
+      "phrase": "l"
+    },
+    {
+      "value": "l",
+      "phrase": "liter"
+    },
+    {
+      "value": "ml",
+      "phrase": "milli liter"
+    },
+    {
+      "value": "ml",
+      "phrase": "milliliter"
+    },
+    {
+      "value": "ml",
+      "phrase": "ml"
+    }
+  ],
+  "number_continuations": [
+    "and",
+    "billion",
+    "hundert",
+    "hundred",
+    "komma",
+    "milliarde",
+    "milliarden",
+    "million",
+    "millionen",
+    "point",
+    "tausend",
+    "thousand",
+    "und"
+  ]
+}

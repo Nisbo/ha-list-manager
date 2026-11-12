@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from contextvars import copy_context
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
+from hashlib import sha256
 import json
 import logging
 import math
@@ -15,6 +17,7 @@ import sqlite3
 import time
 from dataclasses import replace
 from typing import TYPE_CHECKING, Any, TypeVar
+import unicodedata
 from uuid import uuid4
 
 from .localization import async_use_language, text as localized_text
@@ -55,6 +58,10 @@ if TYPE_CHECKING:
 
 _T = TypeVar("_T")
 _UNSET = object()
+_ALEXA_HISTORY_COLUMNS = (
+    "source_id,uid,source_entity_id,target_list_id,item_id,original_name,"
+    "name,description,quantity,cleanup_action,cleanup_status,created_at,cleaned_at,last_error"
+)
 
 
 class HaListManagerDatabaseError(Exception):
@@ -224,15 +231,22 @@ class HaListManagerDatabase:
         """Return configured entity-history sources and their sample counts."""
         return await self._async_run(self._list_tracked_entities)
 
+    async def async_get_entity_history_options(self, entity_id: str) -> dict[str, Any]:
+        """Read one source's preferences without counting every archive."""
+        return await self._async_run(self._get_entity_history_options, entity_id)
+
     async def async_set_entity_tracking(
         self,
         entity_id: str,
-        enabled: bool,
+        enabled: bool | None = None,
         registry_entry_id: str | None = None,
+        ignore_unavailable: bool | None = None,
+        use_ha_precision: bool | None = None,
     ) -> TrackedEntityRecord:
-        """Create or enable/disable one history source without deleting samples."""
+        """Persist recording options without deleting existing samples."""
         return await self._async_run(
-            self._set_entity_tracking, entity_id, enabled, registry_entry_id
+            self._set_entity_tracking, entity_id, enabled, registry_entry_id,
+            ignore_unavailable, use_ha_precision,
         )
 
     async def async_set_entity_registry_id(
@@ -260,6 +274,10 @@ class HaListManagerDatabase:
     async def async_delete_entity_history(self, entity_id: str) -> None:
         """Delete one source and its independently stored samples."""
         await self._async_run(self._delete_entity_history, entity_id)
+
+    async def async_hide_unavailable_entity_states(self, entity_id: str) -> int:
+        """Hide recorded unavailable states while retaining their original rows."""
+        return await self._async_run(self._hide_unavailable_entity_states, entity_id)
 
     async def async_record_entity_state(
         self,
@@ -373,6 +391,7 @@ class HaListManagerDatabase:
         tandoor_include_ingredients: bool = True,
         tandoor_excluded_units: str = "",
         tandoor_result_limit: int = 100,
+        capitalize_first_letter: bool = False,
     ) -> ListRecord:
         """Create and return a list."""
         return await self._async_run(
@@ -384,6 +403,7 @@ class HaListManagerDatabase:
             use_dishes, use_tandoor, tandoor_skip_small_units,
             tandoor_include_ingredients, tandoor_excluded_units,
             tandoor_result_limit,
+            capitalize_first_letter,
         )
 
     async def async_get_list(self, list_id: str) -> ListRecord:
@@ -413,6 +433,7 @@ class HaListManagerDatabase:
         tandoor_excluded_units: str | None = None,
         tandoor_result_limit: int | None = None,
         confirm_scope_changes: bool = False,
+        capitalize_first_letter: bool | None = None,
     ) -> ListRecord:
         """Update and return a list."""
         return await self._async_run(
@@ -437,6 +458,7 @@ class HaListManagerDatabase:
             tandoor_include_ingredients,
             tandoor_excluded_units,
             tandoor_result_limit,
+            capitalize_first_letter,
         )
 
     async def async_preview_list_scope_changes(
@@ -470,9 +492,132 @@ class HaListManagerDatabase:
         """Return all entries of one list."""
         return await self._async_run(self._list_items, list_id)
 
+    async def async_get_item_category_names(self, list_id: str) -> dict[str, str]:
+        """Expose permanent display names without rewriting an item's assignment."""
+        return await self._async_run(self._get_item_category_names, list_id)
+
     async def async_get_item(self, item_id: str) -> ListItemRecord:
         """Return one list entry."""
         return await self._async_run(self._get_item, item_id)
+
+    async def async_get_alexa_state(self) -> dict[str, Any]:
+        """Return the single Alexa connection and recent intake diagnostics."""
+        return await self._async_run(self._get_alexa_state)
+
+    async def async_set_alexa_settings(self, settings: dict[str, Any]) -> dict[str, Any]:
+        """Save connection preferences without discarding processed source IDs."""
+        return await self._async_run(self._set_alexa_settings, settings)
+
+    async def async_update_alexa_status(self, status: dict[str, Any]) -> None:
+        """Merge runtime diagnostics while preserving connection preferences."""
+        await self._async_run(self._update_alexa_status, status)
+
+    async def async_get_alexa_receipts(
+        self, source_id: str, uids: list[str],
+    ) -> dict[str, dict[str, Any]]:
+        """Read processing receipts for one observed source snapshot."""
+        return await self._async_run(self._get_alexa_receipts, source_id, uids)
+
+    async def async_list_alexa_pending_receipts(self) -> list[dict[str, Any]]:
+        """Return already imported items whose optional source cleanup needs retry."""
+        return await self._async_run(self._list_alexa_pending_receipts)
+
+    async def async_list_alexa_links(self, source_id: str) -> list[dict[str, Any]]:
+        """Return active source links with their restart-safe synchronization journal."""
+        return await self._async_run(self._list_alexa_links, source_id)
+
+    async def async_list_alexa_outbox(
+        self, source_id: str | None = None, target_list_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Return durable local-create jobs, including uncertain cloud requests."""
+        return await self._async_run(self._list_alexa_outbox, source_id, target_list_id)
+
+    async def async_update_alexa_outbox(
+        self, job_id: str, state: str, payload: dict[str, Any] | None = None,
+        expected_state: str | None = None,
+    ) -> dict[str, Any] | None:
+        """Persist a cloud intent before attempting a non-idempotent create."""
+        return await self._async_run(self._update_alexa_outbox, job_id, state, payload, expected_state)
+
+    async def async_remove_alexa_outbox(self, job_id: str) -> None:
+        """Remove a job that never sent or whose remote identity is accounted for."""
+        await self._async_run(self._remove_alexa_outbox, job_id)
+
+    async def async_bind_alexa_outbox(
+        self, job_id: str, uid: str, summary: str, status: str,
+    ) -> bool:
+        """Link a created Alexa ID without importing it or adding its quantity."""
+        return await self._async_run(self._bind_alexa_outbox, job_id, uid, summary, status)
+
+    async def async_update_alexa_link(
+        self, source_id: str, uid: str, sync: dict[str, Any],
+        original_name: str | None = None, *, cleanup_action: str | None = None,
+        cleanup_status: str | None = None,
+    ) -> None:
+        """Update an existing link, never recreate a link removed by reconciliation."""
+        await self._async_run(self._update_alexa_link, source_id, uid, sync,
+                              original_name, cleanup_action, cleanup_status)
+
+    async def async_remove_alexa_links(self, source_id: str, uids: list[str]) -> None:
+        """Forget confirmed deleted source identities; retain the bounded activity log."""
+        await self._async_run(self._remove_alexa_links, source_id, uids)
+
+    async def async_has_alexa_history(self, source_id: str, uids: list[str]) -> set[str]:
+        """Recognize recent processed IDs, including expiring cloud-echo guards."""
+        return await self._async_run(self._has_alexa_history, source_id, uids)
+
+    async def async_prune_alexa_tombstones(self) -> int:
+        """Remove expired minimal cloud-echo guards during periodic housekeeping."""
+        return await self._async_run(self._prune_alexa_tombstones)
+
+    async def async_apply_alexa_sync_local(
+        self, item_id: str, expected_updated_at: str,
+        completed: bool | None = None, delete: bool = False,
+    ) -> dict[str, Any]:
+        """Apply a cloud status only while the observed local revision still matches."""
+        return await self._async_run(self._apply_alexa_sync_local, item_id,
+                                     expected_updated_at, completed, delete)
+
+    async def async_ignore_alexa_items(
+        self, source_id: str, uids: list[str], *, source_entity_id: str | None = None,
+    ) -> None:
+        """Remember an initial snapshot without importing existing entries."""
+        await self._async_run(self._ignore_alexa_items, source_id, uids, source_entity_id)
+
+    async def async_accept_alexa_item(
+        self, source_id: str, uid: str, target_list_id: str, name: str,
+        description: str | None, quantity: int, cleanup_action: str,
+        original_name: str, *, include_existing: bool = False,
+        source_entity_id: str | None = None,
+        match_products: bool = False, has_unit: bool = False,
+        product_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Commit an item and its source receipt in the same transaction."""
+        return await self._async_run(
+            self._accept_alexa_item, source_id, uid, target_list_id, name,
+            description, quantity, cleanup_action, original_name,
+            include_existing, source_entity_id, match_products, has_unit, product_id,
+        )
+
+    async def async_preview_alexa_item(
+        self, target_list_id: str | None, name: str, description: str | None,
+        quantity: int, *, match_products: bool = False, has_unit: bool = False,
+        product_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Resolve an incoming item without adding it or reserving its source ID."""
+        return await self._async_run(
+            self._preview_alexa_item, target_list_id, name, description,
+            quantity, match_products, has_unit, product_id,
+        )
+
+    async def async_update_alexa_receipt(
+        self, source_id: str, uid: str, cleanup_status: str,
+        last_error: str | None = None,
+    ) -> None:
+        """Record cleanup progress independently of the local item's lifetime."""
+        await self._async_run(
+            self._update_alexa_receipt, source_id, uid, cleanup_status, last_error,
+        )
 
     async def async_create_item(
         self,
@@ -489,6 +634,8 @@ class HaListManagerDatabase:
         recurrence_interval: int | None = None,
         recurrence_unit: str | None = None,
         offer_only: bool | object = False,
+        remember_product_category: bool = False,
+        remember_product_labels: bool = False,
     ) -> ListItemRecord:
         """Create and return a list item."""
         record = await self._async_run(
@@ -506,9 +653,207 @@ class HaListManagerDatabase:
             recurrence_interval,
             recurrence_unit,
             offer_only,
+            remember_product_category,
+            remember_product_labels,
         )
         self._fire_item_mutated(None, record)
         return record
+
+    async def async_create_item_action_chip(
+        self, list_id: str, name: str, product_id: str | None = None,
+    ) -> tuple[ChipRecord, bool]:
+        """Create a list-local quick chip without replacing an existing one."""
+        return await self._async_run(self._create_item_action_chip, list_id, name, product_id)
+
+    async def async_create_item_action_rule(
+        self, list_id: str, name: str, category_id: str,
+    ) -> tuple[CategoryRecord, bool]:
+        """Append one exact, list-local rule, retaining inherited definitions."""
+        return await self._async_run(self._create_item_action_rule, list_id, name, category_id)
+
+    async def async_send_item_action(
+        self, source_list_id: str, source_item_id: str | None,
+        source_entry_id: str | None, target_list_id: str, quantity: int,
+    ) -> tuple[ListItemRecord, bool, ListRecord]:
+        """Copy a saved article; publish only its committed target mutation."""
+        record, before, target = await self._async_run(
+            self._send_item_action, source_list_id, source_item_id,
+            source_entry_id, target_list_id, quantity,
+        )
+        self._fire_item_mutated(before, record)
+        return record, before is not None, target
+
+    @staticmethod
+    def _item_action_list(connection: sqlite3.Connection, list_id: str) -> sqlite3.Row:
+        row = connection.execute("SELECT * FROM lists WHERE id = ?", (list_id,)).fetchone()
+        if row is None:
+            raise ListNotFoundError(list_id)
+        if not row["enabled"] or row["list_type"] not in {"shopping", "inventory"}:
+            raise ValueError(localized_text("actions.article_list_required"))
+        return row
+
+    def _create_item_action_chip(
+        self, list_id: str, name: str, product_id: str | None,
+    ) -> tuple[ChipRecord, bool]:
+        name = " ".join(name.strip().split())
+        if not name or len(name) > 100:
+            raise ValueError(localized_text("actions.chip_name_length"))
+        key = self._normalize_priority_name(name)
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            self._item_action_list(connection, list_id)
+            if product_id is not None:
+                self._require_product(connection, product_id)
+            row = connection.execute(
+                "SELECT chips.*, products.name AS product_name FROM chips "
+                "LEFT JOIN products ON products.id = chips.product_id "
+                "WHERE chips.scope = 'list' AND chips.list_id = ? "
+                "AND chips.chip_kind = 'entry' AND chips.priority_name = ?",
+                (list_id, key),
+            ).fetchone()
+            if row is not None:
+                return self._chip_record_from_row(row), False
+            now, chip_id = self._now(), str(uuid4())
+            connection.execute(
+                "INSERT INTO chips(id,name,priority_name,chip_kind,icon,color,scope,"
+                "list_type,list_id,product_id,template_json,created_at,updated_at) "
+                "VALUES(?,?,?,'entry',NULL,NULL,'list',NULL,?,?,NULL,?,?)",
+                (chip_id, name, key, list_id, product_id, now, now),
+            )
+            row = connection.execute(
+                "SELECT chips.*, products.name AS product_name FROM chips "
+                "LEFT JOIN products ON products.id = chips.product_id WHERE chips.id = ?",
+                (chip_id,),
+            ).fetchone()
+            return self._chip_record_from_row(row), True
+
+    def _create_item_action_rule(
+        self, list_id: str, name: str, category_id: str,
+    ) -> tuple[CategoryRecord, bool]:
+        name = " ".join(name.strip().split())
+        if not name or len(name) > 100:
+            raise ValueError(localized_text("actions.rule_name_length"))
+        if "*" in name:
+            raise ValueError(localized_text("actions.exact_rule_required"))
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            target = self._item_action_list(connection, list_id)
+            category = connection.execute("SELECT * FROM categories WHERE id = ?", (category_id,)).fetchone()
+            if category is None or not (
+                category["scope"] == "list" and category["list_id"] == list_id
+                or category["scope"] == "global" and target["use_global_categories"]
+                or category["scope"] == "list_type" and category["list_type"] == target["list_type"] and target["use_type_categories"]
+            ):
+                raise CategoryNotFoundError(category_id)
+            local = connection.execute(
+                "SELECT * FROM categories WHERE scope = 'list' AND list_id = ? AND name = ? COLLATE NOCASE",
+                (list_id, category["name"]),
+            ).fetchone()
+            local_id = local["id"] if local else str(uuid4())
+            self._ensure_category_rules_unique_in_scope(connection, local_id, [name], "list", None, list_id)
+            now = self._now()
+            if local is None:
+                connection.execute(
+                    "INSERT INTO categories(id,name,scope,list_type,list_id,icon,color,position,created_at,updated_at) "
+                    "VALUES(?,?,'list',NULL,?,?,?,?,?,?)",
+                    (local_id, category["name"], list_id, category["icon"], category["color"], category["position"], now, now),
+                )
+            rows = connection.execute("SELECT pattern FROM category_rules WHERE category_id = ?", (local_id,)).fetchall()
+            created = not any(row["pattern"].casefold() == name.casefold() for row in rows)
+            if created:
+                if len(rows) >= 100:
+                    raise ValueError(localized_text("backend.category_rule_limit"))
+                position = connection.execute("SELECT COALESCE(MAX(position),-1)+1 FROM category_rules WHERE category_id = ?", (local_id,)).fetchone()[0]
+                connection.execute(
+                    "INSERT INTO category_rules(id,category_id,pattern,position,created_at,updated_at) VALUES(?,?,?,?,?,?)",
+                    (str(uuid4()), local_id, name, position, now, now),
+                )
+            result = connection.execute("SELECT * FROM categories WHERE id = ?", (local_id,)).fetchone()
+            return self._category_record_from_row(result), created
+
+    def _send_item_action(
+        self, source_list_id: str, source_item_id: str | None,
+        source_entry_id: str | None, target_list_id: str, quantity: int,
+    ) -> tuple[ListItemRecord, ListItemRecord | None, ListRecord]:
+        if bool(source_item_id) == bool(source_entry_id):
+            raise ValueError(localized_text("actions.source_required"))
+        if source_list_id == target_list_id:
+            raise ValueError(localized_text("actions.different_list_required"))
+        if type(quantity) is not int or not 1 <= quantity <= 1000000:
+            raise ValueError(localized_text("backend.quantity_range"))
+        now = self._now()
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            source_list = self._item_action_list(connection, source_list_id)
+            target = self._item_action_list(connection, target_list_id)
+            if target["list_type"] != "shopping" or target["provider"] != "local":
+                raise ValueError(localized_text("actions.shopping_target_required"))
+            if source_item_id:
+                source = connection.execute("SELECT * FROM list_items WHERE id = ? AND list_id = ?", (source_item_id, source_list_id)).fetchone()
+                if source is None:
+                    raise ListItemNotFoundError(source_item_id)
+                if source_list["list_type"] != "shopping":
+                    raise ValueError(localized_text("actions.article_list_required"))
+                product_id, name, description = source["product_id"], source["name"], source["description"]
+                offer_only = bool(source["offer_only"])
+                source_labels = [row[0] for row in connection.execute(
+                    "SELECT labels.name FROM list_item_labels JOIN labels ON labels.id = list_item_labels.label_id WHERE item_id = ?", (source_item_id,)
+                )]
+            else:
+                source = connection.execute(
+                    "SELECT inventory_entries.product_id, products.name FROM inventory_entries "
+                    "JOIN products ON products.id = inventory_entries.product_id WHERE inventory_entries.id = ? AND inventory_entries.list_id = ?",
+                    (source_entry_id, source_list_id),
+                ).fetchone()
+                if source is None:
+                    raise InventoryEntryNotFoundError(source_entry_id)
+                if source_list["list_type"] != "inventory":
+                    raise ValueError(localized_text("actions.article_list_required"))
+                product_id, name, description, offer_only, source_labels = source["product_id"], source["name"], None, False, []
+            if product_id:
+                source_labels.extend(row[0] for row in connection.execute(
+                    "SELECT labels.name FROM product_labels JOIN labels ON labels.id = product_labels.label_id WHERE product_id = ?", (product_id,)
+                ))
+            allowed_ids = self._applicable_label_ids(connection, target_list_id)
+            allowed_labels = {row["name"].casefold(): row["id"] for row in connection.execute("SELECT id,name FROM labels") if row["id"] in allowed_ids}
+            label_ids = list(dict.fromkeys(allowed_labels[name.casefold()] for name in source_labels if name.casefold() in allowed_labels))
+            # Only a known identical product with the same item details is safe to merge.
+            existing = connection.execute(
+                "SELECT * FROM list_items WHERE list_id = ? AND product_id = ? AND completed = 0 "
+                "AND COALESCE(description,'') = COALESCE(?,'') AND offer_only = ? ORDER BY position,id LIMIT 1",
+                (target_list_id, product_id, description, int(offer_only)),
+            ).fetchone() if product_id else None
+            before = None
+            if existing:
+                if int(existing["quantity"]) + quantity > 1000000:
+                    raise ValueError(localized_text("backend.quantity_range"))
+                labels = self._labels_for(connection, "list_item_labels", "item_id", existing["id"], target_list_id)
+                before = self._item_record_from_row(existing, labels)
+                item_id = existing["id"]
+                connection.execute("UPDATE list_items SET quantity = quantity + ?, updated_at = ? WHERE id = ?", (quantity, now, item_id))
+                # Merge allowed incoming labels while retaining every stored target assignment.
+                connection.executemany(
+                    "INSERT OR IGNORE INTO list_item_labels(item_id,label_id) VALUES(?,?)",
+                    [(item_id, label_id) for label_id in label_ids],
+                )
+            else:
+                category_id, category = (None, None)
+                if product_id:
+                    category_id, category = self._resolve_product_category_for_list(connection, product_id, target_list_id)
+                if category_id is None:
+                    category_id, category = self._resolve_category_rule_for_list(connection, target_list_id, name)
+                item_id = str(uuid4())
+                position = connection.execute("SELECT COALESCE(MAX(position),-1)+1 FROM list_items WHERE list_id = ?", (target_list_id,)).fetchone()[0]
+                connection.execute(
+                    "INSERT INTO list_items(id,list_id,product_id,external_uid,name,description,quantity,category_id,category,due_at,"
+                    "recurrence_interval,recurrence_unit,completed,position,created_at,updated_at,offer_only) "
+                    "VALUES(?,?,?,NULL,?,?,?,?,?,NULL,NULL,NULL,0,?,?,?,?)",
+                    (item_id, target_list_id, product_id, name, description, quantity, category_id, category, position, now, now, int(offer_only)),
+                )
+                self._replace_labels(connection, "list_item_labels", "item_id", item_id, label_ids)
+            row = connection.execute("SELECT * FROM list_items WHERE id = ?", (item_id,)).fetchone()
+            labels = self._labels_for(connection, "list_item_labels", "item_id", item_id, target_list_id)
+            return self._item_record_from_row(row, labels), before, self._record_from_row(target)
 
     async def async_update_item(
         self,
@@ -527,6 +872,8 @@ class HaListManagerDatabase:
         recurrence_interval: int | None = None,
         recurrence_unit: str | None = None,
         offer_only: bool | object = _UNSET,
+        remember_product_category: bool = False,
+        remember_product_labels: bool = False,
     ) -> ListItemRecord:
         """Update and return a list item."""
         before = await self._async_run(self._get_item, item_id)
@@ -546,6 +893,8 @@ class HaListManagerDatabase:
             recurrence_interval,
             recurrence_unit,
             offer_only,
+            remember_product_category,
+            remember_product_labels,
         )
         self._fire_item_mutated(before, record)
         return record
@@ -711,6 +1060,10 @@ class HaListManagerDatabase:
         """Return the most recently updated products."""
         return await self._async_run(self._list_recent_products, limit)
 
+    async def async_get_products_by_ids(self, product_ids: list[str]) -> list[ProductRecord]:
+        """Resolve referenced products without loading the entire product catalog."""
+        return await self._async_run(self._get_products_by_ids, product_ids)
+
     async def async_list_products_page(
         self,
         search: str | None,
@@ -769,8 +1122,9 @@ class HaListManagerDatabase:
         image_url: str | None,
         label_ids: list[str],
         category_ids: list[str] | None = None,
+        list_id: str | None = None,
     ) -> ProductRecord:
-        """Update and return a product."""
+        """Update a product, retaining labels hidden in an optional list context."""
         return await self._async_run(
             self._update_product,
             product_id,
@@ -783,6 +1137,7 @@ class HaListManagerDatabase:
             image_url,
             label_ids,
             category_ids,
+            list_id,
         )
 
     async def async_delete_product(self, product_id: str) -> None:
@@ -1086,8 +1441,9 @@ class HaListManagerDatabase:
         category_id: str | None = None,
         category: str | None = None,
         hidden: bool = False,
+        label_ids: list[str] | None = None,
     ) -> InventoryRecord:
-        """Update stock settings for an inventory assignment."""
+        """Update stock settings and optional product labels atomically."""
         return await self._async_run(
             self._update_inventory_entry,
             entry_id,
@@ -1098,6 +1454,7 @@ class HaListManagerDatabase:
             hidden,
             restock_quantity,
             restock_mode,
+            label_ids,
         )
 
     async def async_set_inventory_hidden(
@@ -1129,10 +1486,15 @@ class HaListManagerDatabase:
         )
 
     async def async_adjust_inventory_with_restock(
-        self, entry_id: str, delta: int
+        self, entry_id: str, delta: int, *, minimum_stock: int | None = None,
+        restock_quantity: int | None = None, restock_mode: str | None = None,
+        category_id: str | None = None, category: str | None = None,
     ) -> dict[str, Any]:
-        """Adjust stock and apply the configured restock rule atomically."""
-        return await self._async_run(self._adjust_inventory_with_restock, entry_id, delta)
+        """Adjust stock, optional scanner metadata and the restock rule atomically."""
+        return await self._async_run(
+            self._adjust_inventory_with_restock, entry_id, delta, minimum_stock,
+            restock_quantity, restock_mode, category_id, category,
+        )
 
     async def async_preview_inventory_restock(self, list_id: str) -> dict[str, Any]:
         """Preview all current shortages without changing data."""
@@ -1289,6 +1651,10 @@ class HaListManagerDatabase:
         """Return recent scan results, newest first."""
         return await self._async_run(self._list_scan_history, limit, offset)
 
+    async def async_get_scan_history_record(self, scan_id: str) -> ScanHistoryRecord | None:
+        """Read one persisted scan, including its terminal status."""
+        return await self._async_run(self._get_scan_history_record, scan_id)
+
     async def async_list_pending_scans(self) -> list[ScanHistoryRecord]:
         """Return scans that still need user input."""
         return await self._async_run(self._list_pending_scans)
@@ -1354,6 +1720,11 @@ class HaListManagerDatabase:
                 })
             except Exception:
                 logging.getLogger(__name__).exception("Unable to publish a committed script action")
+        if ((target.__name__ == "_accept_alexa_item" and result.get("accepted"))
+                or (target.__name__ == "_apply_alexa_sync_local" and result.get("applied"))):
+            # A cancellation cannot undo the SQLite commit. Publish its one
+            # mutation before propagating cancellation, just like bookings.
+            self._fire_item_mutated(result.pop("_before"), result.pop("_after"))
         if cancelled is not None:
             raise cancelled
         return result
@@ -1519,11 +1890,17 @@ class HaListManagerDatabase:
             },
         )
 
-    def _connect(self) -> sqlite3.Connection:
+    @contextmanager
+    def _connect(self) -> Iterator[sqlite3.Connection]:
         connection = sqlite3.connect(self.path, timeout=10)
-        connection.row_factory = sqlite3.Row
-        connection.execute("PRAGMA foreign_keys = ON")
-        return connection
+        try:
+            connection.row_factory = sqlite3.Row
+            connection.execute("PRAGMA foreign_keys = ON")
+            # SQLite's transaction context commits/rolls back but does not close.
+            with connection:
+                yield connection
+        finally:
+            connection.close()
 
     def _initialize(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -1540,7 +1917,7 @@ class HaListManagerDatabase:
                         "The existing database has no supported schema metadata"
                     )
                 version = self._read_schema_version(connection)
-                if version != DATABASE_SCHEMA_VERSION:
+                if version not in (1, 2, 3, DATABASE_SCHEMA_VERSION):
                     raise UnsupportedSchemaVersionError(
                         f"Database schema {version} is not supported; "
                         f"expected {DATABASE_SCHEMA_VERSION}"
@@ -1559,6 +1936,26 @@ class HaListManagerDatabase:
                     "INSERT INTO schema_metadata(key, value) VALUES('schema_version', ?)",
                     (str(DATABASE_SCHEMA_VERSION),),
                 )
+            elif version < DATABASE_SCHEMA_VERSION:
+                # Additive upgrades preserve existing records and IDs. All DDL
+                # and the version marker commit together or roll back together.
+                connection.execute("BEGIN IMMEDIATE")
+                if version == 1:
+                    self._create_alexa_schema(connection)
+                if version < 3:
+                    connection.execute("ALTER TABLE lists ADD COLUMN capitalize_first_letter "
+                                       "INTEGER NOT NULL DEFAULT 0 CHECK(capitalize_first_letter IN (0,1))")
+                    if version == 2:
+                        connection.execute("ALTER TABLE alexa_receipts ADD COLUMN sync_json TEXT NOT NULL DEFAULT '{}'")
+                    self._create_alexa_history_schema(connection)
+                    self._create_alexa_tombstone_schema(connection)
+                    self._seed_alexa_history(connection)
+                self._create_alexa_outbox_schema(connection)
+                connection.execute(
+                    "UPDATE schema_metadata SET value = ? WHERE key = 'schema_version'",
+                    (str(DATABASE_SCHEMA_VERSION),),
+                )
+            self._prune_alexa_tombstones_in(connection, self._now())
 
     def _create_schema(self, connection: sqlite3.Connection) -> None:
         """Create the complete current schema for a first installation."""
@@ -1567,6 +1964,8 @@ class HaListManagerDatabase:
 CREATE TABLE lists (
                 id TEXT PRIMARY KEY,
                 name TEXT NOT NULL COLLATE NOCASE,
+                capitalize_first_letter INTEGER NOT NULL DEFAULT 0
+                    CHECK (capitalize_first_letter IN (0, 1)),
                 list_type TEXT NOT NULL CHECK (
                     list_type IN ('shopping', 'todo', 'inventory')
                 ),
@@ -2074,6 +2473,115 @@ CREATE UNIQUE INDEX chips_list_name_unique ON chips(list_id, priority_name) WHER
         self._create_user_favorites_schema(connection)
         self._create_inventory_restock_transfers_schema(connection)
         self._create_list_scripts_schema(connection)
+        self._create_alexa_schema(connection)
+        self._create_alexa_outbox_schema(connection)
+
+    @staticmethod
+    def _create_alexa_schema(connection: sqlite3.Connection) -> None:
+        """Keep one connection and durable per-source processing receipts."""
+        connection.execute("""CREATE TABLE IF NOT EXISTS alexa_inbox (
+            id INTEGER PRIMARY KEY CHECK(id = 1),
+            settings_json TEXT NOT NULL DEFAULT '{}',
+            status_json TEXT NOT NULL DEFAULT '{}',
+            updated_at TEXT NOT NULL)""")
+        # No foreign keys to list_items/lists: deleting an imported item must
+        # never make its still-visible Amazon source eligible for import again.
+        connection.execute("""CREATE TABLE IF NOT EXISTS alexa_receipts (
+            source_id TEXT NOT NULL,
+            uid TEXT NOT NULL,
+            source_entity_id TEXT,
+            target_list_id TEXT,
+            item_id TEXT,
+            original_name TEXT,
+            name TEXT,
+            description TEXT,
+            quantity INTEGER,
+            cleanup_action TEXT NOT NULL CHECK(cleanup_action IN ('keep','complete','delete')),
+            cleanup_status TEXT NOT NULL CHECK(cleanup_status IN ('ignored','kept','pending','done','error')),
+            created_at TEXT NOT NULL,
+            cleaned_at TEXT,
+            last_error TEXT,
+            sync_json TEXT NOT NULL DEFAULT '{}',
+            PRIMARY KEY(source_id, uid))""")
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS alexa_cleanup_idx "
+            "ON alexa_receipts(cleanup_status, created_at)"
+        )
+        HaListManagerDatabase._create_alexa_history_schema(connection)
+        HaListManagerDatabase._create_alexa_tombstone_schema(connection)
+
+    @staticmethod
+    def _create_alexa_tombstone_schema(connection: sqlite3.Connection) -> None:
+        connection.execute("""CREATE TABLE IF NOT EXISTS alexa_tombstones (
+            source_id TEXT NOT NULL, uid_hash TEXT NOT NULL, expires_at TEXT NOT NULL,
+            PRIMARY KEY(source_id,uid_hash))""")
+        connection.execute("CREATE INDEX IF NOT EXISTS alexa_tombstone_expiry ON alexa_tombstones(expires_at)")
+
+    @staticmethod
+    def _create_alexa_outbox_schema(connection: sqlite3.Connection) -> None:
+        """Queue new local rows in their original transaction, never backfill."""
+        # Keep attempted jobs after local deletion: a lost cloud response may
+        # still need a remote ID attached before its orphan can be removed.
+        connection.execute("""CREATE TABLE IF NOT EXISTS alexa_outbox (
+            id TEXT PRIMARY KEY, source_id TEXT NOT NULL, source_entity_id TEXT NOT NULL,
+            target_list_id TEXT NOT NULL, item_id TEXT NOT NULL,
+            state TEXT NOT NULL DEFAULT 'queued'
+                CHECK(state IN ('queued','attempted','uncertain','cancelled')),
+            payload_json TEXT NOT NULL DEFAULT '{}',
+            created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+            UNIQUE(source_id,target_list_id,item_id))""")
+        connection.execute("CREATE INDEX IF NOT EXISTS alexa_outbox_source ON alexa_outbox(source_id,target_list_id,state)")
+        # This covers card, API, backend, scanner and transfer inserts equally.
+        # Alexa intake commits its receipt in the same transaction, allowing
+        # that transient queue row to be removed before any sender sees it.
+        connection.execute("""CREATE TRIGGER IF NOT EXISTS alexa_outbox_item_created
+AFTER INSERT ON list_items
+WHEN NEW.completed=0 AND NEW.external_uid IS NULL
+BEGIN
+    INSERT OR IGNORE INTO alexa_outbox(
+        id,source_id,source_entity_id,target_list_id,item_id,payload_json,created_at,updated_at)
+    SELECT lower(hex(randomblob(16))),json_extract(settings_json,'$.source_registry_id'),
+        json_extract(settings_json,'$.source_entity_id'),NEW.list_id,NEW.id,
+        json_object('local',json_object('id',NEW.id,'name',NEW.name,'description',NEW.description,
+            'quantity',NEW.quantity,'completed',json('false'),'updated_at',NEW.updated_at)),
+        NEW.created_at,NEW.created_at
+    FROM alexa_inbox JOIN lists ON lists.id=NEW.list_id
+    WHERE alexa_inbox.id=1 AND lists.provider='local' AND lists.list_type='shopping'
+        AND lists.enabled=1 AND json_extract(settings_json,'$.enabled')=1
+        AND json_extract(settings_json,'$.mode')='coupled'
+        AND json_extract(settings_json,'$.send_local_items')=1
+        AND json_extract(settings_json,'$.target_list_id')=NEW.list_id
+        AND length(json_extract(settings_json,'$.source_registry_id'))>0
+        AND length(json_extract(settings_json,'$.source_entity_id'))>0;
+END""")
+        connection.execute("""CREATE TRIGGER IF NOT EXISTS alexa_outbox_item_deleted
+AFTER DELETE ON list_items
+BEGIN
+    DELETE FROM alexa_outbox WHERE item_id=OLD.id AND state='queued';
+END""")
+
+    @staticmethod
+    def _prune_alexa_tombstones_in(connection: sqlite3.Connection, now: str) -> int:
+        return connection.execute("DELETE FROM alexa_tombstones WHERE expires_at<=?", (now,)).rowcount
+
+    def _prune_alexa_tombstones(self) -> int:
+        with self._connect() as connection:
+            return self._prune_alexa_tombstones_in(connection, self._now())
+
+    @staticmethod
+    def _create_alexa_history_schema(connection: sqlite3.Connection) -> None:
+        connection.execute("""CREATE TABLE IF NOT EXISTS alexa_history (
+            source_id TEXT NOT NULL, uid TEXT NOT NULL, source_entity_id TEXT,
+            target_list_id TEXT, item_id TEXT, original_name TEXT, name TEXT,
+            description TEXT, quantity INTEGER, cleanup_action TEXT NOT NULL,
+            cleanup_status TEXT NOT NULL, created_at TEXT NOT NULL,
+            cleaned_at TEXT, last_error TEXT, PRIMARY KEY(source_id,uid))""")
+
+    @staticmethod
+    def _seed_alexa_history(connection: sqlite3.Connection) -> None:
+        connection.execute(f"INSERT OR IGNORE INTO alexa_history({_ALEXA_HISTORY_COLUMNS}) SELECT {_ALEXA_HISTORY_COLUMNS} "
+                           "FROM alexa_receipts WHERE cleanup_status!='ignored' "
+                           "ORDER BY created_at DESC,source_id,uid LIMIT 20")
 
     @staticmethod
     def _create_inventory_restock_transfers_schema(
@@ -2197,12 +2705,19 @@ WHERE registry_entry_id IS NOT NULL;
                 SELECT tracked_entities.*,
                        COUNT(entity_states.id) - COUNT(v.id) AS sample_count,
                        COUNT(v.id) AS hidden_count,
+                       SUM(CASE WHEN v.id IS NULL AND entity_states.source != 'manual'
+                           AND lower(trim(COALESCE(c.state, entity_states.state)))
+                               IN ('unknown', 'unavailable') THEN 1 ELSE 0 END) AS unavailable_count,
+                       options.value AS history_options,
                        MIN(CASE WHEN v.id IS NULL THEN entity_states.last_updated END) AS first_recorded_at,
                        MAX(CASE WHEN v.id IS NULL THEN entity_states.last_updated END) AS last_recorded_at
                 FROM tracked_entities
                 LEFT JOIN entity_states
                   ON entity_states.entity_id = tracked_entities.entity_id
                 LEFT JOIN entity_state_visibility AS v ON v.id = entity_states.id
+                LEFT JOIN entity_state_corrections AS c ON c.id = entity_states.id
+                LEFT JOIN schema_metadata AS options
+                  ON options.key = 'entity_history_options:' || lower(tracked_entities.entity_id)
                 GROUP BY tracked_entities.entity_id
                 ORDER BY tracked_entities.entity_id COLLATE NOCASE
                 """
@@ -2218,18 +2733,67 @@ WHERE registry_entry_id IS NOT NULL;
                 hidden_count=int(row["hidden_count"]),
                 first_recorded_at=row["first_recorded_at"],
                 last_recorded_at=row["last_recorded_at"],
+                ignore_unavailable=self._entity_history_ignore_option(row["history_options"]),
+                unavailable_count=int(row["unavailable_count"]),
+                use_ha_precision=self._entity_history_options(row["history_options"]).get("use_ha_precision") is True,
             )
             for row in rows
         ]
 
+    @staticmethod
+    def _entity_history_options_key(entity_id: str) -> str:
+        return f"entity_history_options:{entity_id.casefold()}"
+
+    @staticmethod
+    def _entity_history_options(value: str | None) -> dict[str, Any]:
+        if value is not None:
+            try:
+                options = json.loads(value)
+                if isinstance(options, dict):
+                    return options
+            except (TypeError, ValueError):
+                pass
+        return {}
+
+    @classmethod
+    def _entity_history_ignore_option(cls, value: str | None) -> bool:
+        option = cls._entity_history_options(value).get("ignore_unavailable")
+        return option if isinstance(option, bool) else True
+
+    def _entity_history_ignores_unavailable(
+        self, connection: sqlite3.Connection, entity_id: str
+    ) -> bool:
+        row = connection.execute(
+            "SELECT value FROM schema_metadata WHERE key = ?",
+            (self._entity_history_options_key(entity_id),),
+        ).fetchone()
+        return self._entity_history_ignore_option(row["value"] if row else None)
+
+    def _get_entity_history_options(self, entity_id: str) -> dict[str, Any]:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT value FROM schema_metadata WHERE key = ?",
+                (self._entity_history_options_key(entity_id),),
+            ).fetchone()
+        return self._entity_history_options(row["value"] if row else None)
+
     def _set_entity_tracking(
         self,
         entity_id: str,
-        enabled: bool,
+        enabled: bool | None = None,
         registry_entry_id: str | None = None,
+        ignore_unavailable: bool | None = None,
+        use_ha_precision: bool | None = None,
     ) -> TrackedEntityRecord:
         now = datetime.now(UTC).isoformat()
         with self._connect() as connection:
+            if enabled is None:
+                row = connection.execute(
+                    "SELECT enabled FROM tracked_entities WHERE entity_id = ?", (entity_id,)
+                ).fetchone()
+                if row is None:
+                    raise ValueError(localized_text("history.source_missing"))
+                enabled = bool(row["enabled"])
             connection.execute(
                 """
                 INSERT INTO tracked_entities(
@@ -2246,6 +2810,23 @@ WHERE registry_entry_id IS NOT NULL;
                 """,
                 (entity_id, registry_entry_id, int(enabled), now, now),
             )
+            if ignore_unavailable is not None or use_ha_precision is not None:
+                key = self._entity_history_options_key(entity_id)
+                row = connection.execute(
+                    "SELECT value FROM schema_metadata WHERE key = ?", (key,)
+                ).fetchone()
+                options = self._entity_history_options(row["value"] if row else None)
+                # Independent preferences share this key; updating one must not
+                # reset the others, including options from future versions.
+                if ignore_unavailable is not None:
+                    options["ignore_unavailable"] = ignore_unavailable
+                if use_ha_precision is not None:
+                    options["use_ha_precision"] = use_ha_precision
+                connection.execute(
+                    """INSERT INTO schema_metadata(key, value) VALUES (?, ?)
+                    ON CONFLICT(key) DO UPDATE SET value = excluded.value""",
+                    (key, json.dumps(options)),
+                )
         return next(
             item for item in self._list_tracked_entities()
             if item.entity_id.casefold() == entity_id.casefold()
@@ -2325,6 +2906,11 @@ WHERE registry_entry_id IS NOT NULL;
                 (new_entity_id, old_entity_id),
             )
             connection.execute(
+                "UPDATE schema_metadata SET key = ? WHERE key = ?",
+                (self._entity_history_options_key(new_entity_id),
+                 self._entity_history_options_key(old_entity_id)),
+            )
+            connection.execute(
                 "DELETE FROM tracked_entities WHERE entity_id = ?",
                 (old_entity_id,),
             )
@@ -2349,6 +2935,8 @@ WHERE registry_entry_id IS NOT NULL;
                 (entity_id,),
             ).fetchone()
             if source is None or not bool(source["enabled"]):
+                return False
+            if state.strip().casefold() in {"unknown", "unavailable"} and self._entity_history_ignores_unavailable(connection, entity_id):
                 return False
             duplicate = connection.execute(
                 """SELECT 1 FROM entity_states
@@ -2389,7 +2977,7 @@ WHERE registry_entry_id IS NOT NULL;
     ) -> dict[str, int]:
         if source not in {"recorder", "long_term_statistics"}:
             raise ValueError(localized_text("backend.history_import_source_unsupported"))
-        imported = updated = already_stored = unchanged = 0
+        imported = updated = already_stored = unchanged = ignored = 0
         now = datetime.now(UTC).isoformat()
         with self._connect() as connection:
             tracked = connection.execute(
@@ -2397,7 +2985,11 @@ WHERE registry_entry_id IS NOT NULL;
             ).fetchone()
             if tracked is None:
                 raise ValueError(localized_text("backend.history_entity_not_configured"))
+            ignore_unavailable = self._entity_history_ignores_unavailable(connection, entity_id)
             for snapshot in states:
+                if ignore_unavailable and str(snapshot["state"]).strip().casefold() in {"unknown", "unavailable"}:
+                    ignored += 1
+                    continue
                 attributes_json = json.dumps(
                     snapshot.get("attributes") or {},
                     ensure_ascii=False,
@@ -2457,14 +3049,39 @@ WHERE registry_entry_id IS NOT NULL;
             "updated": updated,
             "already_stored": already_stored,
             "unchanged": unchanged,
+            "ignored": ignored,
             # Retain the combined field for older frontend builds.
-            "skipped": already_stored + unchanged,
+            "skipped": already_stored + unchanged + ignored,
         }
+
+    def _hide_unavailable_entity_states(self, entity_id: str) -> int:
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            if not connection.execute(
+                "SELECT 1 FROM tracked_entities WHERE entity_id = ?", (entity_id,)
+            ).fetchone():
+                raise ValueError(localized_text("history.source_missing"))
+            # Corrections are the displayed value. Keep repaired measurements
+            # visible, and retain hidden IDs so reimports cannot resurrect them.
+            cursor = connection.execute(
+                """INSERT INTO entity_state_visibility(id, hidden_at)
+                SELECT s.id, ? FROM entity_states AS s
+                LEFT JOIN entity_state_corrections AS c ON c.id = s.id
+                LEFT JOIN entity_state_visibility AS v ON v.id = s.id
+                WHERE s.entity_id = ? AND s.source != 'manual' AND v.id IS NULL
+                  AND lower(trim(COALESCE(c.state, s.state))) IN ('unknown', 'unavailable')""",
+                (datetime.now(UTC).isoformat(), entity_id),
+            )
+            return cursor.rowcount
 
     def _delete_entity_history(self, entity_id: str) -> None:
         with self._connect() as connection:
             connection.execute(
                 "DELETE FROM tracked_entities WHERE entity_id = ?", (entity_id,)
+            )
+            connection.execute(
+                "DELETE FROM schema_metadata WHERE key = ?",
+                (self._entity_history_options_key(entity_id),),
             )
 
     def _same_entity_attributes(self, left: Any, right: Any) -> bool:
@@ -2906,7 +3523,7 @@ WHERE registry_entry_id IS NOT NULL;
                        use_list_labels, use_global_chips, use_type_chips, use_dishes,
                        use_tandoor, tandoor_skip_small_units,
                        tandoor_include_ingredients, tandoor_excluded_units,
-                       tandoor_result_limit,
+                       tandoor_result_limit, capitalize_first_letter,
                        enabled, created_at, updated_at
                 FROM lists
                 ORDER BY name COLLATE NOCASE
@@ -2950,6 +3567,14 @@ WHERE registry_entry_id IS NOT NULL;
             raise LegacyImportError("invalid_config")
         if sum(len(row["items"]) for row in lists) > MAX_ITEMS:
             raise LegacyImportError("too_many_items")
+        if plan.get("can_import") is False or any(
+            not conflict.get("selected")
+            for source in lists for conflict in source.get("ean_conflicts", [])
+        ):
+            raise LegacyImportError("ean_unresolved")
+        ean_products = plan.get("ean_products", [])
+        if not isinstance(ean_products, list) or len(ean_products) > MAX_ITEMS:
+            raise LegacyImportError("ean_source_invalid")
         now = self._now()
         result = {"lists": [], "counts": dict(plan["counts"]), "replayed": False}
         with self._connect() as connection:
@@ -2962,6 +3587,42 @@ WHERE registry_entry_id IS NOT NULL;
                 if stored["fingerprint"] != fingerprint:
                     raise LegacyImportError("import_changed")
                 return {**stored["result"], "replayed": True}
+            # EAN products belong to the shared catalog, including those without
+            # stock. Reusing an EAN never replaces an existing product's data.
+            ean_product_ids = {}
+            ean_created = 0
+            for product in ean_products:
+                if not isinstance(product, dict):
+                    raise LegacyImportError("ean_source_invalid")
+                ean = product.get("ean")
+                if (not isinstance(ean, str) or not ean.isascii() or not ean.isdecimal()
+                        or len(ean) not in {8, 12, 13, 14} or ean in ean_product_ids):
+                    raise LegacyImportError("ean_source_invalid")
+                name = product.get("name")
+                if not isinstance(name, str) or not name.strip() or len(name) > 200:
+                    raise LegacyImportError("ean_source_invalid")
+                existing = connection.execute("SELECT id FROM products WHERE ean = ?", (ean,)).fetchone()
+                if existing is not None:
+                    ean_product_ids[ean] = existing["id"]
+                    continue
+                product_id = str(uuid4())
+                connection.execute(
+                    """INSERT INTO products(
+                        id, ean, name, original_name, brand, package_quantity,
+                        image_url, source, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, 'manual', ?, ?)""",
+                    (product_id, ean, name, product.get("original_name"),
+                     product.get("brand"), product.get("package_quantity"),
+                     product.get("image_url"), now, now),
+                )
+                ean_product_ids[ean] = product_id
+                ean_created += 1
+            if ean_products or any(source.get("ean_enabled") for source in lists):
+                result["ean_counts"] = {
+                    "total": len(ean_product_ids), "created": ean_created,
+                    "reused": len(ean_product_ids) - ean_created,
+                }
+                result["ean_product_ids"] = list(ean_product_ids.values())
             names = {row["name"].casefold() for row in connection.execute("SELECT name FROM lists")}
             for source in lists:
                 name, list_type = source["name"], source["list_type"]
@@ -3010,21 +3671,54 @@ WHERE registry_entry_id IS NOT NULL;
                          chip["chip_kind"], chip["icon"], chip["color"], list_id,
                          json.dumps(template) if template is not None else None, now, now),
                     )
+                for ean, category_name in source.get("ean_product_categories", {}).items():
+                    category_id = category_ids.get(category_name.casefold())
+                    product_id = ean_product_ids.get(ean)
+                    if category_id is None or product_id is None or list_type != "inventory":
+                        raise LegacyImportError("ean_source_invalid")
+                    connection.execute(
+                        "INSERT OR IGNORE INTO product_category_assignments(product_id, category_id) VALUES (?, ?)",
+                        (product_id, category_id),
+                    )
                 product_ids = []
+                seen_product_ids = set()
                 for item in source["items"]:
                     category_id = category_ids.get(item["category"].casefold()) if item["category"] and item["category_saved"] else None
                     if list_type == "inventory":
                         stock = item["stock"]
                         self._validate_stock(stock, None)
-                        product_id = str(uuid4())
-                        # Simplified import deliberately creates generic products,
-                        # leaving every existing product and EAN assignment alone.
-                        connection.execute(
-                            """INSERT INTO products(id, name, source, created_at, updated_at)
-                               VALUES (?, ?, 'manual', ?, ?)""",
-                            (product_id, item["name"], now, now),
-                        )
-                        product_ids.append(product_id)
+                        ean = item.get("product_ean")
+                        product_id = ean_product_ids.get(ean) if ean else None
+                        if ean and (not source.get("ean_enabled") or product_id is None):
+                            raise LegacyImportError("ean_choice_invalid")
+                        if product_id is None:
+                            # Without an EAN choice the established simplified import
+                            # remains independent from existing catalog records.
+                            product_id = str(uuid4())
+                            connection.execute(
+                                """INSERT INTO products(id, name, source, created_at, updated_at)
+                                   VALUES (?, ?, 'manual', ?, ?)""",
+                                (product_id, item["name"], now, now),
+                            )
+                        previous = None
+                        if product_id in seen_product_ids:
+                            previous = connection.execute(
+                                "SELECT id, stock, hidden FROM inventory_entries WHERE list_id = ? AND product_id = ?",
+                                (list_id, product_id),
+                            ).fetchone()
+                        else:
+                            product_ids.append(product_id)
+                            seen_product_ids.add(product_id)
+                        if previous is not None:
+                            # A product has one stock record per list. Even if old
+                            # category names differ, its quantities must not multiply.
+                            stock += previous["stock"]
+                            self._validate_stock(stock, None)
+                            connection.execute(
+                                "UPDATE inventory_entries SET stock = ?, hidden = ? WHERE id = ?",
+                                (stock, int(bool(previous["hidden"]) and item["hidden"]), previous["id"]),
+                            )
+                            continue
                         connection.execute(
                             """INSERT INTO inventory_entries(
                                 id, list_id, product_id, stock, category_id, category,
@@ -3073,6 +3767,7 @@ WHERE registry_entry_id IS NOT NULL;
         tandoor_include_ingredients: bool = True,
         tandoor_excluded_units: str = "",
         tandoor_result_limit: int = 100,
+        capitalize_first_letter: bool = False,
     ) -> ListRecord:
         self._validate_list_type(list_type)
         self._validate_list_provider(list_type, provider, external_entity_id)
@@ -3104,6 +3799,7 @@ WHERE registry_entry_id IS NOT NULL;
             enabled=True,
             created_at=now,
             updated_at=now,
+            capitalize_first_letter=capitalize_first_letter,
         )
         try:
             with self._connect() as connection:
@@ -3117,8 +3813,9 @@ WHERE registry_entry_id IS NOT NULL;
                         use_tandoor, tandoor_skip_small_units,
                         tandoor_include_ingredients, tandoor_excluded_units,
                         tandoor_result_limit,
+                        capitalize_first_letter,
                         enabled, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         record.id,
@@ -3141,6 +3838,7 @@ WHERE registry_entry_id IS NOT NULL;
                         int(record.tandoor_include_ingredients),
                         record.tandoor_excluded_units,
                         record.tandoor_result_limit,
+                        int(record.capitalize_first_letter),
                         int(record.enabled),
                         record.created_at,
                         record.updated_at,
@@ -3176,6 +3874,7 @@ WHERE registry_entry_id IS NOT NULL;
         tandoor_include_ingredients: bool | None = None,
         tandoor_excluded_units: str | None = None,
         tandoor_result_limit: int | None = None,
+        capitalize_first_letter: bool | None = None,
     ) -> ListRecord:
         with self._connect() as connection:
             existing = connection.execute(
@@ -3185,6 +3884,8 @@ WHERE registry_entry_id IS NOT NULL;
                 raise ListNotFoundError(list_id)
 
             next_name = name if name is not None else existing["name"]
+            next_capitalize = (int(capitalize_first_letter) if capitalize_first_letter is not None
+                               else existing["capitalize_first_letter"])
             next_icon = icon
             next_enabled = int(enabled) if enabled is not None else existing["enabled"]
             next_external_entity_id = (
@@ -3307,6 +4008,7 @@ WHERE registry_entry_id IS NOT NULL;
                         use_tandoor = ?, tandoor_skip_small_units = ?,
                         tandoor_include_ingredients = ?, tandoor_excluded_units = ?,
                         tandoor_result_limit = ?,
+                        capitalize_first_letter = ?,
                         updated_at = ?
                     WHERE id = ?
                     """,
@@ -3329,6 +4031,7 @@ WHERE registry_entry_id IS NOT NULL;
                         next_tandoor_include_ingredients,
                         next_tandoor_excluded_units,
                         next_tandoor_result_limit,
+                        next_capitalize,
                         updated_at,
                         list_id,
                     ),
@@ -3385,6 +4088,15 @@ WHERE registry_entry_id IS NOT NULL;
             ]
         return records
 
+    def _get_item_category_names(self, list_id: str) -> dict[str, str]:
+        with self._connect() as connection:
+            self._require_list(connection, list_id)
+            return {row["id"]: row["name"] for row in connection.execute(
+                "SELECT DISTINCT categories.id,categories.name FROM categories "
+                "JOIN list_items ON list_items.category_id = categories.id WHERE list_items.list_id = ?",
+                (list_id,),
+            )}
+
     def _get_item(self, item_id: str) -> ListItemRecord:
         with self._connect() as connection:
             row = connection.execute(
@@ -3396,6 +4108,525 @@ WHERE registry_entry_id IS NOT NULL;
                 connection, "list_item_labels", "item_id", item_id, row["list_id"]
             )
         return self._item_record_from_row(row, labels)
+
+    def _get_alexa_state(self) -> dict[str, Any]:
+        with self._connect() as connection:
+            self._prune_alexa_tombstones_in(connection, self._now())
+            row = connection.execute("SELECT * FROM alexa_inbox WHERE id = 1").fetchone()
+            receipts = connection.execute(
+                "SELECT * FROM alexa_history ORDER BY created_at DESC, source_id, uid LIMIT 20"
+            ).fetchall()
+        return {
+            "settings": json.loads(row["settings_json"]) if row else {},
+            "status": json.loads(row["status_json"]) if row else {},
+            "receipts": [dict(receipt) for receipt in receipts],
+        }
+
+    def _set_alexa_settings(self, settings: dict[str, Any]) -> dict[str, Any]:
+        # Copy through JSON so callers cannot mutate already persisted values.
+        encoded = json.dumps(settings, ensure_ascii=False, allow_nan=False)
+        with self._connect() as connection:
+            connection.execute(
+                "INSERT INTO alexa_inbox(id,settings_json,status_json,updated_at) "
+                "VALUES(1,?,'{}',?) ON CONFLICT(id) DO UPDATE SET "
+                "settings_json=excluded.settings_json,updated_at=excluded.updated_at",
+                (encoded, self._now()),
+            )
+            # Never backfill or resume unsent rows after an option/mapping is
+            # disabled. Attempted creates remain durable until accounted for.
+            eligible = (settings.get("enabled") is True and settings.get("mode") == "coupled"
+                        and settings.get("send_local_items") is True)
+            if eligible:
+                connection.execute(
+                    "DELETE FROM alexa_outbox WHERE state='queued' AND "
+                    "(source_id!=? OR target_list_id!=?)",
+                    (settings.get("source_registry_id") or "", settings.get("target_list_id") or ""),
+                )
+            else:
+                connection.execute("DELETE FROM alexa_outbox WHERE state='queued'")
+        return self._get_alexa_state()
+
+    def _update_alexa_status(self, status: dict[str, Any]) -> None:
+        with self._connect() as connection:
+            row = connection.execute("SELECT status_json FROM alexa_inbox WHERE id=1").fetchone()
+            values = json.loads(row[0]) if row else {}
+            values.update(status)
+            encoded = json.dumps(values, ensure_ascii=False, allow_nan=False)
+            connection.execute(
+                "INSERT INTO alexa_inbox(id,settings_json,status_json,updated_at) "
+                "VALUES(1,'{}',?,?) ON CONFLICT(id) DO UPDATE SET "
+                "status_json=excluded.status_json,updated_at=excluded.updated_at",
+                (encoded, self._now()),
+            )
+
+    def _get_alexa_receipts(
+        self, source_id: str, uids: list[str],
+    ) -> dict[str, dict[str, Any]]:
+        found = {}
+        with self._connect() as connection:
+            for offset in range(0, len(uids), 400):
+                chunk = uids[offset:offset + 400]
+                rows = connection.execute(
+                    "SELECT * FROM alexa_receipts WHERE source_id=? AND uid IN ("
+                    + ",".join("?" for _ in chunk) + ")", (source_id, *chunk),
+                ).fetchall()
+                found.update({row["uid"]: dict(row) for row in rows})
+        return found
+
+    def _list_alexa_pending_receipts(self) -> list[dict[str, Any]]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM alexa_receipts WHERE cleanup_status IN ('pending','error') "
+                "ORDER BY created_at,source_id,uid"
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def _list_alexa_links(self, source_id: str) -> list[dict[str, Any]]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM alexa_receipts WHERE source_id=? ORDER BY created_at,uid",
+                (source_id,),
+            ).fetchall()
+        result = []
+        for row in rows:
+            record = dict(row)
+            record["sync"] = json.loads(record.pop("sync_json"))
+            result.append(record)
+        return result
+
+    @staticmethod
+    def _alexa_outbox_record(row) -> dict[str, Any]:
+        result = dict(row)
+        result["payload"] = json.loads(result.pop("payload_json"))
+        return result
+
+    def _list_alexa_outbox(self, source_id=None, target_list_id=None) -> list[dict[str, Any]]:
+        predicates, parameters = [], []
+        for column, value in (("source_id", source_id), ("target_list_id", target_list_id)):
+            if value is not None:
+                predicates.append(f"{column}=?")
+                parameters.append(value)
+        where = " WHERE " + " AND ".join(predicates) if predicates else ""
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM alexa_outbox" + where + " ORDER BY created_at,id", parameters,
+            ).fetchall()
+        return [self._alexa_outbox_record(row) for row in rows]
+
+    def _update_alexa_outbox(self, job_id, state, payload=None, expected_state=None):
+        allowed = {"queued", "attempted", "uncertain", "cancelled"}
+        if state not in allowed or expected_state is not None and expected_state not in allowed:
+            raise ValueError("Invalid Alexa outbox state")
+        if payload is not None and not isinstance(payload, dict):
+            raise TypeError("Alexa outbox payload must be a mapping")
+        encoded = json.dumps(payload, ensure_ascii=False, allow_nan=False) if payload is not None else None
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute("SELECT * FROM alexa_outbox WHERE id=?", (job_id,)).fetchone()
+            if row is None or expected_state is not None and row["state"] != expected_state:
+                return None
+            # Once a request may have reached Alexa, it must never become a
+            # fresh create automatically after a retry, restart or old callback.
+            if state == "queued" and row["state"] != "queued":
+                raise ValueError("Attempted Alexa create cannot be queued again")
+            connection.execute(
+                "UPDATE alexa_outbox SET state=?,payload_json=COALESCE(?,payload_json),updated_at=? WHERE id=?",
+                (state, encoded, self._now(), job_id),
+            )
+            return self._alexa_outbox_record(connection.execute(
+                "SELECT * FROM alexa_outbox WHERE id=?", (job_id,),
+            ).fetchone())
+
+    def _remove_alexa_outbox(self, job_id: str) -> None:
+        with self._connect() as connection:
+            connection.execute("DELETE FROM alexa_outbox WHERE id=?", (job_id,))
+
+    def _bind_alexa_outbox(self, job_id, uid, summary, status) -> bool:
+        if (not isinstance(uid, str) or not uid or len(uid) > 1000
+                or not isinstance(summary, str) or not summary.strip() or len(summary) > 2000
+                or status not in {"needs_action", "completed"}):
+            raise ValueError("Invalid Alexa create acknowledgement")
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute("SELECT * FROM alexa_outbox WHERE id=?", (job_id,)).fetchone()
+            if row is None or row["state"] == "queued":
+                return False
+            job = self._alexa_outbox_record(row)
+            if uid in job["payload"].get("before_uids", []):
+                return False
+            # Never attach a guessed UID that is already consumed elsewhere.
+            if (connection.execute("SELECT 1 FROM alexa_receipts WHERE source_id=? AND uid=?", (row["source_id"], uid)).fetchone()
+                    or connection.execute("SELECT 1 FROM alexa_history WHERE source_id=? AND uid=?", (row["source_id"], uid)).fetchone()
+                    or connection.execute("SELECT 1 FROM alexa_tombstones WHERE source_id=? AND uid_hash=? AND expires_at>?",
+                        (row["source_id"], sha256(uid.encode("utf-8")).hexdigest(), self._now())).fetchone()):
+                return False
+            local = job["payload"].get("local")
+            if not isinstance(local, dict) or local.get("id") != row["item_id"]:
+                raise ValueError("Alexa outbox has no matching local snapshot")
+            # todo.add_item creates an open position. A completed observation
+            # already represents a later user action and must reach normal
+            # reconciliation rather than being swallowed into its baseline.
+            sync = {"local": local, "remote": {"summary": summary, "status": "needs_action"}}
+            connection.execute(
+                "INSERT INTO alexa_receipts(source_id,uid,source_entity_id,target_list_id,item_id,"
+                "original_name,name,description,quantity,cleanup_action,cleanup_status,created_at,sync_json) "
+                "VALUES(?,?,?,?,?,?,?,?,?,'keep','kept',?,?)",
+                (row["source_id"], uid, row["source_entity_id"], row["target_list_id"], row["item_id"],
+                 summary, local.get("name"), local.get("description"), local.get("quantity"), self._now(),
+                 json.dumps(sync, ensure_ascii=False, allow_nan=False)),
+            )
+            connection.execute("DELETE FROM alexa_outbox WHERE id=?", (job_id,))
+        # No list-item mutation, script event, or inbound activity count: this
+        # is an acknowledgement for an item that was already locally stored.
+        return True
+
+    def _update_alexa_link(
+        self, source_id: str, uid: str, sync: dict[str, Any],
+        original_name: str | None, cleanup_action: str | None, cleanup_status: str | None,
+    ) -> None:
+        if not isinstance(sync, dict):
+            raise TypeError("Alexa synchronization journal must be a mapping")
+        encoded = json.dumps(sync, ensure_ascii=False, allow_nan=False)
+        if cleanup_action is not None and cleanup_action not in {"keep", "complete", "delete"}:
+            raise ValueError(localized_text("alexa.invalid_cleanup"))
+        if cleanup_status is not None and cleanup_status not in {"ignored", "kept", "pending", "done", "error"}:
+            raise ValueError(localized_text("alexa.invalid_cleanup"))
+        with self._connect() as connection:
+            connection.execute(
+                "UPDATE alexa_receipts SET sync_json=?,original_name=COALESCE(?,original_name),"
+                "cleanup_action=COALESCE(?,cleanup_action),cleanup_status=COALESCE(?,cleanup_status),"
+                "last_error=CASE WHEN ? IS NOT NULL THEN NULL ELSE last_error END "
+                "WHERE source_id=? AND uid=?",
+                (encoded, original_name, cleanup_action, cleanup_status, cleanup_status, source_id, uid),
+            )
+            if cleanup_action is not None or cleanup_status is not None:
+                connection.execute(
+                    "UPDATE alexa_history SET cleanup_action=COALESCE(?,cleanup_action),"
+                    "cleanup_status=COALESCE(?,cleanup_status),last_error=NULL WHERE source_id=? AND uid=?",
+                    (cleanup_action, cleanup_status, source_id, uid),
+                )
+
+    def _remove_alexa_links(self, source_id: str, uids: list[str]) -> None:
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            now = self._now()
+            self._prune_alexa_tombstones_in(connection, now)
+            expires = (datetime.fromisoformat(now) + timedelta(minutes=10)).isoformat()
+            for uid in set(uids):
+                if connection.execute("SELECT 1 FROM alexa_receipts WHERE source_id=? AND uid=?", (source_id, uid)).fetchone():
+                    connection.execute("INSERT OR REPLACE INTO alexa_tombstones(source_id,uid_hash,expires_at) VALUES(?,?,?)",
+                                       (source_id, sha256(uid.encode("utf-8")).hexdigest(), expires))
+            connection.executemany("DELETE FROM alexa_receipts WHERE source_id=? AND uid=?",
+                                   [(source_id, uid) for uid in set(uids)])
+
+    def _has_alexa_history(self, source_id: str, uids: list[str]) -> set[str]:
+        found = set()
+        with self._connect() as connection:
+            now = self._now()
+            for offset in range(0, len(uids), 400):
+                chunk = uids[offset:offset + 400]
+                found.update(row[0] for row in connection.execute(
+                    "SELECT uid FROM alexa_history WHERE source_id=? AND uid IN ("
+                    + ",".join("?" for _ in chunk) + ")", (source_id, *chunk)))
+            guards = {row[0] for row in connection.execute(
+                "SELECT uid_hash FROM alexa_tombstones WHERE source_id=? AND expires_at>?", (source_id, now))}
+            found.update(uid for uid in uids if sha256(uid.encode("utf-8")).hexdigest() in guards)
+        return found
+
+    def _ignore_alexa_items(
+        self, source_id: str, uids: list[str], source_entity_id: str | None,
+    ) -> None:
+        if not source_id or not isinstance(source_id, str):
+            raise ValueError(localized_text("alexa.invalid_source"))
+        if any(not isinstance(uid, str) or not uid or len(uid) > 1000 for uid in uids):
+            raise ValueError(localized_text("alexa.invalid_source"))
+        with self._connect() as connection:
+            connection.executemany(
+                "INSERT OR IGNORE INTO alexa_receipts("
+                "source_id,uid,source_entity_id,cleanup_action,cleanup_status,created_at) "
+                "VALUES(?,?,?,'keep','ignored',?)",
+                [(source_id, uid, source_entity_id, self._now()) for uid in set(uids)],
+            )
+
+    @staticmethod
+    def _alexa_match_text(value: str | None) -> str:
+        return " ".join((value or "").split()).casefold()
+
+    @staticmethod
+    def _validate_alexa_item_input(
+        name: str, description: str | None, quantity: int,
+    ) -> tuple[str, str | None]:
+        if not isinstance(name, str) or not name.strip() or len(name) > 200:
+            raise ValueError(localized_text("alexa.item_invalid"))
+        if description is not None and (not isinstance(description, str) or len(description) > 2000):
+            raise ValueError(localized_text("backend.description_too_long"))
+        if isinstance(quantity, bool) or not isinstance(quantity, int) or not 1 <= quantity <= 1_000_000:
+            raise ValueError(localized_text("backend.quantity_range"))
+        return name.strip(), description.strip() or None if description is not None else None
+
+    def _resolve_alexa_product(
+        self, connection: sqlite3.Connection, name: str,
+        match_products: bool, has_unit: bool,
+        product_id: str | None = None,
+    ) -> dict[str, Any]:
+        resolution = {
+            "product_id": None, "product_name": None,
+            "reason": "unit" if has_unit else "disabled", "match_count": 0,
+        }
+        if product_id is not None:
+            product = connection.execute("SELECT id,name FROM products WHERE id=?", (product_id,)).fetchone()
+            if product is None:
+                raise ValueError(localized_text("alexa.alias_product_missing"))
+            resolution.update(product_id=None if has_unit else product["id"],
+                              product_name=product["name"], match_count=1,
+                              reason="unit" if has_unit else "alias_product")
+            return resolution
+        if match_products and not has_unit:
+            key = self._alexa_match_text(unicodedata.normalize("NFKC", name))
+            products = [row for row in connection.execute("SELECT id,name FROM products")
+                        if self._alexa_match_text(unicodedata.normalize("NFKC", row["name"])) == key]
+            resolution["match_count"] = len(products)
+            resolution["reason"] = "no_match" if not products else "multiple_products"
+            if len(products) == 1:
+                product = products[0]
+                resolution.update(product_id=product["id"], product_name=product["name"], reason="unique_product")
+        return resolution
+
+    def _resolve_alexa_item(
+        self, connection: sqlite3.Connection, target_list_id: str,
+        name: str, description: str | None, quantity: int,
+        match_products: bool, has_unit: bool,
+        product_id: str | None = None,
+    ) -> tuple[dict[str, Any], sqlite3.Row | None]:
+        self._require_list(connection, target_list_id)
+        target = connection.execute("SELECT * FROM lists WHERE id=?", (target_list_id,)).fetchone()
+        if target["list_type"] != "shopping" or target["provider"] != "local" or not target["enabled"]:
+            raise ValueError(localized_text("backend.local_shopping_target_required"))
+        resolution = self._resolve_alexa_product(connection, name, match_products, has_unit, product_id)
+        if product_id is not None:
+            name = resolution["product_name"]
+        name = self._format_list_item_name(connection, target_list_id, name, resolution["product_id"])
+        match = None
+        if resolution["product_id"] is not None:
+            linked = connection.execute(
+                "SELECT * FROM list_items WHERE list_id=? AND completed=0 AND product_id=? "
+                "AND external_uid IS NULL AND inventory_source_type IS NULL AND inventory_source_id IS NULL "
+                "ORDER BY position,created_at,id", (target_list_id, resolution["product_id"]),
+            ).fetchall()
+            if len(linked) > 1:
+                resolution.update(product_id=None,
+                                  product_name=resolution["product_name"] if product_id is not None else None,
+                                  reason="multiple_items")
+            else:
+                match = linked[0] if linked else None
+        if resolution["product_id"] is None:
+            # Unit-qualified orders must never become package counts. Ambiguous
+            # products retain the established free-item merge behavior as well.
+            candidates = connection.execute(
+                "SELECT * FROM list_items WHERE list_id=? AND completed=0 "
+                "AND product_id IS NULL AND external_uid IS NULL "
+                "AND inventory_source_type IS NULL AND inventory_source_id IS NULL "
+                "ORDER BY position,created_at,id", (target_list_id,),
+            ).fetchall()
+            match = next((row for row in candidates
+                if self._alexa_match_text(row["name"]) == self._alexa_match_text(name)
+                and self._alexa_match_text(row["description"]) == self._alexa_match_text(description)), None)
+        total = quantity + (match["quantity"] if match else 0)
+        if total > 1_000_000:
+            raise ValueError(localized_text("backend.quantity_range"))
+        resolution.update(
+            action=("product" if resolution["product_id"] else "free") + ("_increase" if match else "_add"),
+            item_id=match["id"] if match else None,
+            quantity=quantity, result_quantity=total, target_missing=False,
+            name=resolution["product_name"] if resolution["product_id"] else name,
+        )
+        return resolution, match
+
+    def _preview_alexa_item(
+        self, target_list_id: str | None, name: str, description: str | None,
+        quantity: int, match_products: bool = False, has_unit: bool = False,
+        product_id: str | None = None,
+    ) -> dict[str, Any]:
+        name, description = self._validate_alexa_item_input(name, description, quantity)
+        with self._connect() as connection:
+            # Resolve against one read snapshot without creating assignments or
+            # reserving a source ID while the user inspects the preview.
+            connection.execute("BEGIN")
+            if target_list_id is None:
+                resolution = self._resolve_alexa_product(connection, name, match_products, has_unit, product_id)
+                resolution.update(action="target_required", target_missing=True, quantity=quantity,
+                                  name=resolution["product_name"] or name)
+            else:
+                resolution, _ = self._resolve_alexa_item(
+                    connection, target_list_id, name, description, quantity,
+                    match_products, has_unit, product_id,
+                )
+        return resolution
+
+    def _accept_alexa_item(
+        self, source_id: str, uid: str, target_list_id: str, name: str,
+        description: str | None, quantity: int, cleanup_action: str,
+        original_name: str, include_existing: bool = False,
+        source_entity_id: str | None = None,
+        match_products: bool = False, has_unit: bool = False,
+        product_id: str | None = None,
+    ) -> dict[str, Any]:
+        if (not isinstance(source_id, str) or not source_id or len(source_id) > 1000
+            or not isinstance(uid, str) or not uid or len(uid) > 1000):
+            raise ValueError(localized_text("alexa.invalid_source"))
+        name, description = self._validate_alexa_item_input(name, description, quantity)
+        if cleanup_action not in ("keep", "complete", "delete"):
+            raise ValueError(localized_text("alexa.invalid_cleanup"))
+        now = self._now()
+        before = None
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            self._prune_alexa_tombstones_in(connection, now)
+            if connection.execute(
+                "SELECT 1 FROM alexa_tombstones WHERE source_id=? AND uid_hash=?",
+                (source_id, sha256(uid.encode("utf-8")).hexdigest()),
+            ).fetchone():
+                return {"accepted": False, "receipt": {"source_id": source_id, "uid": uid,
+                        "cleanup_status": "done"}, "item": None, "resolution": None}
+            previous = connection.execute(
+                "SELECT * FROM alexa_receipts WHERE source_id=? AND uid=?", (source_id, uid),
+            ).fetchone()
+            if previous is None or previous["cleanup_status"] == "ignored":
+                historical = connection.execute(
+                    "SELECT * FROM alexa_history WHERE source_id=? AND uid=?", (source_id, uid),
+                ).fetchone()
+                if historical is not None:
+                    previous = historical
+            if previous is not None and not (include_existing and previous["cleanup_status"] == "ignored"):
+                row = connection.execute("SELECT * FROM list_items WHERE id=?", (previous["item_id"],)).fetchone()
+                item = self._item_record_from_row(
+                    row, self._labels_for(connection, "list_item_labels", "item_id", row["id"], row["list_id"])
+                ).as_dict() if row else None
+                return {"accepted": False, "receipt": dict(previous), "item": item, "resolution": None}
+
+            resolution, match = self._resolve_alexa_item(
+                connection, target_list_id, name, description, quantity,
+                match_products, has_unit, product_id,
+            )
+            name = resolution["name"]
+            if match:
+                before = self._item_record_from_row(
+                    match, self._labels_for(connection, "list_item_labels", "item_id", match["id"], target_list_id)
+                )
+                item_id = match["id"]
+                connection.execute(
+                    "UPDATE list_items SET quantity=quantity+?,updated_at=? WHERE id=?",
+                    (quantity, now, item_id),
+                )
+            else:
+                product_id = resolution["product_id"]
+                item_name = resolution["product_name"] if product_id else name
+                item_name = self._format_list_item_name(connection, target_list_id, item_name, product_id)
+                category_id = category = None
+                if product_id:
+                    category_id, category = self._resolve_product_category_for_list(connection, product_id, target_list_id)
+                if category_id is None and category is None:
+                    category_id, category = self._resolve_category_rule_for_list(connection, target_list_id, item_name)
+                category_id, category = self._resolve_item_category(connection, target_list_id, category_id, category)
+                position = connection.execute(
+                    "SELECT COALESCE(MAX(position),-1)+1 FROM list_items WHERE list_id=?", (target_list_id,),
+                ).fetchone()[0]
+                item_id = str(uuid4())
+                connection.execute(
+                    "INSERT INTO list_items(id,list_id,product_id,name,description,quantity,category_id,category,"
+                    "completed,position,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,0,?,?,?)",
+                    (item_id, target_list_id, product_id, item_name, description, quantity, category_id, category, position, now, now),
+                )
+                if product_id:
+                    labels = self._labels_for(connection, "product_labels", "product_id", product_id, target_list_id)
+                    self._replace_labels(connection, "list_item_labels", "item_id", item_id, [label.id for label in labels])
+            cleanup_status = "kept" if cleanup_action == "keep" else "pending"
+            connection.execute(
+                "INSERT INTO alexa_receipts(source_id,uid,source_entity_id,target_list_id,item_id,"
+                "original_name,name,description,quantity,cleanup_action,cleanup_status,created_at) "
+                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(source_id,uid) DO UPDATE SET "
+                "source_entity_id=excluded.source_entity_id,target_list_id=excluded.target_list_id,"
+                "item_id=excluded.item_id,original_name=excluded.original_name,name=excluded.name,"
+                "description=excluded.description,quantity=excluded.quantity,cleanup_action=excluded.cleanup_action,"
+                "cleanup_status=excluded.cleanup_status,created_at=excluded.created_at,cleaned_at=NULL,last_error=NULL",
+                (source_id, uid, source_entity_id, target_list_id, item_id, original_name,
+                 name, description, quantity, cleanup_action, cleanup_status, now),
+            )
+            connection.execute(
+                "DELETE FROM alexa_outbox WHERE source_id=? AND target_list_id=? AND item_id=? AND state='queued'",
+                (source_id, target_list_id, item_id),
+            )
+            row = connection.execute("SELECT * FROM list_items WHERE id=?", (item_id,)).fetchone()
+            connection.execute(
+                f"INSERT OR REPLACE INTO alexa_history({_ALEXA_HISTORY_COLUMNS}) "
+                f"SELECT {_ALEXA_HISTORY_COLUMNS} FROM alexa_receipts WHERE source_id=? AND uid=?",
+                (source_id, uid),
+            )
+            connection.execute("DELETE FROM alexa_history WHERE rowid NOT IN "
+                               "(SELECT rowid FROM alexa_history ORDER BY created_at DESC,source_id,uid LIMIT 20)")
+            after = self._item_record_from_row(
+                row, self._labels_for(connection, "list_item_labels", "item_id", item_id, target_list_id)
+            )
+            receipt = dict(connection.execute(
+                "SELECT * FROM alexa_receipts WHERE source_id=? AND uid=?", (source_id, uid),
+            ).fetchone())
+        return {"accepted": True, "receipt": receipt, "item": after.as_dict(), "resolution": resolution, "_before": before, "_after": after}
+
+    def _update_alexa_receipt(
+        self, source_id: str, uid: str, cleanup_status: str, last_error: str | None,
+    ) -> None:
+        if cleanup_status not in ("pending", "done", "error", "kept"):
+            raise ValueError(localized_text("alexa.invalid_cleanup"))
+        cleaned_at = self._now() if cleanup_status == "done" else None
+        with self._connect() as connection:
+            connection.execute(
+                "UPDATE alexa_receipts SET cleanup_status=?,last_error=?,cleaned_at=? "
+                "WHERE source_id=? AND uid=? AND cleanup_status!='ignored'",
+                (cleanup_status, last_error, cleaned_at, source_id, uid),
+            )
+            connection.execute(
+                "UPDATE alexa_history SET cleanup_status=?,last_error=?,cleaned_at=? "
+                "WHERE source_id=? AND uid=?",
+                (cleanup_status, last_error, cleaned_at, source_id, uid),
+            )
+
+    def _apply_alexa_sync_local(
+        self, item_id: str, expected_updated_at: str,
+        completed: bool | None, delete: bool,
+    ) -> dict[str, Any]:
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute("SELECT * FROM list_items WHERE id=?", (item_id,)).fetchone()
+            if row is None:
+                return {"applied": False, "item": None, "list_id": None}
+            labels = self._labels_for(connection, "list_item_labels", "item_id", item_id, row["list_id"])
+            before = self._item_record_from_row(row, labels)
+            result = {"applied": False, "item": before.as_dict(), "list_id": row["list_id"]}
+            target = connection.execute("SELECT provider,list_type FROM lists WHERE id=?", (row["list_id"],)).fetchone()
+            if row["updated_at"] != expected_updated_at or target["provider"] != "local" or target["list_type"] != "shopping":
+                return result
+            if delete:
+                connection.execute("DELETE FROM list_items WHERE id=?", (item_id,))
+                after = None
+            elif completed is not None and bool(row["completed"]) != completed:
+                connection.execute("UPDATE list_items SET completed=?,updated_at=? WHERE id=?",
+                                   (int(completed), self._now(), item_id))
+                after = self._item_record_from_row(connection.execute(
+                    "SELECT * FROM list_items WHERE id=?", (item_id,)).fetchone(), labels)
+            else:
+                return result
+            return {"applied": True, "item": after.as_dict() if after else None,
+                    "list_id": before.list_id, "_before": before, "_after": after}
+
+    @staticmethod
+    def _format_list_item_name(
+        connection: sqlite3.Connection, list_id: str, name: str,
+        product_id: str | None, external_uid: str | None = None,
+    ) -> str:
+        if product_id is not None or external_uid is not None or not name:
+            return name
+        row = connection.execute("SELECT provider,capitalize_first_letter FROM lists WHERE id=?", (list_id,)).fetchone()
+        return name[:1].upper() + name[1:] if row and row["provider"] == "local" and row["capitalize_first_letter"] else name
 
     def _create_item(
         self,
@@ -3412,16 +4643,29 @@ WHERE registry_entry_id IS NOT NULL;
         recurrence_interval: int | None = None,
         recurrence_unit: str | None = None,
         offer_only: bool | object = False,
+        remember_product_category: bool = False,
+        remember_product_labels: bool = False,
     ) -> ListItemRecord:
         now = self._now()
         recurrence_interval, recurrence_unit = self._validate_recurrence(
             recurrence_interval, recurrence_unit
         )
         with self._connect() as connection:
+            if remember_product_category or remember_product_labels:
+                connection.execute("BEGIN IMMEDIATE")
             self._require_list(connection, list_id)
+            name = self._format_list_item_name(connection, list_id, name, product_id, external_uid)
             kind = connection.execute("SELECT list_type FROM lists WHERE id = ?", (list_id,)).fetchone()[0]
             if offer_only and kind != "shopping":
                 raise ValueError(localized_text("backend.offers_shopping_only"))
+            if remember_product_category:
+                category_id, category = self._remember_item_product_category(
+                    connection, list_id, product_id, category_id
+                )
+            if remember_product_labels:
+                self._remember_item_product_labels(
+                    connection, list_id, product_id, label_ids
+                )
             if product_id is not None:
                 self._require_product(connection, product_id)
                 if category_id is None and category is None:
@@ -3533,11 +4777,15 @@ WHERE registry_entry_id IS NOT NULL;
         recurrence_interval: int | None = None,
         recurrence_unit: str | None = None,
         offer_only: bool | object = _UNSET,
+        remember_product_category: bool = False,
+        remember_product_labels: bool = False,
     ) -> ListItemRecord:
         recurrence_interval, recurrence_unit = self._validate_recurrence(
             recurrence_interval, recurrence_unit
         )
         with self._connect() as connection:
+            if remember_product_category or remember_product_labels:
+                connection.execute("BEGIN IMMEDIATE")
             existing = connection.execute(
                 "SELECT list_id, product_id, external_uid FROM list_items WHERE id = ?", (item_id,)
             ).fetchone()
@@ -3550,11 +4798,21 @@ WHERE registry_entry_id IS NOT NULL;
                 connection.execute("UPDATE list_items SET offer_only = ? WHERE id = ?", (int(bool(offer_only)), item_id))
             next_product_id = existing["product_id"] if product_id is _UNSET else product_id
             next_external_uid = existing["external_uid"] if external_uid is _UNSET else external_uid
+            name = self._format_list_item_name(connection, existing["list_id"], name, next_product_id, next_external_uid)
             if next_product_id is not None:
                 self._require_product(connection, next_product_id)
             category_id, category = self._resolve_item_category(
                 connection, existing["list_id"], category_id, category
             )
+            if remember_product_category:
+                category_id, category = self._remember_item_product_category(
+                    connection, existing["list_id"], next_product_id, category_id
+                )
+            if remember_product_labels:
+                self._remember_item_product_labels(
+                    connection, existing["list_id"], next_product_id, label_ids,
+                    item_id,
+                )
             connection.execute(
                 """
                 UPDATE list_items
@@ -3581,17 +4839,10 @@ WHERE registry_entry_id IS NOT NULL;
             row = connection.execute(
                 "SELECT * FROM list_items WHERE id = ?", (item_id,)
             ).fetchone()
-            existing_label_ids = {
-                assigned["label_id"] for assigned in connection.execute(
-                    "SELECT label_id FROM list_item_labels WHERE item_id = ?", (item_id,)
-                ).fetchall()
-            }
-            visible_label_ids = self._applicable_label_ids(
-                connection, existing["list_id"]
+            label_ids = self._list_context_label_ids(
+                connection, "list_item_labels", "item_id", item_id,
+                label_ids, existing["list_id"],
             )
-            label_ids = list(dict.fromkeys([
-                *label_ids, *(existing_label_ids - visible_label_ids)
-            ]))
             self._replace_labels(
                 connection, "list_item_labels", "item_id", item_id, label_ids
             )
@@ -4082,6 +5333,109 @@ WHERE registry_entry_id IS NOT NULL;
                 (list_id, profile_id),
             )
 
+    def _remember_item_product_labels(
+        self,
+        connection: sqlite3.Connection,
+        list_id: str,
+        product_id: str | None,
+        label_ids: list[str],
+        item_id: str | None = None,
+    ) -> None:
+        """Replace only direct product assignments editable in this list."""
+        target = connection.execute(
+            "SELECT list_type, provider FROM lists WHERE id = ?", (list_id,),
+        ).fetchone()
+        if target is None:
+            raise ListNotFoundError(list_id)
+        if target["list_type"] != "shopping" or target["provider"] != "local":
+            raise ValueError(localized_text("backend.local_shopping_target_required"))
+        if product_id is None:
+            raise ProductNotFoundError(product_id)
+        self._require_product(connection, product_id)
+        self._validate_label_ids(connection, label_ids)
+        visible_ids = self._applicable_label_ids(connection, list_id)
+        stored_ids = {
+            label.id for label in self._labels_for(
+                connection, "product_labels", "product_id", product_id
+            )
+        }
+        selected_ids = set(label_ids)
+        retained_item_ids = {
+            label.id for label in self._labels_for(
+                connection, "list_item_labels", "item_id", item_id
+            )
+        } if item_id is not None else set()
+        # Drafts can retain unavailable assignments, but cannot introduce a
+        # label from another list, a disabled scope or a shadowed definition.
+        if selected_ids - visible_ids - stored_ids - retained_item_ids:
+            raise LabelNotFoundError(localized_text("backend.label_assignment_unknown"))
+        next_ids = (stored_ids - visible_ids) | (selected_ids & visible_ids)
+        if next_ids != stored_ids:
+            self._replace_labels(
+                connection, "product_labels", "product_id", product_id,
+                sorted(next_ids),
+            )
+            connection.execute(
+                "UPDATE products SET updated_at = ? WHERE id = ?",
+                (self._now(), product_id),
+            )
+
+    def _remember_item_product_category(
+        self,
+        connection: sqlite3.Connection,
+        list_id: str,
+        product_id: str | None,
+        category_id: str | None,
+    ) -> tuple[str, str]:
+        """Store the saved item's default only in this product/list context."""
+        target = connection.execute(
+            "SELECT list_type, provider, use_global_categories, use_type_categories "
+            "FROM lists WHERE id = ?", (list_id,),
+        ).fetchone()
+        if target is None:
+            raise ListNotFoundError(list_id)
+        if target["list_type"] != "shopping" or target["provider"] != "local":
+            raise ValueError(localized_text("backend.local_shopping_target_required"))
+        if product_id is None:
+            raise ProductNotFoundError(product_id)
+        self._require_product(connection, product_id)
+        category = connection.execute(
+            "SELECT * FROM categories WHERE id = ?", (category_id,),
+        ).fetchone()
+        if category is None or not (
+            category["scope"] == "list" and category["list_id"] == list_id
+            or category["scope"] == "global" and target["use_global_categories"]
+            or category["scope"] == "list_type" and category["list_type"] == "shopping"
+            and target["use_type_categories"]
+        ):
+            raise CategoryNotFoundError(category_id)
+        local = connection.execute(
+            "SELECT * FROM categories WHERE scope = 'list' AND list_id = ? "
+            "AND name = ? COLLATE NOCASE", (list_id, category["name"]),
+        ).fetchone()
+        local_id = local["id"] if local else str(uuid4())
+        if local is None:
+            now = self._now()
+            connection.execute(
+                "INSERT INTO categories(id,name,scope,list_type,list_id,icon,color,"
+                "position,created_at,updated_at) VALUES(?,?,'list',NULL,?,?,?,?,?,?)",
+                (local_id, category["name"], list_id, category["icon"],
+                 category["color"], category["position"], now, now),
+            )
+        # Unlike category administration, this opt-in save must never move
+        # sibling entries or overwrite the product's broader defaults.
+        connection.execute(
+            "DELETE FROM product_category_assignments WHERE product_id = ? "
+            "AND category_id IN (SELECT id FROM categories "
+            "WHERE scope = 'list' AND list_id = ?)",
+            (product_id, list_id),
+        )
+        connection.execute(
+            "INSERT INTO product_category_assignments(product_id, category_id) VALUES (?, ?)",
+            (product_id, local_id),
+        )
+        return local_id, local["name"] if local else category["name"]
+
     @staticmethod
     def _resolve_item_category(
         connection: sqlite3.Connection,
@@ -4177,6 +5531,19 @@ WHERE registry_entry_id IS NOT NULL;
                 )
                 for row in rows
             ]
+
+    def _get_products_by_ids(self, product_ids: list[str]) -> list[ProductRecord]:
+        if not product_ids:
+            return []
+        with self._connect() as connection:
+            placeholders = ",".join("?" for _ in product_ids)
+            rows = connection.execute(
+                f"SELECT * FROM products WHERE id IN ({placeholders}) ORDER BY name COLLATE NOCASE",
+                product_ids,
+            ).fetchall()
+            return [self._product_record_from_row(
+                row, self._labels_for(connection, "product_labels", "product_id", row["id"]),
+                self._product_category_assignments(connection, row["id"])) for row in rows]
 
     def _list_products_page(
         self,
@@ -4314,6 +5681,7 @@ WHERE registry_entry_id IS NOT NULL;
         image_url: str | None,
         label_ids: list[str],
         category_ids: list[str] | None,
+        list_id: str | None = None,
     ) -> ProductRecord:
         try:
             with self._connect() as connection:
@@ -4341,6 +5709,12 @@ WHERE registry_entry_id IS NOT NULL;
                 row = connection.execute(
                     "SELECT * FROM products WHERE id = ?", (product_id,)
                 ).fetchone()
+                if list_id is not None:
+                    self._require_list(connection, list_id)
+                    label_ids = self._list_context_label_ids(
+                        connection, "product_labels", "product_id", product_id,
+                        label_ids, list_id,
+                    )
                 self._replace_labels(
                     connection, "product_labels", "product_id", product_id, label_ids
                 )
@@ -6074,7 +7448,7 @@ WHERE registry_entry_id IS NOT NULL;
                        use_list_labels, use_global_chips, use_type_chips, use_dishes,
                        use_tandoor, tandoor_skip_small_units,
                        tandoor_include_ingredients, tandoor_excluded_units,
-                       tandoor_result_limit,
+                       tandoor_result_limit, capitalize_first_letter,
                        enabled,
                        created_at, updated_at
                 FROM lists
@@ -6168,7 +7542,7 @@ WHERE registry_entry_id IS NOT NULL;
                     (entry_id,),
                 ).fetchone()
                 labels = self._labels_for(
-                    connection, "product_labels", "product_id", product_id
+                    connection, "product_labels", "product_id", product_id, list_id
                 )
                 category_assignments = self._product_category_assignments(
                     connection, product_id
@@ -6191,11 +7565,13 @@ WHERE registry_entry_id IS NOT NULL;
         hidden: bool,
         restock_quantity: int | None = None,
         restock_mode: str | None = None,
+        label_ids: list[str] | None = None,
     ) -> InventoryRecord:
         self._validate_stock(stock, minimum_stock)
         with self._connect() as connection:
             existing = connection.execute(
-                """SELECT inventory_entries.list_id, inventory_entries.stock,
+                """SELECT inventory_entries.list_id, inventory_entries.product_id,
+                          inventory_entries.stock,
                           inventory_entries.restock_quantity, inventory_entries.restock_mode,
                           inventory_group_members.group_id
                    FROM inventory_entries
@@ -6229,6 +7605,22 @@ WHERE registry_entry_id IS NOT NULL;
             )
             if cursor.rowcount != 1:
                 raise InventoryEntryNotFoundError(entry_id)
+            if label_ids is not None:
+                # Validate before resolving scope: an unknown ID must reject
+                # the complete stock correction rather than disappear silently.
+                self._validate_label_ids(connection, label_ids)
+                scoped_labels = self._list_context_label_ids(
+                    connection, "product_labels", "product_id", existing["product_id"],
+                    label_ids, existing["list_id"],
+                )
+                self._replace_labels(
+                    connection, "product_labels", "product_id", existing["product_id"],
+                    scoped_labels,
+                )
+                connection.execute(
+                    "UPDATE products SET updated_at = ? WHERE id = ?",
+                    (self._now(), existing["product_id"]),
+                )
             if int(existing["stock"]) != stock:
                 connection.execute(
                     "DELETE FROM inventory_restock_state WHERE list_id = ? AND ((source_type = 'entry' AND source_id = ?) OR (source_type = 'group' AND source_id = ?))",
@@ -6581,14 +7973,20 @@ WHERE registry_entry_id IS NOT NULL;
             "target_item_created": existing is None, "origin": origin,
         }
 
-    def _adjust_inventory_with_restock(self, entry_id: str, delta: int) -> dict[str, Any]:
+    def _adjust_inventory_with_restock(
+        self, entry_id: str, delta: int, minimum_stock: int | None = None,
+        restock_quantity: int | None = None, restock_mode: str | None = None,
+        category_id: str | None = None, category: str | None = None,
+    ) -> dict[str, Any]:
         if delta == 0 or abs(delta) > 1000000:
             raise ValueError(localized_text("backend.stock_delta_range"))
         with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
             before_source = self._restock_source(connection, entry_id)
-            before_stock = connection.execute(
-                "SELECT stock FROM inventory_entries WHERE id = ?", (entry_id,)
-            ).fetchone()["stock"]
+            existing = connection.execute(
+                "SELECT * FROM inventory_entries WHERE id = ?", (entry_id,)
+            ).fetchone()
+            before_stock = existing["stock"]
             if delta < 0 and before_stock == 0:
                 settings = self._restock_settings_row(connection, before_source["list_id"])
                 effective_mode = self._effective_restock_mode(settings, before_source)
@@ -6601,6 +7999,7 @@ WHERE registry_entry_id IS NOT NULL;
                 ).fetchone()
                 return {
                     "entry": self._inventory_record_from_row(connection, row).as_dict(),
+                    "stock_before": int(before_stock), "stock_after": int(before_stock),
                     "needs_confirmation": bool(
                         settings and settings["enabled"] and settings["target_list_id"]
                         and effective_mode not in {None, "disabled"} and fixed_configured
@@ -6612,6 +8011,29 @@ WHERE registry_entry_id IS NOT NULL;
                     "transfer": None,
                 }
             undo_before = self._inventory_booking_snapshot(connection, entry_id, before_source["list_id"])
+            if any(value is not None for value in (
+                minimum_stock, restock_quantity, restock_mode, category_id, category,
+            )):
+                minimum_stock = existing["minimum_stock"] if minimum_stock is None else minimum_stock
+                restock_quantity = existing["restock_quantity"] if restock_quantity is None else restock_quantity
+                restock_mode = existing["restock_mode"] if restock_mode is None else restock_mode
+                if restock_mode == "inherit":
+                    restock_mode = None
+                self._validate_stock(before_stock, minimum_stock)
+                self._validate_restock_quantity(restock_quantity)
+                self._validate_restock_mode(restock_mode)
+                self._validate_fixed_restock_threshold(restock_mode, minimum_stock)
+                if category_id is None and category is None:
+                    category_id, category = existing["category_id"], existing["category"]
+                else:
+                    category_id, category = self._resolve_item_category(
+                        connection, existing["list_id"], category_id, category
+                    )
+                connection.execute(
+                    "UPDATE inventory_entries SET minimum_stock = ?, restock_quantity = ?, "
+                    "restock_mode = ?, category_id = ?, category = ? WHERE id = ?",
+                    (minimum_stock, restock_quantity, restock_mode, category_id, category, entry_id),
+                )
             actual_delta = delta if delta > 0 else -min(abs(delta), int(before_stock))
             connection.execute(
                 "UPDATE inventory_entries SET stock = stock + ?, updated_at = ? WHERE id = ?",
@@ -6654,6 +8076,7 @@ WHERE registry_entry_id IS NOT NULL;
             ).fetchone()
             return {"undo_token": undo_token,
                 "entry": self._inventory_record_from_row(connection, row).as_dict(),
+                "stock_before": int(before_stock), "stock_after": int(before_stock) + actual_delta,
                 "needs_confirmation": False, "transfer": transfer,
             }
 
@@ -7121,6 +8544,11 @@ WHERE registry_entry_id IS NOT NULL;
             ).fetchall()
         return [self._scan_history_from_row(row) for row in rows], total
 
+    def _get_scan_history_record(self, scan_id: str) -> ScanHistoryRecord | None:
+        with self._connect() as connection:
+            row = connection.execute("SELECT * FROM scan_history WHERE id = ?", (scan_id,)).fetchone()
+        return self._scan_history_from_row(row) if row else None
+
     def _list_pending_scans(self) -> list[ScanHistoryRecord]:
         with self._connect() as connection:
             rows = connection.execute(
@@ -7354,7 +8782,7 @@ WHERE registry_entry_id IS NOT NULL;
         connection: sqlite3.Connection, row: sqlite3.Row
     ) -> InventoryRecord:
         labels = HaListManagerDatabase._labels_for(
-            connection, "product_labels", "product_id", row["product_id"]
+            connection, "product_labels", "product_id", row["product_id"], row["list_id"]
         )
         assignments = HaListManagerDatabase._product_category_assignments(
             connection, row["product_id"]
@@ -7458,6 +8886,33 @@ WHERE registry_entry_id IS NOT NULL;
         return row
 
     @staticmethod
+    def _list_context_label_ids(
+        connection: sqlite3.Connection, assignment_table: str, owner_column: str,
+        owner_id: str, label_ids: list[str], list_id: str,
+    ) -> list[str]:
+        """Apply visible selections while preserving hidden and inherited IDs."""
+        available = HaListManagerDatabase._applicable_label_records(connection, list_id)
+        visible_ids = {label.id for label in available}
+        selected_names = {
+            label.name.casefold() for label in available if label.id in label_ids
+        }
+        stored = HaListManagerDatabase._labels_for(
+            connection, assignment_table, owner_column, owner_id
+        )
+        stored_visible_names = {
+            label.name.casefold() for label in stored if label.id in visible_ids
+        }
+        effective = HaListManagerDatabase._resolve_scoped_records(available)
+        # A selected inherited name keeps its stored ID even when a more
+        # specific definition supplies its appearance. Hidden scopes survive.
+        return list(dict.fromkeys([
+            *(label.id for label in stored if label.id not in visible_ids
+              or label.name.casefold() in selected_names),
+            *(label.id for label in effective if label.name.casefold() in
+              selected_names - stored_visible_names),
+        ]))
+
+    @staticmethod
     def _labels_for(
         connection: sqlite3.Connection,
         assignment_table: str,
@@ -7476,27 +8931,22 @@ WHERE registry_entry_id IS NOT NULL;
         ).fetchall()
         records = [HaListManagerDatabase._label_record_from_row(row) for row in rows]
         if list_id is not None:
-            list_row = connection.execute(
-                "SELECT list_type, use_global_labels, use_type_labels "
-                "FROM lists WHERE id = ?",
-                (list_id,),
-            ).fetchone()
-            if list_row is not None:
-                records = [
-                    label for label in records
-                    if (label.scope == "global" and list_row["use_global_labels"])
-                    or (label.scope == "list_type" and list_row["use_type_labels"] and label.list_type == list_row["list_type"])
-                    or (label.scope == "list" and label.list_id == list_id)
-                ]
-                records = HaListManagerDatabase._resolve_scoped_records(records)
+            available = HaListManagerDatabase._applicable_label_records(connection, list_id)
+            available_ids = {label.id for label in available}
+            effective = {
+                label.name.casefold(): label
+                for label in HaListManagerDatabase._resolve_scoped_records(available)
+            }
+            records = list({
+                label.name.casefold(): effective[label.name.casefold()]
+                for label in records if label.id in available_ids
+            }.values())
+            records.sort(key=lambda label: label.name.casefold())
         return tuple(records)
 
     @staticmethod
-    def _replace_labels(
+    def _validate_label_ids(
         connection: sqlite3.Connection,
-        assignment_table: str,
-        owner_column: str,
-        owner_id: str,
         label_ids: list[str],
     ) -> None:
         unique_ids = list(dict.fromkeys(label_ids))
@@ -7508,6 +8958,17 @@ WHERE registry_entry_id IS NOT NULL;
             ).fetchone()["count"]
             if count != len(unique_ids):
                 raise LabelNotFoundError(localized_text("backend.label_assignment_unknown"))
+
+    @staticmethod
+    def _replace_labels(
+        connection: sqlite3.Connection,
+        assignment_table: str,
+        owner_column: str,
+        owner_id: str,
+        label_ids: list[str],
+    ) -> None:
+        unique_ids = list(dict.fromkeys(label_ids))
+        HaListManagerDatabase._validate_label_ids(connection, unique_ids)
         connection.execute(
             f"DELETE FROM {assignment_table} WHERE {owner_column} = ?", (owner_id,)
         )
@@ -7694,45 +9155,16 @@ WHERE registry_entry_id IS NOT NULL;
         return re.fullmatch(expression, normalized_name) is not None
 
     @staticmethod
-    def _category_rules_overlap(first: str, second: str) -> bool:
-        """Return whether two simple asterisk patterns can match one name."""
-        left = " ".join(first.casefold().split())
-        right = " ".join(second.casefold().split())
-        pending = [(0, 0)]
-        visited: set[tuple[int, int]] = set()
-        while pending:
-            left_index, right_index = pending.pop()
-            state = (left_index, right_index)
-            if state in visited:
-                continue
-            visited.add(state)
-            if left_index == len(left) and right_index == len(right):
-                return True
-
-            left_star = left_index < len(left) and left[left_index] == "*"
-            right_star = right_index < len(right) and right[right_index] == "*"
-            if left_star:
-                pending.append((left_index + 1, right_index))
-            if right_star:
-                pending.append((left_index, right_index + 1))
-
-            left_symbol = None if left_index == len(left) else (
-                None if left_star else left[left_index]
-            )
-            right_symbol = None if right_index == len(right) else (
-                None if right_star else right[right_index]
-            )
-            if left_index == len(left) or right_index == len(right):
-                continue
-            if left_star and right_star:
-                continue
-            if left_star:
-                pending.append((left_index, right_index + 1))
-            elif right_star:
-                pending.append((left_index + 1, right_index))
-            elif left_symbol == right_symbol:
-                pending.append((left_index + 1, right_index + 1))
-        return False
+    def _category_rules_conflict(first: str, second: str) -> bool:
+        """Detect direct text conflicts without inventing combined item names."""
+        # Arbitrary pattern intersection would reject every pair of contains
+        # rules: '*Sauce*' and '*Erdbeeren*' could both match 'Erdbeeren Sauce'.
+        # Compare the rules' own literal text instead; real combined names use
+        # the normal category priority when they are added.
+        return (
+            HaListManagerDatabase._category_rule_matches(first, second.replace("*", ""))
+            or HaListManagerDatabase._category_rule_matches(second, first.replace("*", ""))
+        )
 
     @staticmethod
     def _ensure_category_rules_unique_in_scope(
@@ -7743,7 +9175,7 @@ WHERE registry_entry_id IS NOT NULL;
         list_type: str | None,
         list_id: str | None,
     ) -> None:
-        """Reject ambiguous rules on two categories in one scope bucket."""
+        """Reject direct rule conflicts on two categories in one scope bucket."""
         if not patterns:
             return
         rows = connection.execute(
@@ -7760,7 +9192,7 @@ WHERE registry_entry_id IS NOT NULL;
         ).fetchall()
         for pattern in patterns:
             for row in rows:
-                if HaListManagerDatabase._category_rules_overlap(
+                if HaListManagerDatabase._category_rules_conflict(
                     pattern, row["pattern"]
                 ):
                     raise ValueError(
@@ -7837,6 +9269,8 @@ WHERE registry_entry_id IS NOT NULL;
             WHERE (categories.scope = 'list' AND categories.list_id = ?)
                OR (categories.scope = 'list_type' AND categories.list_type = ? AND ?)
                OR (categories.scope = 'global' AND ?)
+            ORDER BY categories.position, categories.name COLLATE NOCASE,
+                     categories.id, rules.position
             """,
             (
                 list_id,
@@ -7888,13 +9322,23 @@ WHERE registry_entry_id IS NOT NULL;
     def _applicable_label_ids(
         connection: sqlite3.Connection, list_id: str
     ) -> set[str]:
+        labels = HaListManagerDatabase._applicable_label_records(connection, list_id)
+        return {
+            label.id for label in HaListManagerDatabase._resolve_scoped_records(labels)
+        }
+
+    @staticmethod
+    def _applicable_label_records(
+        connection: sqlite3.Connection, list_id: str
+    ) -> list[LabelRecord]:
+        """Return permitted definitions before resolving same-name priority."""
         list_row = connection.execute(
             "SELECT list_type, use_global_labels, use_type_labels "
             "FROM lists WHERE id = ?",
             (list_id,),
         ).fetchone()
         if list_row is None:
-            return set()
+            return []
         clauses = []
         values: list[Any] = []
         if list_row["use_global_labels"]:
@@ -7904,15 +9348,11 @@ WHERE registry_entry_id IS NOT NULL;
             values.append(list_row["list_type"])
         clauses.append("(scope = 'list' AND list_id = ?)")
         values.append(list_id)
-        if not clauses:
-            return set()
         rows = connection.execute(
             "SELECT labels.*, 0 AS product_count, 0 AS item_count FROM labels WHERE "
             + " OR ".join(clauses), values
         ).fetchall()
-        labels = [HaListManagerDatabase._label_record_from_row(row) for row in rows]
-        labels = HaListManagerDatabase._resolve_scoped_records(labels)
-        return {label.id for label in labels}
+        return [HaListManagerDatabase._label_record_from_row(row) for row in rows]
 
     @staticmethod
     def _require_list(connection: sqlite3.Connection, list_id: str) -> None:
@@ -7954,6 +9394,7 @@ WHERE registry_entry_id IS NOT NULL;
             enabled=bool(row["enabled"]),
             created_at=row["created_at"],
             updated_at=row["updated_at"],
+            capitalize_first_letter=bool(row["capitalize_first_letter"]),
         )
 
     @staticmethod
@@ -8000,8 +9441,6 @@ WHERE registry_entry_id IS NOT NULL;
             raise ValueError(localized_text("backend.notification_provider_unsupported", provider=provider))
         if message_format not in {"plain", "markdown", "html"}:
             raise ValueError(localized_text("backend.message_format_unsupported", format=message_format))
-        if provider == "notify_entity" and message_format != "plain":
-            raise ValueError(localized_text("backend.notify_plain_text_only"))
         if provider in {"persistent", "ntfy"} and message_format == "html":
             raise ValueError(localized_text("backend.provider_html_unsupported", provider=provider))
 

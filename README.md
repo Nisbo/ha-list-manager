@@ -1,166 +1,210 @@
 # HA List Manager
 
-Shopping lists, household inventory and to-do lists inside Home Assistant —
-with a shared product database, dashboard cards and an administration panel.
-A separate history card adds long-term recording for selected HA entities.
+**Shopping lists, inventory and tasks — together in Home Assistant.**
 
-> [!IMPORTANT]
-> **Beta release: 1.0.0b1.** This is the first public beta, not a stable release.
-> Back up your Home Assistant configuration and important data before testing.
-> Please report problems with the installed version and steps to reproduce them.
+English · [Deutsch](README_DE.md) · [Wiki](https://github.com/Nisbo/ha-list-manager/wiki)
 
-**Release channel:** For technical reasons, the first beta **1.0.0b1** is
-published from `main` as a regular GitHub release. The software remains a
-**beta**. Further beta updates will be published as pre-releases from the
-[`beta` branch](https://github.com/Nisbo/ha-list-manager/tree/beta) until the
-final **1.0.0** release is ready.
+HA List Manager builds on the original
+[Improved Shopping List Card](https://github.com/Nisbo/ha-shopping-list-improved),
+adding a shared product database and central administration in Home Assistant.
 
-**Documentation:** [English wiki](https://github.com/Nisbo/ha-list-manager/wiki) ·
-[Deutsches Wiki](https://github.com/Nisbo/ha-list-manager/wiki/Home-DE)
+<!-- ha-marketplace:exclude-start -->
+[![Open HA List Manager in Marketplace](https://my.home-assistant.io/badges/marketplace_repository.svg)](https://my.home-assistant.io/redirect/marketplace_repository/?owner=Nisbo&repository=ha-list-manager&category=integration)
+<!-- ha-marketplace:exclude-end -->
 
-The interface and complete wiki are available in **English and German**.
-HA List Manager is a separate integration from the original
-[Improved Shopping List Card](https://github.com/Nisbo/ha-shopping-list-improved).
-It has its own version numbering and does not replace that card automatically.
+Plan your shopping, keep track of supplies and manage recurring tasks. Use the
+three dashboard cards separately or together. Shopping and inventory share a
+product database; categories, labels and quick entries help organize the lists.
+The interface and complete wiki are available in English and German.
 
-## What it does
+![Compact dashboard cards for inventory, shopping and tasks](docs/images/en/overview-desktop.jpg)
 
-| Workflow | Features |
-| --- | --- |
-| **Shopping lists** | Products or free-text items, quantities, categories, labels, reusable quick entries, offer-only markers, notifications and PDF export. Optional Bring! connection through Home Assistant's official integration. |
-| **Inventory** | Stock and minimum quantities, book items in or out, 60-second undo, interchangeable-product groups, and configurable automatic or manual replenishment to a shopping list. |
-| **To-do lists** | Tasks, due dates, repeat intervals, categories, labels, filters and reusable task templates. Tasks never require product records or barcodes. |
-| **Entity history** | An independent long-term archive for selected HA entities, with history imports, corrections and hidden values. Its own card displays charts or a chronological list, with up to five entities. |
+## Three kinds of lists
 
-![Complete inventory, shopping and to-do cards with neutral English example data](https://raw.githubusercontent.com/wiki/Nisbo/ha-list-manager/images/en/home-cards.png)
+### Shopping lists
 
-The shared backend also provides:
+- Add free-text items or select saved products with pictures and package sizes.
+- Track quantities and descriptions.
+- Reuse quick entries and mark items to buy **only when on offer**.
+- Filter offers and search items.
+- Add ingredients from saved dishes or Tandoor recipes to local shopping lists.
+- Send an item to another shopping list, export a PDF or send notifications.
+- Connect a Bring! list through Home Assistant's official Bring! integration.
 
-- **Product management:** Optional EAN, brand, package quantity and image, with
-  local lookup and Open Food Facts lookup for unknown barcodes.
-- **Categories, labels and chips:** Global, list-type or list-specific definitions,
-  with icons, colors and dynamic categories.
-- **Central scanner processing:** Scanner targets, modes and pending scans work
-  in the backend without requiring a dashboard card to be open.
-- **List-specific scripts and notifications:** Select the events that invoke an
-  HA script or send a notification. Scripts can use the supplied message for
-  feedback or speech output.
-- **Data backup:** A persistent archive with download, upload, confirmed restore
-  and delete controls, plus automatic safety copies before restore or import.
-- **Import from the original card:** Previewed transfer of shopping, to-do or
-  simplified inventory data, with explanations for omitted settings.
+### Inventory
 
-Products, shopping entries and inventory stock are separate records. Removing a
-shopping entry does not delete its product. Marking a purchase complete does not
-automatically book it into inventory.
+- Manage separate stock lists for the kitchen, freezer or storage room.
+- Book products in or out, correct stock and undo the last manual booking for 60 seconds.
+- Scan barcodes to book products in or out, or adjust stock with the plus/minus buttons.
+- Set minimum stocks and replenish manually or automatically to a shopping list.
+- Choose replenishment rules per list, product or interchangeable-product group.
 
-## Requirements
+### To-do lists
 
-- **Home Assistant 2026.10.0 or newer.** The first beta was tested with 2026.10.4.
-- **HACS** for the installation method below, or use manual installation.
-- An **administrator account** for installation and backend configuration.
+- Organize tasks with notes, due dates, times and repeat intervals.
+- Create reusable task templates and configure due-date warnings.
+- Search tasks, sort by due date and hide completed tasks.
+- Keep tasks independent from products and barcodes.
 
-Normal signed-in Home Assistant users can operate all three list cards.
-The administration panel, shared configuration and backup management are
-restricted to administrators. See the [permissions guide](https://github.com/Nisbo/ha-list-manager/wiki/Backend-Settings#permissions).
+**Mobile card layouts in the dashboard**
 
-## Install with HACS
+![Inventory and shopping list in the mobile card layout](docs/images/en/overview-tablet.jpg)
 
-[![Open HA List Manager in HACS](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=Nisbo&repository=ha-list-manager&category=integration)
+## Alexa shopping
 
-1. Make sure [HACS is installed](https://www.hacs.dev/docs/use/) in your HA instance.
-2. Click the blue button above, select your Home Assistant instance and open
-   **HA List Manager** in HACS. Confirm adding the repository if requested.
-3. Download **1.0.0b1** and **restart Home Assistant**.
-4. Open **Settings → Devices & services → Add integration**, search for
-   **HA List Manager**, and complete setup.
-5. Open **HA List Manager** in the sidebar to create your lists, then add their
-   cards to a dashboard.
+Say “Alexa, add cucumbers to the shopping list” and have the entry arrive in
+HA List Manager. This uses an existing list from Home Assistant's **Alexa Devices**
+integration, assigned to one local shopping list.
 
-If you prefer adding it manually in HACS, open **HACS → ⋮ → Custom repositories**
-and enter:
+- **Alexa input (recommended):** import new entries and delete them from Alexa by default.
+- **Sync linked items:** also synchronize status, deletion and optional quantities.
+- **Sync including new local items:** additionally send future new local items to Alexa.
 
-| Field | Value |
-| --- | --- |
-| Repository | `https://github.com/Nisbo/ha-list-manager` |
-| Type / category | **Integration** |
+Optional number and unit recognition handles spoken quantities. Aliases turn
+several phrases into a particular product or replacement name. Preview the
+result in the **Test** tab before using your settings.
 
-Then follow steps 3–5 above. This is an integration that includes its dashboard
-cards; do not add it as a Dashboard/Frontend-only repository.
+## Dishes and optional Tandoor connection
 
-### Manual installation
+- **Save your own dishes:** Combine free-text ingredients or linked products,
+  such as tomatoes, onions and garlic for tomato soup. When adding a dish,
+  select ingredients, adjust counts and review categories.
+- **Connect Tandoor Recipes (optional):** Set up an existing Tandoor instance
+  with its address and API token under **HA List Manager → Settings**. Search
+  recipes or select a cookbook in the shopping card, adjust servings and add
+  the ingredients you need to the shopping list. Serving adjustments require
+  serving information in the recipe.
 
-1. Download the installation archive
-   [`ha-list-manager-1.0.0b1.zip`](https://github.com/Nisbo/ha-list-manager/releases/download/1.0.0b1/ha-list-manager-1.0.0b1.zip).
-2. Extract it into your HA configuration directory so the result is
-   `<config>/custom_components/ha_list_manager/manifest.json`.
-3. Restart Home Assistant and add **HA List Manager** under
-   **Settings → Devices & services → Add integration**.
+Enable dishes and Tandoor separately for each local shopping list. Adding
+ingredients updates the shopping list without booking any inventory stock.
 
-Only the `custom_components/ha_list_manager` directory belongs in the HA
-installation. The repository also contains this README, HACS metadata and
-license information.
+[Guide to dishes and recipes](https://github.com/Nisbo/ha-list-manager/wiki/Chips-Dishes-and-Recipes)
 
-## First steps
+## Categories and labels across all three list types
 
-1. In the administration panel, create a **shopping**, **inventory** or **to-do**
-   list. For Bring!, configure Home Assistant's official Bring! integration first,
-   then select its to-do entity when creating the linked list.
-2. Add an **HA List Manager** card from the dashboard card picker and select the
-   backend list in the graphical editor. Card resources are registered
-   automatically; no separate card download is needed.
-3. Add shopping items or tasks directly. To use inventory, select an existing
-   product or create one, then set its starting stock.
-4. Optionally configure categories, labels, scanners, scripts and replenishment.
+- **Categories** divide a list into sections such as Drinks, Bakery or Household.
+  Each entry belongs to one category or to General.
+- **Multiple labels per entry** add another way to organize it. Milk can belong
+  to Drinks and carry both Breakfast and Lactose-free labels. Tasks could use
+  Garden and Weekend.
+- **Group by category or label:** in the label view, an entry appears under each
+  of its labels. It remains the same entry: quantities, completion state and edits
+  update in every view.
+- **Share definitions or keep them separate:** categories and labels can apply
+  globally, to a list type or to one list, each with an icon and color. When names
+  match, the individual list takes priority over the list type and global scope.
+- **Select and edit quickly:** use search, dropdowns, selection popups or the
+  shortcut buttons in the item editor.
 
-The [Quick Start](https://github.com/Nisbo/ha-list-manager/wiki/Quick-Start) /
-[Schnellstart](https://github.com/Nisbo/ha-list-manager/wiki/Quick-Start-DE) walks
-through this with complete screenshots and neutral examples.
+Automatic category assignments place new entries by name. Quick entries and
+task templates instead help you add recurring items or tasks with fewer taps.
 
-### Already using the original card?
+## Product database
 
-Use **HA List Manager → Backup → Import old card**. Supply the old card YAML and
-choose a source to-do list, or choose **Without entries** to copy only categories
-and configured chips. Check the preview and import notes before applying.
+Keep a shared product catalog with optional EAN, brand, package size and image.
+Unknown barcodes can be looked up through Open Food Facts; product data remains
+editable. Removing a shopping entry does not delete its product or change stock.
 
-The importer creates **new lists** and leaves the sources unchanged. Simplified
-inventory import creates new generic products without EANs and combines matching
-names in the same category. It does not transfer EAN databases, browser chips,
-transfer queues, inventory groups or replenishment settings.
+![Product management with search and product information](docs/images/en/backend-products.jpg)
 
-See [Data import](https://github.com/Nisbo/ha-list-manager/wiki/Data-Import) /
-[Datenübernahme](https://github.com/Nisbo/ha-list-manager/wiki/Data-Import-DE) for
-the supported data and examples.
+### Inside the item editor
 
-## Documentation
+![Complete shopping item editor with shortcuts, quantity, category and labels](docs/images/en/edit-item.jpg)
 
-| Topic | English | Deutsch |
-| --- | --- | --- |
-| Start and concepts | [Quick Start](https://github.com/Nisbo/ha-list-manager/wiki/Quick-Start) · [Concepts](https://github.com/Nisbo/ha-list-manager/wiki/Concepts) | [Schnellstart](https://github.com/Nisbo/ha-list-manager/wiki/Quick-Start-DE) · [Grundlagen](https://github.com/Nisbo/ha-list-manager/wiki/Concepts-DE) |
-| Shopping and tasks | [Shopping lists](https://github.com/Nisbo/ha-list-manager/wiki/Shopping-Lists) · [To-do](https://github.com/Nisbo/ha-list-manager/wiki/To-do-Lists) | [Einkaufslisten](https://github.com/Nisbo/ha-list-manager/wiki/Shopping-Lists-DE) · [Aufgaben](https://github.com/Nisbo/ha-list-manager/wiki/To-do-Lists-DE) |
-| Stock, groups and replenishment | [Inventory](https://github.com/Nisbo/ha-list-manager/wiki/Inventory) | [Inventar](https://github.com/Nisbo/ha-list-manager/wiki/Inventory-DE) |
-| Scanners, scripts and notifications | [Scanners](https://github.com/Nisbo/ha-list-manager/wiki/Scanners) · [Scripts](https://github.com/Nisbo/ha-list-manager/wiki/Script-Connection) · [Notifications](https://github.com/Nisbo/ha-list-manager/wiki/Notifications) | [Scanner](https://github.com/Nisbo/ha-list-manager/wiki/Scanners-DE) · [Skripte](https://github.com/Nisbo/ha-list-manager/wiki/Script-Connection-DE) · [Benachrichtigungen](https://github.com/Nisbo/ha-list-manager/wiki/Notifications-DE) |
-| Entity archive and history card | [Archive](https://github.com/Nisbo/ha-list-manager/wiki/Entity-History) · [Card](https://github.com/Nisbo/ha-list-manager/wiki/Entity-History-Card) | [Archiv](https://github.com/Nisbo/ha-list-manager/wiki/Entity-History-DE) · [Karte](https://github.com/Nisbo/ha-list-manager/wiki/Entity-History-Card-DE) |
-| Backup and import | [Backups](https://github.com/Nisbo/ha-list-manager/wiki/Backup-and-Restore) · [Import](https://github.com/Nisbo/ha-list-manager/wiki/Data-Import) | [Datensicherung](https://github.com/Nisbo/ha-list-manager/wiki/Backup-and-Restore-DE) · [Übernahme](https://github.com/Nisbo/ha-list-manager/wiki/Data-Import-DE) |
+## Shared use and backups
 
-## Data and updates
+- Updates reach open cards on other devices. Barcode scans are processed centrally,
+  even without an open dashboard, with a shared queue for unfinished scans.
+- Normal signed-in users operate the list cards; administration is reserved for admins.
+- Assign an HA script to a list and choose which events trigger notifications or speech.
+- Create, download and restore backups, or import lists from the original Improved Shopping List Card.
 
-The integration stores its database at `<config>/ha_list_manager.db` and its
-backup archive at `<config>/ha_list_manager_backups/`. These files survive normal
-HA restarts and are not automatically deleted when the integration is removed.
-Use the backup panel and keep a copy outside the HA machine. The initial database
-schema for this release is **1**.
+## Entity history
 
-Install later beta updates through HACS, restart HA and refresh open dashboards.
-See the [release notes](https://github.com/Nisbo/ha-list-manager/releases)
-for changes.
+Archive selected HA entities long-term, import old history, and correct or hide
+measurements. The separate **entity-history card** displays up to five entities
+as a chart or chronological list, with reference lines and configurable precision.
 
-## Feedback
+**Chart**
 
-Report reproducible problems in [GitHub Issues](https://github.com/Nisbo/ha-list-manager/issues).
-Include your HA version, HA List Manager version, affected workflow and steps to
-reproduce the problem. Use screenshots or relevant logs where useful; remove
-credentials and private data before posting.
+![Entity-history card with several measurement series](docs/images/en/history.jpg)
 
-Licensed under the [MIT License](LICENSE). The bundled PDF library has its own
-[license notice](custom_components/ha_list_manager/frontend/PDF-LIB-LICENSE.md).
+**Chronological list**
+
+![Entity-history card as a chronological list with timestamps and measurements](docs/images/en/history-list.jpg)
+
+## Large panel views
+
+Open a list in a large panel to give its contents more room. The same lists
+remain available in the compact dashboard cards.
+
+### Shopping list
+
+**PC**
+
+![Shopping list in the large PC panel view](docs/images/en/shopping-panel-desktop.jpg)
+
+**Tablet**
+
+![Shopping list in the large tablet panel view](docs/images/en/shopping-panel-tablet.jpg)
+
+### Inventory
+
+**PC**
+
+![Inventory in the large PC panel view](docs/images/en/inventory-panel-desktop.jpg)
+
+**Tablet**
+
+![Inventory in the large tablet panel view](docs/images/en/inventory-panel-tablet.jpg)
+
+### To-do list
+
+**PC**
+
+![To-do list in the large PC panel view](docs/images/en/todo-panel-desktop.jpg)
+
+**Tablet**
+
+![To-do list in the large tablet panel view](docs/images/en/todo-panel-tablet.jpg)
+
+<!-- ha-marketplace:exclude-start -->
+## Installation
+
+Use **Marketplace** in Home Assistant **2026.11 or newer**. Installation and
+setup require an administrator account.
+
+[![Open HA List Manager in Marketplace](https://my.home-assistant.io/badges/marketplace_repository.svg)](https://my.home-assistant.io/redirect/marketplace_repository/?owner=Nisbo&repository=ha-list-manager&category=integration)
+
+1. Click the blue button, or open **Settings → Marketplace → Add from link**
+   and enter `https://github.com/Nisbo/ha-list-manager`.
+2. Connect GitHub if prompted, select **Integration** and install HA List Manager.
+   Restart Home Assistant when installation is complete.
+3. Open **Settings → Devices & services → Add integration** and select **HA List Manager**.
+4. In the HA sidebar, open **HA List Manager → Lists → Create list**
+   and select the list type you want.
+5. Edit your dashboard, choose **Add card** and search for **HA List Manager**.
+   Select **HA List Manager – Shopping list**, **HA List Manager – Inventory** or
+   **HA List Manager – To-do list**, then choose the list you created in the card.
+   For recorded entity history, select **HA List Manager – Entity inventory**.
+
+**Manual installation (HA 2026.10+):** download the installation archive from
+[Releases](https://github.com/Nisbo/ha-list-manager/releases), extract it so
+`custom_components/ha_list_manager/manifest.json` is inside your HA configuration
+directory, restart HA and continue with step 3.
+<!-- ha-marketplace:exclude-end -->
+
+## Guides and help
+
+[Quick Start](https://github.com/Nisbo/ha-list-manager/wiki/Quick-Start) ·
+[Shopping](https://github.com/Nisbo/ha-list-manager/wiki/Shopping-Lists) ·
+[Inventory](https://github.com/Nisbo/ha-list-manager/wiki/Inventory) ·
+[To-do](https://github.com/Nisbo/ha-list-manager/wiki/To-do-Lists) ·
+[Alexa](https://github.com/Nisbo/ha-list-manager/wiki/Alexa) ·
+[Dishes and recipes](https://github.com/Nisbo/ha-list-manager/wiki/Chips-Dishes-and-Recipes) ·
+[Scanners](https://github.com/Nisbo/ha-list-manager/wiki/Scanners) ·
+[Backups](https://github.com/Nisbo/ha-list-manager/wiki/Backup-and-Restore)
+
+Report problems or suggest improvements in [GitHub Issues](https://github.com/Nisbo/ha-list-manager/issues).
+
+[MIT License](LICENSE) · [Bundled PDF library license](custom_components/ha_list_manager/frontend/PDF-LIB-LICENSE.md)

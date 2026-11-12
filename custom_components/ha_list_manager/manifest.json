@@ -20,5 +20,5 @@
   "iot_class": "local_push",
   "issue_tracker": "https://github.com/Nisbo/ha-list-manager/issues",
   "single_config_entry": true,
-  "version": "1.0.0b1"
+  "version": "1.0.0"
 }

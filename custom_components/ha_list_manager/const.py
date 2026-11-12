@@ -4,9 +4,9 @@ from typing import Final
 
 DOMAIN: Final = "ha_list_manager"
 INTEGRATION_NAME: Final = "HA List Manager"
-VERSION: Final = "1.0.0b1"
+VERSION: Final = "1.0.0"
 DATABASE_FILENAME: Final = "ha_list_manager.db"
-DATABASE_SCHEMA_VERSION: Final = 1
+DATABASE_SCHEMA_VERSION: Final = 4
 LIST_TYPES: Final = ("shopping", "todo", "inventory")
 LIST_PROVIDERS: Final = ("local", "bring")
 SCANNER_ACTIONS: Final = ("add", "remove", "register", "correct")
@@ -17,6 +17,7 @@ EVENT_SCAN_PROCESSED: Final = f"{DOMAIN}_scan_processed"
 EVENT_LISTS_CHANGED: Final = f"{DOMAIN}_lists_changed"
 EVENT_ITEMS_CHANGED: Final = f"{DOMAIN}_items_changed"
 EVENT_ITEM_MUTATED: Final = f"{DOMAIN}_item_mutated"
+EVENT_ALEXA_CHANGED: Final = f"{DOMAIN}_alexa_changed"
 
 PANEL_ELEMENT_NAME: Final = "ha-list-manager-panel"
 PANEL_ICON: Final = "mdi:cart-variant"

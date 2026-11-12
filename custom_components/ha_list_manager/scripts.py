@@ -73,7 +73,8 @@ class ListScriptManager:
         data = event.data
         # Successful bookings are published by the database exactly once. The
         # scanned control QR is likewise already represented by the target event.
-        if data.get("status") == "success":
+        # Opening or locking a shared dialog is not another barcode scan.
+        if data.get("status") == "success" or data.get("collaboration_update"):
             return
         status = data.get("status")
         if status not in {"error", "queued", "needs_input", "offered"}:

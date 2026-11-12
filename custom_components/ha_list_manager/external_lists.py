@@ -41,31 +41,53 @@ class ExternalListManager:
         self._database = database
         self._locks: dict[str, asyncio.Lock] = {}
         self._unsubscribe_state = None
+        self._tasks: set[asyncio.Task] = set()
+        self._stopped = False
 
     async def async_start(self) -> None:
         """Refresh linked lists when their official Bring entity changes."""
         if self._unsubscribe_state is not None:
             return
+        self._stopped = False
 
         @callback
         def handle_state_changed(event: Event) -> None:
+            if self._stopped:
+                return
             entity_id = str(event.data.get("entity_id") or "")
             if not entity_id.startswith("todo."):
                 return
             registry_entry = er.async_get(self._hass).async_get(entity_id)
             if registry_entry is None or registry_entry.platform != "bring":
                 return
-            self._hass.async_create_task(self._async_sync_entity(entity_id))
+            task = self._hass.async_create_task(self._async_sync_entity(entity_id))
+            self._tasks.add(task)
+            task.add_done_callback(self._tasks.discard)
 
         self._unsubscribe_state = self._hass.bus.async_listen(
             "state_changed", handle_state_changed
         )
 
     async def async_stop(self) -> None:
-        """Stop listening for Bring entity updates."""
+        """Stop new updates and finish synchronization already in progress."""
+        self._stopped = True
         if self._unsubscribe_state is not None:
             self._unsubscribe_state()
             self._unsubscribe_state = None
+        cancelled = None
+        if self._tasks:
+            # A remote update may already have succeeded; finish its local
+            # reconciliation even when the unload request is cancelled.
+            drained = asyncio.gather(*tuple(self._tasks), return_exceptions=True)
+            while True:
+                try:
+                    await asyncio.shield(drained)
+                    break
+                except asyncio.CancelledError as error:
+                    cancelled = error
+        self._tasks.clear()
+        if cancelled is not None:
+            raise cancelled
 
     def validate_bring_entity(self, entity_id: str) -> None:
         """Require an existing Bring To-do entity, not an HA-LM proxy entity."""
@@ -124,6 +146,8 @@ class ExternalListManager:
         async with self._lock(list_id):
             record = await self._require_bring_list(list_id)
             before = await self._fetch_items(record)
+            if record.capitalize_first_letter and not product_id:
+                name = name[:1].upper() + name[1:]
             remote_description = self._description_for_quantity(quantity, description)
             await self._call_todo(
                 "add_item",
@@ -170,6 +194,9 @@ class ExternalListManager:
 
             before = await self._fetch_items(list_record)
             name = str(updates["name"])
+            if list_record.capitalize_first_letter and not updates.get("product_id", existing.product_id):
+                name = name[:1].upper() + name[1:]
+                updates["name"] = name
             quantity = int(updates["quantity"])
             description = self._description_for_quantity(
                 quantity, updates.get("description")

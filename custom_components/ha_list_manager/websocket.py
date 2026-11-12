@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from functools import wraps
 from typing import Any
@@ -13,6 +14,7 @@ from homeassistant.auth.permissions.const import POLICY_READ
 from homeassistant.components import websocket_api
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers import entity_registry as er
 from homeassistant.util import dt as dt_util
 
 from .localization import (
@@ -89,6 +91,24 @@ def _runtime(hass: HomeAssistant) -> HaListManagerRuntime:
     return hass.data[DOMAIN]
 
 
+def _entity_history_display_options(hass, entity_id, use_ha_precision) -> dict[str, Any]:
+    """Read current HA presentation metadata without altering stored samples."""
+    registry_entry = er.async_get(hass).async_get(entity_id)
+    entry_options = getattr(registry_entry, "options", None)
+    options = entry_options.get("sensor") if isinstance(entry_options, Mapping) else None
+    precision = None
+    if isinstance(options, Mapping):
+        precision = options.get("display_precision")
+        if precision is None:
+            precision = options.get("suggested_display_precision")
+        if type(precision) is not int or precision < 0:
+            precision = None
+    return {
+        "use_ha_precision": use_ha_precision,
+        "display_precision": precision,
+    }
+
+
 def _send_error(connection, msg_id, code, message):
     """Keep API error codes while supplying HA's standard translation fields."""
     metadata = error_translation_metadata(message)
@@ -138,12 +158,117 @@ def _fire_items_changed(hass: HomeAssistant, list_id: str) -> None:
     hass.bus.async_fire(EVENT_ITEMS_CHANGED, {"list_id": list_id})
 
 
+async def _alexa_result(hass, connection, msg, operation, **kwargs) -> None:
+    """Keep the fixed Alexa intake administrative, including its diagnostics."""
+    try:
+        manager = _runtime(hass).alexa
+        result = await getattr(manager, operation)(**kwargs)
+    except ValueError as error:
+        _send_input_error(connection, msg, error)
+        return
+    except HomeAssistantError as error:
+        _send_error(connection, msg["id"], "alexa_error", error)
+        return
+    except Exception:
+        _send_error(connection, msg["id"], "alexa_error", localized_text("alexa.processing_failed"))
+        return
+    connection.send_result(msg["id"], result)
+
+
+@websocket_api.require_admin
+@localized_command({probatio.Required("type"): f"{DOMAIN}/alexa/get"})
+async def websocket_alexa_get(hass, connection, msg) -> None:
+    """Return settings, eligible sources and the durable intake status."""
+    await _alexa_result(hass, connection, msg, "async_get")
+
+
+@websocket_api.require_admin
+@localized_command({probatio.Required("type"): f"{DOMAIN}/alexa/set", probatio.Required("settings"): dict})
+async def websocket_alexa_set(hass, connection, msg) -> None:
+    """Configure one source and one fixed local shopping target."""
+    await _alexa_result(hass, connection, msg, "async_set", values=msg["settings"])
+
+
+@websocket_api.require_admin
+@localized_command({
+    probatio.Required("type"): f"{DOMAIN}/alexa/aliases/set",
+    probatio.Required("aliases"): list,
+    probatio.Required("expected_aliases"): list,
+})
+async def websocket_alexa_aliases_set(hass, connection, msg) -> None:
+    """Persist alias CRUD without overwriting settings from other editors."""
+    await _alexa_result(hass, connection, msg, "async_set_aliases",
+                       aliases=msg["aliases"], expected_aliases=msg["expected_aliases"])
+
+
+@websocket_api.require_admin
+@localized_command({
+    probatio.Required("type"): f"{DOMAIN}/alexa/outbox/resolve",
+    probatio.Required("job_id"): str,
+    probatio.Required("action"): probatio.In({"bind", "cancel"}),
+    probatio.Optional("uid"): str,
+})
+async def websocket_alexa_outbox_resolve(hass, connection, msg) -> None:
+    """Resolve a create acknowledgement without retrying the cloud create."""
+    await _alexa_result(hass, connection, msg, "async_resolve_outbox",
+                       job_id=msg["job_id"], action=msg["action"], uid=msg.get("uid"))
+
+
+@websocket_api.require_admin
+@localized_command({probatio.Required("type"): f"{DOMAIN}/alexa/preview"})
+async def websocket_alexa_preview(hass, connection, msg) -> None:
+    """Preview existing open entries without importing or cleaning anything."""
+    await _alexa_result(hass, connection, msg, "async_preview")
+
+
+@websocket_api.require_admin
+@localized_command({probatio.Required("type"): f"{DOMAIN}/alexa/process", probatio.Optional("include_existing", default=False): bool})
+async def websocket_alexa_process(hass, connection, msg) -> None:
+    """Retry intake, or explicitly include the entries excluded at activation."""
+    await _alexa_result(hass, connection, msg, "async_process", include_existing=msg.get("include_existing", False))
+
+
+@websocket_api.require_admin
+@localized_command({
+    probatio.Required("type"): f"{DOMAIN}/alexa/test",
+    probatio.Required("settings"): dict,
+    probatio.Required("text"): str,
+})
+async def websocket_alexa_test(hass, connection, msg) -> None:
+    """Test an unsaved recognition draft without changing lists or settings."""
+    await _alexa_result(hass, connection, msg, "async_test", settings=msg["settings"], input_text=msg["text"])
+
+
+@websocket_api.require_admin
+@localized_command({
+    probatio.Required("type"): f"{DOMAIN}/alexa/rules",
+    probatio.Required("language_code"): str,
+    probatio.Required("kind"): probatio.In({"numbers", "units"}),
+    probatio.Optional("query", default=""): str,
+    probatio.Optional("offset", default=0): int,
+    probatio.Optional("limit", default=50): int,
+})
+async def websocket_alexa_rules(hass, connection, msg) -> None:
+    """Return one bounded page of shipped recognition rules for a language."""
+    await _alexa_result(hass, connection, msg, "async_rules", language_code=msg["language_code"],
+                       kind=msg["kind"], query=msg["query"], offset=msg["offset"], limit=msg["limit"])
+
+
 @callback
 def async_register_websocket_commands(hass: HomeAssistant) -> None:
     """Register commands once for the current Home Assistant process."""
     if hass.data.get(DATA_WEBSOCKET_REGISTERED):
         return
     hass.data[DATA_WEBSOCKET_REGISTERED] = True
+
+    websocket_api.async_register_command(hass, websocket_alexa_get)
+    websocket_api.async_register_command(hass, websocket_alexa_set)
+    websocket_api.async_register_command(hass, websocket_alexa_aliases_set)
+    websocket_api.async_register_command(hass, websocket_alexa_outbox_resolve)
+    websocket_api.async_register_command(hass, websocket_alexa_preview)
+    websocket_api.async_register_command(hass, websocket_alexa_process)
+    websocket_api.async_register_command(hass, websocket_alexa_test)
+    websocket_api.async_register_command(hass, websocket_alexa_rules)
 
     websocket_api.async_register_command(hass, websocket_subscribe)
     websocket_api.async_register_command(hass, websocket_get_list_script_settings)
@@ -159,6 +284,9 @@ def async_register_websocket_commands(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, websocket_sync_external_list)
     websocket_api.async_register_command(hass, websocket_list_items)
     websocket_api.async_register_command(hass, websocket_create_item)
+    websocket_api.async_register_command(hass, websocket_item_action_chip)
+    websocket_api.async_register_command(hass, websocket_item_action_rule)
+    websocket_api.async_register_command(hass, websocket_item_action_send)
     websocket_api.async_register_command(hass, websocket_update_item)
     websocket_api.async_register_command(hass, websocket_set_item_completed)
     websocket_api.async_register_command(hass, websocket_reorder_items)
@@ -234,6 +362,10 @@ def async_register_websocket_commands(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, websocket_pending_scans)
     websocket_api.async_register_command(hass, websocket_pending_scans_for_list)
     websocket_api.async_register_command(hass, websocket_hold_pending_scan)
+    websocket_api.async_register_command(hass, websocket_view_pending_scan)
+    websocket_api.async_register_command(hass, websocket_edit_pending_scan)
+    websocket_api.async_register_command(hass, websocket_release_pending_scan)
+    websocket_api.async_register_command(hass, websocket_discard_pending_scan)
     websocket_api.async_register_command(hass, websocket_resolve_pending_scan)
     websocket_api.async_register_command(hass, websocket_dismiss_pending_scan)
     websocket_api.async_register_command(hass, websocket_scan_history)
@@ -248,6 +380,7 @@ def async_register_websocket_commands(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, websocket_list_tracked_entities)
     websocket_api.async_register_command(hass, websocket_set_entity_tracking)
     websocket_api.async_register_command(hass, websocket_delete_entity_history)
+    websocket_api.async_register_command(hass, websocket_hide_unavailable_entity_states)
     websocket_api.async_register_command(hass, websocket_get_entity_history)
     websocket_api.async_register_command(hass, websocket_save_entity_sample)
     websocket_api.async_register_command(hass, websocket_delete_entity_sample)
@@ -271,8 +404,18 @@ async def _legacy_import_response(connection, msg, operation):
     try:
         result = await operation
     except LegacyImportError as error:
+        values = error.values
+        field_key = {
+            "entry": "import.field_entry", "uid": "import.field_uid",
+            "summary": "import.field_summary", "name": "import.field_name",
+            "description": "import.field_description", "category": "import.field_category",
+            "quantity": "import.field_quantity", "recurrence_interval": "import.field_interval",
+            "status": "import.field_status", "due": "import.field_due",
+        }.get(values.get("field"))
+        if field_key:
+            values = {**values, "field": localized_text(field_key)}
         _send_error(connection, msg["id"], error.code,
-                    localized_text(error.translation_key, **error.values))
+                    localized_text(error.translation_key, **values))
     except DuplicateListNameError:
         _send_error(connection, msg["id"], "target_exists", localized_text("import.target_exists"))
     except BackupError:
@@ -333,6 +476,7 @@ async def websocket_legacy_import_apply(hass, connection, msg):
     probatio.Required("type"): f"{DOMAIN}/subscribe",
     probatio.Required("event_type"): probatio.In({
         EVENT_ITEMS_CHANGED,
+        EVENT_LISTS_CHANGED,
         EVENT_INVENTORY_CHANGED,
         EVENT_SCANNER_TARGET_CHANGED,
         EVENT_SCAN_PROCESSED,
@@ -366,7 +510,10 @@ async def websocket_list_tracked_entities(
     """Return every configured independent history source."""
     records = await _runtime(hass).database.async_list_tracked_entities()
     connection.send_result(
-        msg["id"], {"entities": [record.as_dict() for record in records]}
+        msg["id"], {"entities": [
+            {**record.as_dict(), **_entity_history_display_options(hass, record.entity_id, record.use_ha_precision)}
+            for record in records
+        ]}
     )
 
 
@@ -375,7 +522,9 @@ async def websocket_list_tracked_entities(
     {
         probatio.Required("type"): f"{DOMAIN}/entity_history/set",
         probatio.Required("entity_id"): str,
-        probatio.Required("enabled"): bool,
+        probatio.Optional("enabled"): bool,
+        probatio.Optional("ignore_unavailable"): bool,
+        probatio.Optional("use_ha_precision"): bool,
     }
 )
 async def websocket_set_entity_tracking(
@@ -396,10 +545,42 @@ async def websocket_set_entity_tracking(
             msg["id"], websocket_api.ERR_UNKNOWN_ERROR, localized_text("errors.history_unavailable")
         )
         return
-    await runtime.entity_history.async_set_tracking(entity_id, msg["enabled"])
+    options = {key: msg[key] for key in ("ignore_unavailable", "use_ha_precision") if key in msg}
+    try:
+        await runtime.entity_history.async_set_tracking(entity_id, msg.get("enabled"), **options)
+    except ValueError as error:
+        _send_input_error(connection, msg, error)
+        return
     records = await runtime.database.async_list_tracked_entities()
     record = next(item for item in records if item.entity_id == entity_id)
-    connection.send_result(msg["id"], {"entity": record.as_dict()})
+    connection.send_result(msg["id"], {"entity": {
+        **record.as_dict(), **_entity_history_display_options(hass, entity_id, record.use_ha_precision),
+    }})
+
+
+@websocket_api.require_admin
+@localized_command(
+    {
+        probatio.Required("type"): f"{DOMAIN}/entity_history/hide_unavailable",
+        probatio.Required("entity_id"): str,
+    }
+)
+async def websocket_hide_unavailable_entity_states(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Hide unavailable originals without deleting their import identities."""
+    entity_id = msg["entity_id"].strip().lower()
+    database = _runtime(hass).database
+    try:
+        hidden = await database.async_hide_unavailable_entity_states(entity_id)
+    except ValueError as error:
+        _send_input_error(connection, msg, error)
+        return
+    records = await database.async_list_tracked_entities()
+    record = next(item for item in records if item.entity_id == entity_id)
+    connection.send_result(msg["id"], {"hidden": hidden, "entity": record.as_dict()})
 
 
 @websocket_api.require_admin
@@ -462,7 +643,8 @@ async def websocket_get_entity_history(
             localized_text("errors.numeric_range_invalid"),
         )
         return
-    records, truncated, query_limited = await _runtime(hass).database.async_query_entity_history(
+    database = _runtime(hass).database
+    records, truncated, query_limited = await database.async_query_entity_history(
         entity_id,
         msg.get("start_time"),
         msg.get("end_time"),
@@ -474,6 +656,7 @@ async def websocket_get_entity_history(
         msg.get("before_id"),
         msg.get("include_hidden", False),
     )
+    options = await database.async_get_entity_history_options(entity_id)
     connection.send_result(
         msg["id"],
         {
@@ -481,6 +664,7 @@ async def websocket_get_entity_history(
             "states": [record.as_dict() for record in records],
             "truncated": truncated,
             "query_limited": query_limited,
+            **_entity_history_display_options(hass, entity_id, options.get("use_ha_precision") is True),
         },
     )
 
@@ -674,7 +858,7 @@ async def websocket_set_favorite(
     """Add or remove one navigation favorite for the authenticated user."""
     allowed_sections = {
         "lists", "products", "categories", "labels", "chips", "dishes", "inventory",
-        "entity_history", "history", "notifications", "settings", "backup", "statistics",
+        "entity_history", "history", "notifications", "alexa", "settings", "backup", "statistics",
     }
     section = msg["section"].strip()
     if section not in allowed_sections:
@@ -711,8 +895,8 @@ async def websocket_list_notification_profiles(
     )
 
 
-def _notification_profile_values(msg: dict[str, Any]) -> dict[str, Any]:
-    return {
+def _notification_profile_values(hass: HomeAssistant, msg: dict[str, Any]) -> dict[str, Any]:
+    values = {
         "name": _clean_text(msg["name"], maximum=100, required=True),
         "provider": msg["provider"],
         "target": _clean_text(msg["target"], maximum=255, required=True),
@@ -721,6 +905,11 @@ def _notification_profile_values(msg: dict[str, Any]) -> dict[str, Any]:
         "message_format": msg["message_format"],
         "enabled": msg.get("enabled", True),
     }
+    if values["provider"] == "notify_entity" and values["message_format"] != "plain":
+        entity = er.async_get(hass).async_get(values["target"])
+        if entity is None or entity.platform != "telegram_bot":
+            raise ValueError(localized_text("backend.notify_plain_text_only"))
+    return values
 
 
 @websocket_api.require_admin
@@ -741,7 +930,7 @@ async def websocket_create_notification_profile(
     """Create a reusable notification destination."""
     try:
         record = await _runtime(hass).database.async_create_notification_profile(
-            **_notification_profile_values(msg)
+            **_notification_profile_values(hass, msg)
         )
     except ValueError as error:
         _send_input_error(connection, msg, error)
@@ -771,7 +960,7 @@ async def websocket_update_notification_profile(
     """Update a reusable notification destination."""
     try:
         record = await _runtime(hass).database.async_update_notification_profile(
-            msg["profile_id"], **_notification_profile_values(msg)
+            msg["profile_id"], **_notification_profile_values(hass, msg)
         )
     except ValueError as error:
         _send_input_error(connection, msg, error)
@@ -960,6 +1149,7 @@ async def websocket_list_lists(
     {
         probatio.Required("type"): f"{DOMAIN}/lists/create",
         probatio.Required("name"): str,
+        probatio.Optional("capitalize_first_letter", default=False): bool,
         probatio.Required("list_type"): probatio.In((*LIST_TYPES, "bring")),
         probatio.Optional("icon"): probatio.Any(str, None),
         probatio.Optional("external_entity_id"): probatio.Any(str, None),
@@ -1002,21 +1192,26 @@ async def websocket_create_list(
             msg.get("tandoor_excluded_units"), maximum=500, required=False
         ) or ""
         record = await _runtime(hass).database.async_create_list(
-            name, list_type, icon, provider, external_entity_id,
-            msg["label_conflict_policy"],
-            msg["use_global_labels"],
-            msg["use_type_labels"],
-            msg["use_list_labels"],
-            msg["use_global_categories"],
-            msg["use_type_categories"],
-            msg["use_global_chips"],
-            msg["use_type_chips"],
-            msg["use_dishes"],
-            msg["use_tandoor"],
-            msg["tandoor_skip_small_units"],
-            msg["tandoor_include_ingredients"],
-            tandoor_excluded_units,
-            msg["tandoor_result_limit"],
+            name=name,
+            list_type=list_type,
+            icon=icon,
+            provider=provider,
+            capitalize_first_letter=msg["capitalize_first_letter"],
+            external_entity_id=external_entity_id,
+            label_conflict_policy=msg["label_conflict_policy"],
+            use_global_categories=msg["use_global_categories"],
+            use_type_categories=msg["use_type_categories"],
+            use_global_labels=msg["use_global_labels"],
+            use_type_labels=msg["use_type_labels"],
+            use_list_labels=msg["use_list_labels"],
+            use_global_chips=msg["use_global_chips"],
+            use_type_chips=msg["use_type_chips"],
+            use_dishes=msg["use_dishes"],
+            use_tandoor=msg["use_tandoor"],
+            tandoor_skip_small_units=msg["tandoor_skip_small_units"],
+            tandoor_include_ingredients=msg["tandoor_include_ingredients"],
+            tandoor_excluded_units=tandoor_excluded_units,
+            tandoor_result_limit=msg["tandoor_result_limit"],
         )
     except ValueError as error:
         _send_input_error(connection, msg, error)
@@ -1037,6 +1232,7 @@ async def websocket_create_list(
         probatio.Required("type"): f"{DOMAIN}/lists/update",
         probatio.Required("list_id"): str,
         probatio.Optional("name"): str,
+        probatio.Optional("capitalize_first_letter"): bool,
         probatio.Optional("icon"): probatio.Any(str, None),
         probatio.Optional("enabled"): bool,
         probatio.Optional("external_entity_id"): probatio.Any(str, None),
@@ -1080,6 +1276,7 @@ async def websocket_update_list(
             "name": name,
             "icon": icon,
             "enabled": msg.get("enabled"),
+            "capitalize_first_letter": msg.get("capitalize_first_letter"),
             "label_conflict_policy": msg.get("label_conflict_policy"),
             "use_global_categories": msg.get("use_global_categories"),
             "use_type_categories": msg.get("use_type_categories"),
@@ -1246,7 +1443,11 @@ async def websocket_list_items(
     except ExternalListError as error:
         _send_error(connection, msg["id"], "external_list_error", error)
         return
-    result: dict[str, Any] = {"items": [item.as_dict() for item in records]}
+    category_names = await _runtime(hass).database.async_get_item_category_names(msg["list_id"])
+    result: dict[str, Any] = {"items": [
+        {**item.as_dict(), "category_name": category_names.get(item.category_id)}
+        for item in records
+    ]}
     if list_record.provider == "bring":
         statuses = await _runtime(hass).database.async_list_external_sync_statuses()
         result["sync_status"] = statuses.get(list_record.id)
@@ -1270,6 +1471,8 @@ async def websocket_list_items(
         probatio.Optional("label_ids"): [str],
         probatio.Optional("product_id"): probatio.Any(str, None),
         probatio.Optional("offer_only"): bool,
+        probatio.Optional("remember_product_category"): bool,
+        probatio.Optional("remember_product_labels"): bool,
     }
 )
 async def websocket_create_item(
@@ -1296,6 +1499,8 @@ async def websocket_create_item(
         if list_record.list_type != "todo" and recurrence_interval is not None:
             raise ValueError(localized_text("errors.recurrence_todo_only"))
         if list_record.provider == "bring":
+            if msg.get("remember_product_category", False) or msg.get("remember_product_labels", False):
+                raise ValueError(localized_text("backend.local_shopping_target_required"))
             record = await _runtime(hass).external_lists.async_create_item(
                 msg["list_id"], **values
             )
@@ -1307,6 +1512,8 @@ async def websocket_create_item(
                 _clean_text(msg.get("due_at"), maximum=40, required=False),
                 values["label_ids"], values["product_id"], None,
                 recurrence_interval, recurrence_unit, values["offer_only"],
+                msg.get("remember_product_category", False),
+                msg.get("remember_product_labels", False),
             )
     except ValueError as error:
         _send_input_error(connection, msg, error)
@@ -1326,7 +1533,90 @@ async def websocket_create_item(
         return
     if list_record.provider != "bring":
         _fire_items_changed(hass, record.list_id)
+        if msg.get("remember_product_labels", False):
+            _fire_lists_changed(hass)
+        elif msg.get("remember_product_category", False):
+            _fire_lists_changed(hass, record.list_id)
     connection.send_result(msg["id"], {"item": record.as_dict()})
+
+
+@localized_command({
+    probatio.Required("type"): f"{DOMAIN}/item_actions/chip",
+    probatio.Required("list_id"): str,
+    probatio.Required("name"): str,
+    probatio.Optional("product_id"): probatio.Any(str, None),
+})
+async def websocket_item_action_chip(hass, connection, msg) -> None:
+    """Save an entry chip only for the list operated by the card."""
+    try:
+        chip, created = await _runtime(hass).database.async_create_item_action_chip(
+            _clean_text(msg["list_id"], maximum=64, required=True),
+            _clean_text(msg["name"], maximum=100, required=True),
+            _clean_text(msg.get("product_id"), maximum=64, required=False),
+        )
+    except ValueError as error:
+        _send_input_error(connection, msg, error)
+        return
+    except (ListNotFoundError, ProductNotFoundError):
+        _send_error(connection, msg["id"], websocket_api.ERR_NOT_FOUND, localized_text("errors.product_definition_missing"))
+        return
+    if created:
+        _fire_lists_changed(hass, msg["list_id"])
+    connection.send_result(msg["id"], {"chip": chip.as_dict(), "created": created})
+
+
+@websocket_api.require_admin
+@localized_command({
+    probatio.Required("type"): f"{DOMAIN}/item_actions/rule",
+    probatio.Required("list_id"): str,
+    probatio.Required("name"): str,
+    probatio.Required("category_id"): str,
+})
+async def websocket_item_action_rule(hass, connection, msg) -> None:
+    """Append an exact rule without mutating shared category definitions."""
+    try:
+        category, created = await _runtime(hass).database.async_create_item_action_rule(
+            _clean_text(msg["list_id"], maximum=64, required=True),
+            _clean_text(msg["name"], maximum=100, required=True),
+            _clean_text(msg["category_id"], maximum=64, required=True),
+        )
+    except ValueError as error:
+        _send_input_error(connection, msg, error)
+        return
+    except (ListNotFoundError, CategoryNotFoundError):
+        _send_error(connection, msg["id"], websocket_api.ERR_NOT_FOUND, localized_text("errors.category_or_list_missing"))
+        return
+    if created:
+        _fire_lists_changed(hass, msg["list_id"])
+    connection.send_result(msg["id"], {"category": category.as_dict(), "created": created})
+
+
+@localized_command({
+    probatio.Required("type"): f"{DOMAIN}/item_actions/send",
+    probatio.Required("source_list_id"): str,
+    probatio.Optional("source_item_id"): str,
+    probatio.Optional("source_entry_id"): str,
+    probatio.Required("target_list_id"): str,
+    probatio.Required("quantity"): int,
+})
+async def websocket_item_action_send(hass, connection, msg) -> None:
+    """Copy one persisted article into another local shopping list."""
+    try:
+        item, merged, target = await _runtime(hass).database.async_send_item_action(
+            _clean_text(msg["source_list_id"], maximum=64, required=True),
+            _clean_text(msg.get("source_item_id"), maximum=64, required=False),
+            _clean_text(msg.get("source_entry_id"), maximum=64, required=False),
+            _clean_text(msg["target_list_id"], maximum=64, required=True),
+            _clean_quantity(msg["quantity"]),
+        )
+    except ValueError as error:
+        _send_input_error(connection, msg, error)
+        return
+    except (ListNotFoundError, ListItemNotFoundError, InventoryEntryNotFoundError, ProductNotFoundError):
+        _send_error(connection, msg["id"], websocket_api.ERR_NOT_FOUND, localized_text("errors.product_definition_missing"))
+        return
+    _fire_items_changed(hass, target.id)
+    connection.send_result(msg["id"], {"item": item.as_dict(), "merged": merged, "list": target.as_dict()})
 
 
 @localized_command(
@@ -1347,6 +1637,8 @@ async def websocket_create_item(
         probatio.Optional("label_ids"): [str],
         probatio.Optional("product_id"): probatio.Any(str, None),
         probatio.Optional("offer_only"): bool,
+        probatio.Optional("remember_product_category"): bool,
+        probatio.Optional("remember_product_labels"): bool,
     }
 )
 async def websocket_update_item(
@@ -1390,12 +1682,16 @@ async def websocket_update_item(
         updates["recurrence_interval"] = recurrence_interval
         updates["recurrence_unit"] = recurrence_unit
         if list_record.provider == "bring":
+            if msg.get("remember_product_category", False) or msg.get("remember_product_labels", False):
+                raise ValueError(localized_text("backend.local_shopping_target_required"))
             record = await _runtime(hass).external_lists.async_update_item(
                 msg["item_id"], **updates
             )
         else:
             record = await _runtime(hass).database.async_update_item(
-                msg["item_id"], **updates
+                msg["item_id"], **updates,
+                remember_product_category=msg.get("remember_product_category", False),
+                remember_product_labels=msg.get("remember_product_labels", False),
             )
     except ValueError as error:
         _send_input_error(connection, msg, error)
@@ -1415,6 +1711,10 @@ async def websocket_update_item(
         return
     if list_record.provider != "bring":
         _fire_items_changed(hass, record.list_id)
+        if msg.get("remember_product_labels", False):
+            _fire_lists_changed(hass)
+        elif msg.get("remember_product_category", False):
+            _fire_lists_changed(hass, record.list_id)
     connection.send_result(msg["id"], {"item": record.as_dict()})
 
 
@@ -1706,6 +2006,7 @@ async def websocket_create_product(
     except (LabelNotFoundError, CategoryNotFoundError):
         _send_error(connection, msg["id"], websocket_api.ERR_NOT_FOUND, localized_text("errors.category_or_label_missing"))
         return
+    _fire_lists_changed(hass)
     connection.send_result(msg["id"], {"product": product.as_dict()})
 
 
@@ -1713,6 +2014,7 @@ async def websocket_create_product(
     {
         probatio.Required("type"): f"{DOMAIN}/products/update",
         probatio.Required("product_id"): str,
+        probatio.Optional("list_id"): str,
         probatio.Optional("ean"): probatio.Any(str, None),
         probatio.Required("name"): str,
         probatio.Optional("original_name"): probatio.Any(str, None),
@@ -1745,6 +2047,7 @@ async def websocket_update_product(
             category=_clean_text(msg.get("category"), maximum=100, required=False),
             image_url=_clean_text(msg.get("image_url"), maximum=1000, required=False),
             label_ids=_clean_label_ids(msg.get("label_ids")),
+            list_id=msg.get("list_id"),
             category_ids=(
                 _clean_category_ids(msg.get("category_ids"))
                 if "category_ids" in msg else None
@@ -1763,9 +2066,10 @@ async def websocket_update_product(
             msg["id"], websocket_api.ERR_NOT_FOUND, localized_text("errors.product_not_found")
         )
         return
-    except (LabelNotFoundError, CategoryNotFoundError):
+    except (LabelNotFoundError, CategoryNotFoundError, ListNotFoundError):
         _send_error(connection, msg["id"], websocket_api.ERR_NOT_FOUND, localized_text("errors.category_or_label_missing"))
         return
+    _fire_lists_changed(hass)
     connection.send_result(msg["id"], {"product": product.as_dict()})
 
 
@@ -2228,6 +2532,7 @@ async def websocket_set_category_rules(
             msg["id"], websocket_api.ERR_NOT_FOUND, localized_text("errors.category_not_found")
         )
         return
+    _fire_lists_changed(hass)
     connection.send_result(msg["id"], {"rules": rules})
 
 
@@ -2385,6 +2690,7 @@ async def websocket_create_category(
     except ListNotFoundError:
         _send_error(connection, msg["id"], websocket_api.ERR_NOT_FOUND, localized_text("errors.list_not_found"))
         return
+    _fire_lists_changed(hass)
     connection.send_result(
         msg["id"], {"category": category.as_dict(), "rules": rules}
     )
@@ -2444,6 +2750,7 @@ async def websocket_update_category(
             msg["id"], websocket_api.ERR_NOT_FOUND, localized_text("errors.category_or_list_missing")
         )
         return
+    _fire_lists_changed(hass)
     connection.send_result(
         msg["id"], {"category": category.as_dict(), "rules": rules}
     )
@@ -2469,6 +2776,7 @@ async def websocket_delete_category(
             msg["id"], websocket_api.ERR_NOT_FOUND, localized_text("errors.category_not_found")
         )
         return
+    _fire_lists_changed(hass)
     connection.send_result(msg["id"])
 
 
@@ -2554,6 +2862,7 @@ async def websocket_set_category_order(
     except ListNotFoundError:
         _send_error(connection, msg["id"], websocket_api.ERR_NOT_FOUND, localized_text("errors.list_not_found"))
         return
+    _fire_lists_changed(hass, msg.get("list_id") if "scope" not in msg else None)
     connection.send_result(
         msg["id"],
         {
@@ -2583,6 +2892,7 @@ async def websocket_reset_category_order(
     except ListNotFoundError:
         _send_error(connection, msg["id"], websocket_api.ERR_NOT_FOUND, localized_text("errors.list_not_found"))
         return
+    _fire_lists_changed(hass, msg.get("list_id") if "scope" not in msg else None)
     connection.send_result(
         msg["id"],
         {
@@ -2653,6 +2963,7 @@ async def websocket_create_label(
     except DuplicateLabelError:
         _send_error(connection, msg["id"], "label_already_exists", localized_text("errors.label_exists"))
         return
+    _fire_lists_changed(hass)
     connection.send_result(msg["id"], {"label": label.as_dict()})
 
 
@@ -2698,6 +3009,7 @@ async def websocket_update_label(
     except LabelNotFoundError:
         _send_error(connection, msg["id"], websocket_api.ERR_NOT_FOUND, localized_text("errors.label_not_found"))
         return
+    _fire_lists_changed(hass)
     connection.send_result(msg["id"], {"label": label.as_dict()})
 
 
@@ -2719,6 +3031,7 @@ async def websocket_delete_label(
     except LabelNotFoundError:
         _send_error(connection, msg["id"], websocket_api.ERR_NOT_FOUND, localized_text("errors.label_not_found"))
         return
+    _fire_lists_changed(hass)
     connection.send_result(msg["id"])
 
 
@@ -2796,6 +3109,7 @@ async def websocket_create_chip(
     except ProductNotFoundError:
         _send_error(connection, msg["id"], websocket_api.ERR_NOT_FOUND, localized_text("errors.product_not_found"))
         return
+    _fire_lists_changed(hass)
     connection.send_result(msg["id"], {"chip": chip.as_dict()})
 
 
@@ -2851,6 +3165,7 @@ async def websocket_update_chip(
     except (ChipNotFoundError, ProductNotFoundError):
         _send_error(connection, msg["id"], websocket_api.ERR_NOT_FOUND, localized_text("errors.chip_or_product_missing"))
         return
+    _fire_lists_changed(hass)
     connection.send_result(msg["id"], {"chip": chip.as_dict()})
 
 
@@ -2872,6 +3187,7 @@ async def websocket_delete_chip(
     except ChipNotFoundError:
         _send_error(connection, msg["id"], websocket_api.ERR_NOT_FOUND, localized_text("errors.chip_not_found"))
         return
+    _fire_lists_changed(hass)
     connection.send_result(msg["id"])
 
 
@@ -3161,7 +3477,8 @@ async def websocket_inventory_options(
     list_id = msg["list_id"]
     try:
         inventory_lists = await database.async_list_inventory_lists()
-        if not any(record.id == list_id for record in inventory_lists):
+        inventory_list = next((record for record in inventory_lists if record.id == list_id), None)
+        if inventory_list is None:
             raise InventoryListRequiredError(list_id)
         products = await database.async_list_products(
             _clean_text(msg.get("search"), maximum=200, required=False), None
@@ -3177,10 +3494,26 @@ async def websocket_inventory_options(
         {**category.as_dict(), "manual_position": position}
         for position, category in enumerate(ordered_categories)
     ]
+    effective_labels = {label.name.casefold(): label for label in labels}
+
+    def product_labels(product):
+        return list({
+            label.name.casefold(): effective_labels[label.name.casefold()].as_dict()
+            for label in product.labels
+            if label.name.casefold() in effective_labels and (
+                label.scope == "global" and inventory_list.use_global_labels
+                or label.scope == "list_type" and label.list_type == inventory_list.list_type
+                and inventory_list.use_type_labels
+                or label.scope == "list" and label.list_id == list_id
+            )
+        }.values())
+
     connection.send_result(
         msg["id"],
         {
-            "products": [product.as_dict() for product in products],
+            "products": [
+                {**product.as_dict(), "labels": product_labels(product)} for product in products
+            ],
             "categories": allowed_categories,
             "labels": [label.as_dict() for label in labels],
         },
@@ -3371,7 +3704,9 @@ async def websocket_add_inventory_product(
                 category=None,
                 image_url=product.image_url,
                 label_ids=explicit_label_ids,
+                list_id=msg["list_id"],
             )
+            _fire_lists_changed(hass)
 
         existing = next(
             (
@@ -3477,6 +3812,7 @@ async def websocket_create_inventory_entry(
         probatio.Optional("category_id"): probatio.Any(str, None),
         probatio.Optional("category"): probatio.Any(str, None),
         probatio.Optional("hidden"): bool,
+        probatio.Optional("label_ids"): [str],
     }
 )
 async def websocket_update_inventory_entry(
@@ -3484,7 +3820,7 @@ async def websocket_update_inventory_entry(
     connection: websocket_api.ActiveConnection,
     msg: dict[str, Any],
 ) -> None:
-    """Correct stock and configure the minimum stock."""
+    """Correct stock, configure restocking and optionally edit product labels."""
     try:
         record = await _runtime(hass).database.async_update_inventory_entry(
             msg["entry_id"],
@@ -3495,9 +3831,15 @@ async def websocket_update_inventory_entry(
             category_id=_clean_text(msg.get("category_id"), maximum=64, required=False),
             category=_clean_text(msg.get("category"), maximum=100, required=False),
             hidden=msg.get("hidden", False),
+            label_ids=_clean_label_ids(msg["label_ids"]) if "label_ids" in msg else None,
         )
     except ValueError as error:
         _send_input_error(connection, msg, error)
+        return
+    except LabelNotFoundError:
+        _send_error(connection,
+            msg["id"], websocket_api.ERR_NOT_FOUND, localized_text("errors.category_or_label_missing")
+        )
         return
     except (InventoryEntryNotFoundError, CategoryNotFoundError):
         _send_error(connection,
@@ -3505,6 +3847,8 @@ async def websocket_update_inventory_entry(
         )
         return
     _fire_inventory_changed(hass, list_id=record.list_id, entry_id=record.id)
+    if "label_ids" in msg:
+        _fire_lists_changed(hass)
     connection.send_result(msg["id"], {"entry": record.as_dict()})
 
 
@@ -4076,8 +4420,8 @@ async def _async_delayed_simulation(
 )
 async def websocket_pending_scans(hass, connection, msg) -> None:
     """Return scans waiting for product data or a corrected stock value."""
-    records = await _runtime(hass).database.async_list_pending_scans()
-    connection.send_result(msg["id"], {"scans": [item.as_dict() for item in records]})
+    records = await _runtime(hass).scanner.async_pending_scans()
+    connection.send_result(msg["id"], {"scans": records})
 
 
 @localized_command(
@@ -4088,11 +4432,7 @@ async def websocket_pending_scans(hass, connection, msg) -> None:
 )
 async def websocket_pending_scans_for_list(hass, connection, msg) -> None:
     """Return actionable scans for one inventory card."""
-    records = await _runtime(hass).database.async_list_pending_scans()
-    scans = [
-        item.as_dict() for item in records
-        if item.list_id == msg["list_id"] and item.status in {"queued", "needs_input"}
-    ]
+    scans = await _runtime(hass).scanner.async_pending_scans(msg["list_id"])
     connection.send_result(msg["id"], {"scans": scans})
 
 
@@ -4103,18 +4443,84 @@ async def websocket_pending_scans_for_list(hass, connection, msg) -> None:
     }
 )
 async def websocket_hold_pending_scan(hass, connection, msg) -> None:
-    """Let exactly one visible target card take over an offered scan."""
-    record = await _runtime(hass).database.async_hold_offered_scan(msg["scan_id"])
-    if record is None:
+    """Legacy view notification; opening a scan never claims its editor slot."""
+    record = await _runtime(hass).database.async_get_scan_history_record(msg["scan_id"])
+    if record is None or record.status not in {"queued", "offered", "needs_input"}:
         _send_error(connection, msg["id"], websocket_api.ERR_NOT_FOUND, localized_text("errors.offered_scan_missing"))
         return
     connection.send_result(msg["id"], {"scan": record.as_dict()})
+
+
+def _clean_scan_session(value: str) -> str:
+    return _clean_text(value, maximum=100, required=True)
+
+
+@localized_command({
+    probatio.Required("type"): f"{DOMAIN}/scanner/queue/view",
+    probatio.Required("scan_id"): str,
+    probatio.Required("session_id"): str,
+    probatio.Optional("open", default=True): bool,
+})
+async def websocket_view_pending_scan(hass, connection, msg) -> None:
+    try:
+        record = await _runtime(hass).scanner.async_view_pending_scan(
+            msg["scan_id"], _clean_scan_session(msg["session_id"]), connection, msg["open"])
+    except ValueError as error:
+        _send_input_error(connection, msg, error)
+        return
+    connection.send_result(msg["id"], {"scan": record})
+
+
+@localized_command({
+    probatio.Required("type"): f"{DOMAIN}/scanner/queue/edit",
+    probatio.Required("scan_id"): str,
+    probatio.Required("session_id"): str,
+})
+async def websocket_edit_pending_scan(hass, connection, msg) -> None:
+    try:
+        record = await _runtime(hass).scanner.async_edit_pending_scan(
+            msg["scan_id"], _clean_scan_session(msg["session_id"]), connection)
+    except ValueError as error:
+        _send_input_error(connection, msg, error)
+        return
+    connection.send_result(msg["id"], {"scan": record})
+
+
+@localized_command({
+    probatio.Required("type"): f"{DOMAIN}/scanner/queue/release",
+    probatio.Required("scan_id"): str,
+    probatio.Required("session_id"): str,
+})
+async def websocket_release_pending_scan(hass, connection, msg) -> None:
+    try:
+        record = await _runtime(hass).scanner.async_release_pending_scan(
+            msg["scan_id"], _clean_scan_session(msg["session_id"]), connection)
+    except ValueError as error:
+        _send_input_error(connection, msg, error)
+        return
+    connection.send_result(msg["id"], {"scan": record})
+
+
+@localized_command({
+    probatio.Required("type"): f"{DOMAIN}/scanner/queue/discard",
+    probatio.Required("scan_id"): str,
+    probatio.Required("session_id"): str,
+})
+async def websocket_discard_pending_scan(hass, connection, msg) -> None:
+    try:
+        record = await _runtime(hass).scanner.async_discard_pending_scan(
+            msg["scan_id"], session_id=_clean_scan_session(msg["session_id"]), connection=connection)
+    except ValueError as error:
+        _send_input_error(connection, msg, error)
+        return
+    connection.send_result(msg["id"], {"success": True, "scan": record})
 
 
 @localized_command(
     {
         probatio.Required("type"): f"{DOMAIN}/scanner/queue/resolve",
         probatio.Required("scan_id"): str,
+        probatio.Optional("session_id"): str,
         probatio.Optional("corrected_stock"): probatio.Any(int, None),
         probatio.Optional("minimum_stock"): probatio.Any(int, None),
         probatio.Optional("restock_quantity"): int,
@@ -4151,6 +4557,8 @@ async def websocket_resolve_pending_scan(hass, connection, msg) -> None:
             }
         result = await _runtime(hass).scanner.async_resolve_pending_scan(
             msg["scan_id"], corrected_stock=corrected_stock,
+            session_id=_clean_scan_session(msg["session_id"]) if "session_id" in msg else None,
+            connection=connection,
             minimum_stock=_clean_stock(msg.get("minimum_stock"), optional=True),
             restock_quantity=_clean_stock(msg.get("restock_quantity"), optional=True),
             restock_mode=msg.get("restock_mode"),
@@ -4175,14 +4583,12 @@ async def websocket_resolve_pending_scan(hass, connection, msg) -> None:
 )
 async def websocket_dismiss_pending_scan(hass, connection, msg) -> None:
     """Dismiss a queued scan without applying it."""
-    claimed = await _runtime(hass).database.async_claim_pending_scan(msg["scan_id"])
-    if claimed is None:
-        _send_error(connection, msg["id"], websocket_api.ERR_NOT_FOUND, localized_text("errors.pending_scan_missing"))
+    try:
+        record = await _runtime(hass).scanner.async_discard_pending_scan(msg["scan_id"])
+    except ValueError as error:
+        _send_input_error(connection, msg, error)
         return
-    await _runtime(hass).database.async_finish_pending_scan(
-        msg["scan_id"], "dismissed", localized_text("backend.queued_scan_discarded")
-    )
-    connection.send_result(msg["id"], {"success": True})
+    connection.send_result(msg["id"], {"success": True, "scan": record})
 
 
 @websocket_api.require_admin
