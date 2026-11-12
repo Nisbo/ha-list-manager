@@ -64,6 +64,15 @@ _ALEXA_HISTORY_COLUMNS = (
 )
 
 
+def _product_text(value: str | None) -> str:
+    """Compare products without changing their stored spelling or accents."""
+    return "".join(
+        character
+        for character in unicodedata.normalize("NFKD", (value or "").casefold())
+        if not unicodedata.combining(character)
+    )
+
+
 class HaListManagerDatabaseError(Exception):
     """Base class for database errors."""
 
@@ -1895,6 +1904,7 @@ class HaListManagerDatabase:
         connection = sqlite3.connect(self.path, timeout=10)
         try:
             connection.row_factory = sqlite3.Row
+            connection.create_function("product_text", 1, _product_text, deterministic=True)
             connection.execute("PRAGMA foreign_keys = ON")
             # SQLite's transaction context commits/rolls back but does not close.
             with connection:
@@ -5469,21 +5479,21 @@ WHERE registry_entry_id IS NOT NULL;
         parameters: list[str] = []
         if search:
             clauses.append(
-                "(instr(lower(name), lower(?)) > 0 "
-                "OR instr(lower(COALESCE(original_name, '')), lower(?)) > 0 "
-                "OR instr(lower(COALESCE(ean, '')), lower(?)) > 0 "
-                "OR instr(lower(COALESCE(brand, '')), lower(?)) > 0 "
-                "OR instr(lower(COALESCE(category, '')), lower(?)) > 0 "
+                "(instr(product_text(name), ?) > 0 "
+                "OR instr(product_text(original_name), ?) > 0 "
+                "OR instr(product_text(ean), ?) > 0 "
+                "OR instr(product_text(brand), ?) > 0 "
+                "OR instr(product_text(category), ?) > 0 "
                 "OR EXISTS (SELECT 1 FROM product_category_assignments pca "
                 "JOIN categories pc ON pc.id = pca.category_id "
                 "WHERE pca.product_id = products.id "
-                "AND instr(lower(pc.name), lower(?)) > 0) "
+                "AND instr(product_text(pc.name), ?) > 0) "
                 "OR EXISTS (SELECT 1 FROM product_labels pl "
                 "JOIN labels l ON l.id = pl.label_id "
                 "WHERE pl.product_id = products.id "
-                "AND instr(lower(l.name), lower(?)) > 0))"
+                "AND instr(product_text(l.name), ?) > 0))"
             )
-            parameters.extend([search] * 7)
+            parameters.extend([_product_text(search)] * 7)
         if label_id:
             clauses.append(
                 "EXISTS (SELECT 1 FROM product_labels pl "
@@ -5499,7 +5509,7 @@ WHERE registry_entry_id IS NOT NULL;
             where, parameters = self._product_filter(search, label_id)
             rows = connection.execute(
                 f"SELECT * FROM products {where} "
-                "ORDER BY name COLLATE NOCASE, brand COLLATE NOCASE",
+                "ORDER BY product_text(name), product_text(brand), id",
                 parameters,
             ).fetchall()
             records = [
@@ -5517,7 +5527,7 @@ WHERE registry_entry_id IS NOT NULL;
         with self._connect() as connection:
             rows = connection.execute(
                 "SELECT * FROM products "
-                "ORDER BY updated_at DESC, name COLLATE NOCASE, brand COLLATE NOCASE "
+                "ORDER BY updated_at DESC, product_text(name), product_text(brand), id "
                 "LIMIT ?",
                 (limit,),
             ).fetchall()
@@ -5538,7 +5548,8 @@ WHERE registry_entry_id IS NOT NULL;
         with self._connect() as connection:
             placeholders = ",".join("?" for _ in product_ids)
             rows = connection.execute(
-                f"SELECT * FROM products WHERE id IN ({placeholders}) ORDER BY name COLLATE NOCASE",
+                f"SELECT * FROM products WHERE id IN ({placeholders}) "
+                "ORDER BY product_text(name), product_text(brand), id",
                 product_ids,
             ).fetchall()
             return [self._product_record_from_row(
@@ -5561,7 +5572,7 @@ WHERE registry_entry_id IS NOT NULL;
             )
             rows = connection.execute(
                 f"SELECT * FROM products {where} "
-                "ORDER BY name COLLATE NOCASE, brand COLLATE NOCASE "
+                "ORDER BY product_text(name), product_text(brand), id "
                 "LIMIT ? OFFSET ?",
                 [*parameters, limit, offset],
             ).fetchall()
@@ -5762,7 +5773,7 @@ WHERE registry_entry_id IS NOT NULL;
                 JOIN product_category_assignments AS assignments
                   ON assignments.product_id = products.id
                 WHERE assignments.category_id = ?
-                ORDER BY products.name COLLATE NOCASE, products.brand COLLATE NOCASE
+                ORDER BY product_text(products.name), product_text(products.brand), products.id
                 """,
                 (category_id,),
             ).fetchall()

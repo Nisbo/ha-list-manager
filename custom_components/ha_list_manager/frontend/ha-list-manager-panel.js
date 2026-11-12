@@ -72,7 +72,7 @@ function haListManagerPanelTextRequest(hass, message) {
   return hass.callWS(message.type?.startsWith("ha_list_manager/") ? { ...message, language: haListManagerPanelTextLanguage(hass) } : message);
 }
 
-const PANEL_VERSION = "1.0.0";
+const PANEL_VERSION = "1.0.1";
 const GROUP_PICKER_RESULT_LIMIT = 100;
 const API = "ha_list_manager";
 const ITEMS_EVENT = "ha_list_manager_items_changed";

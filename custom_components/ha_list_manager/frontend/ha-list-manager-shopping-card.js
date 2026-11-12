@@ -88,7 +88,7 @@ function haListManagerShoppingCardTextRequest(hass, message) {
 const HA_LM_API = "ha_list_manager";
 const HA_LM_ITEMS_EVENT = "ha_list_manager_items_changed";
 const HA_LM_LISTS_EVENT = "ha_list_manager_lists_changed";
-const CARD_VERSION = "1.0.0";
+const CARD_VERSION = "1.0.1";
 
 const esc = (value) => String(value ?? "").replace(/[&<>'"]/g, (char) => ({
   "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;",
@@ -148,6 +148,7 @@ class HaListManagerShoppingCard extends HTMLElement {
     this._error = "";
     this._unsubscribe = null;
     this._subscribePromise = null;
+    this._renderListeners = [];
     this._searchTimer = null;
     this._chipsExpanded = false;
     this._chipDialog = false;
@@ -489,6 +490,8 @@ class HaListManagerShoppingCard extends HTMLElement {
     }
   }
   disconnectedCallback() {
+    this._clearRenderListeners();
+    this._pageActionAnchor = null;
     this._watchConnection(null);
     this._setExpandedView(false);
     if (this._unsubscribe) this._unsubscribe();
@@ -972,7 +975,7 @@ class HaListManagerShoppingCard extends HTMLElement {
     if (!header || !section || !group) { this._render(); return; }
     header.setAttribute("aria-expanded", String(!collapsed));
     header.querySelector(".chevron")?.setAttribute("icon", `mdi:chevron-${collapsed ? "down" : "up"}`);
-    [...section.children].slice(1).forEach((element) => element.remove());
+    [...section.children].slice(1).forEach((element) => { this._clearRenderListeners(element); element.remove(); });
     if (!collapsed) {
       section.insertAdjacentHTML("beforeend", group.items.map((item) => this._renderItem(item)).join(""));
       this._bindDynamicContent(section, false);
@@ -1185,6 +1188,37 @@ class HaListManagerShoppingCard extends HTMLElement {
     }
   }
 
+  _capturePageScrollAnchor(preferred = null) {
+    if (this._expandedView) return null;
+    const scrollers = [];
+    for (let node = this; node; node = node.parentElement || node.getRootNode?.().host) {
+      if (node.scrollTop > 0 && node.scrollHeight > node.clientHeight) scrollers.push(node);
+    }
+    if (!scrollers.length) return null;
+    const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
+    const selector = "[data-item-id],[data-chip-category],[data-quick-chip],[data-dish],[data-category]";
+    const action = preferred || this._pageActionAnchor || this.shadowRoot.activeElement?.closest?.(selector);
+    const candidates = [action, ...this.shadowRoot.querySelectorAll(selector)].filter(Boolean);
+    for (const node of candidates) {
+      const bounds = node.getBoundingClientRect();
+      if (bounds.height > 0 && bounds.bottom > 0 && bounds.top < viewportHeight) return { node, top: bounds.top, scrollers };
+    }
+    return null;
+  }
+
+  _restorePageScrollAnchor(anchor) {
+    if (!anchor?.node.isConnected) return;
+    // Safari cannot rely on native scroll anchoring. Correct only the measured
+    // layout shift, synchronously; browsers that already anchored need no change.
+    let remaining = anchor.node.getBoundingClientRect().top - anchor.top;
+    for (const scroller of anchor.scrollers) {
+      if (Math.abs(remaining) < 0.5) break;
+      const before = scroller.scrollTop;
+      scroller.scrollTop += remaining;
+      remaining -= scroller.scrollTop - before;
+    }
+  }
+
   _setNotificationStatus(message, anchorItemId = null) {
     this._notificationStatus = message;
     const region = this.shadowRoot?.querySelector("[data-status-region]");
@@ -1193,9 +1227,14 @@ class HaListManagerShoppingCard extends HTMLElement {
     const anchor = anchorItemId
       ? [...this.shadowRoot.querySelectorAll("[data-item-id]")].find((element) => element.dataset.itemId === anchorItemId)
       : null;
+    const pageAnchor = this._capturePageScrollAnchor(anchor);
     const anchorTop = anchor?.getBoundingClientRect().top;
     const before = region.getBoundingClientRect().height;
-    region.innerHTML = this._notice(message, "notification", "send-status", "check-circle-outline");
+    this._clearRenderListeners(region);
+    // Native HA icons render asynchronously; retain the mounted icon when the text changes.
+    const template = document.createElement("template");
+    template.innerHTML = this._notice(message, "notification", "send-status", "check-circle-outline");
+    this._patchDom(region, template.content);
     this._bindNotices(region);
     const heightChange = Number.isFinite(anchorTop)
       ? anchor.getBoundingClientRect().top - anchorTop
@@ -1204,6 +1243,7 @@ class HaListManagerShoppingCard extends HTMLElement {
       card.scrollTop += heightChange;
       this._expandedScrollTop = card.scrollTop;
     }
+    this._restorePageScrollAnchor(pageAnchor);
   }
 
   _searchProducts(value) {
@@ -1923,7 +1963,8 @@ class HaListManagerShoppingCard extends HTMLElement {
     this._confirmation = null;
     if (!this._dialog) this._unlockScroll();
     if (confirmation?.type !== "discard_dialog") { this._render(); return; }
-    this.shadowRoot.querySelector("[data-discard-backdrop]")?.remove();
+    const backdrop = this.shadowRoot.querySelector("[data-discard-backdrop]");
+    if (backdrop) { this._clearRenderListeners(backdrop); backdrop.remove(); }
     const focus = confirmation.returnFocus;
     const target = focus?.element?.isConnected ? focus.element
       : focus && [...this.shadowRoot.querySelectorAll(`[${focus.attribute}]`)]
@@ -1934,14 +1975,14 @@ class HaListManagerShoppingCard extends HTMLElement {
 
   _bindDiscardConfirmation() {
     if (this._confirmation?.type !== "discard_dialog") return;
-    this.shadowRoot.querySelector("[data-confirm-discard]")?.addEventListener("click", () => {
+    this._listen(this.shadowRoot.querySelector("[data-confirm-discard]"), "click", () => {
       const returnToParent = this._confirmation?.returnToParent;
       this._confirmation = null;
       if (returnToParent) this._backToItemDialog(true);
       else this._discardDialog();
     });
-    this.shadowRoot.querySelector("[data-cancel-confirmation]")?.addEventListener("click", () => this._cancelConfirmation());
-    this.shadowRoot.querySelector("[data-discard-confirmation]")?.addEventListener("keydown", (event) => {
+    this._listen(this.shadowRoot.querySelector("[data-cancel-confirmation]"), "click", () => this._cancelConfirmation());
+    this._listen(this.shadowRoot.querySelector("[data-discard-confirmation]"), "keydown", (event) => {
       if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); this._cancelConfirmation(); }
     });
   }
@@ -2321,17 +2362,18 @@ class HaListManagerShoppingCard extends HTMLElement {
       if (field) this._dialog[field] = "";
     }
     // Remove only this banner: keep input nodes, picker queries and scroll anchors mounted.
-    button?.closest?.("[data-notice]")?.remove();
+    const notice = button?.closest?.("[data-notice]");
+    if (notice) { this._clearRenderListeners(notice); notice.remove(); }
     returnFocus?.focus?.({ preventScroll: true });
   }
 
   _bindNotices(root = this.shadowRoot) {
     root.querySelectorAll("[data-dismiss-message]").forEach((button) => {
-      button.addEventListener("pointerdown", () => {
+      this._listen(button, "pointerdown", () => {
         const active = this.shadowRoot.activeElement;
         button._noticeReturnFocus = active && ["INPUT", "TEXTAREA", "SELECT"].includes(active.tagName) ? active : null;
       });
-      button.addEventListener("click", (event) => {
+      this._listen(button, "click", (event) => {
         event.preventDefault(); event.stopPropagation();
         this._dismissNotice(button.dataset.dismissMessage, button, event.detail === 0);
       });
@@ -2429,7 +2471,8 @@ class HaListManagerShoppingCard extends HTMLElement {
       popup.parent.label_ids = [...new Set([...hiddenIds, ...this._labels.filter((entry) => selectedNames.has(entry.name.toLocaleLowerCase())).map((entry) => entry.id)])];
     }
     this._selectionPopup = null;
-    this.shadowRoot.querySelector("[data-selection-backdrop]")?.remove();
+    const backdrop = this.shadowRoot.querySelector("[data-selection-backdrop]");
+    if (backdrop) { this._clearRenderListeners(backdrop); backdrop.remove(); }
     if (apply && current && !popup.context) this._refreshMetadataUi();
     if (current) {
       const panel = this.shadowRoot.querySelector(popup.panelSelector || "[data-dialog]");
@@ -2479,6 +2522,7 @@ class HaListManagerShoppingCard extends HTMLElement {
     const grid = this.shadowRoot.querySelector("[data-selection-grid]");
     if (!grid) return;
     const scrollTop = grid.scrollTop;
+    this._clearRenderListeners(grid);
     grid.innerHTML = this._renderSelectionOptions();
     this._bindSelectionOptions();
     grid.scrollTop = scrollTop;
@@ -2486,22 +2530,22 @@ class HaListManagerShoppingCard extends HTMLElement {
   }
 
   _bindSelectionOptions() {
-    this.shadowRoot.querySelectorAll("[data-selection-option]").forEach((button) => button.addEventListener("click", () => this._chooseSelectionOption(button.dataset.selectionOption, button)));
+    this.shadowRoot.querySelectorAll("[data-selection-option]").forEach((button) => this._listen(button, "click", () => this._chooseSelectionOption(button.dataset.selectionOption, button)));
   }
 
   _bindSelectionTriggers(root = this.shadowRoot) {
     root.querySelectorAll("[data-open-selection]").forEach((button) => {
       if (button.dataset.selectionBound) return;
       button.dataset.selectionBound = "1";
-      button.addEventListener("pointerdown", (event) => { event.preventDefault(); event.stopPropagation(); });
-      button.addEventListener("click", (event) => { event.preventDefault(); event.stopPropagation(); if (!button.disabled) this._openSelectionPopup(button.dataset.openSelection, button); });
+      this._listen(button, "pointerdown", (event) => { event.preventDefault(); event.stopPropagation(); });
+      this._listen(button, "click", (event) => { event.preventDefault(); event.stopPropagation(); if (!button.disabled) this._openSelectionPopup(button.dataset.openSelection, button); });
     });
   }
 
   _bindSelectionPopup() {
     const root = this.shadowRoot;
-    root.querySelector("[data-selection-backdrop]")?.addEventListener("click", (event) => { if (event.target === event.currentTarget) this._closeSelectionPopup(); });
-    root.querySelector("[data-selection-dialog]")?.addEventListener("keydown", (event) => {
+    this._listen(root.querySelector("[data-selection-backdrop]"), "click", (event) => { if (event.target === event.currentTarget) this._closeSelectionPopup(); });
+    this._listen(root.querySelector("[data-selection-dialog]"), "keydown", (event) => {
       if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); this._closeSelectionPopup(); }
       if (event.key === "Tab") {
         const focusable = [...root.querySelectorAll("[data-selection-dialog] button,[data-selection-dialog] input")].filter((element) => !element.disabled);
@@ -2510,10 +2554,10 @@ class HaListManagerShoppingCard extends HTMLElement {
         else if (!event.shiftKey && root.activeElement === last) { event.preventDefault(); first?.focus({ preventScroll: true }); }
       }
     });
-    root.querySelectorAll("[data-selection-close]").forEach((button) => button.addEventListener("click", () => this._closeSelectionPopup()));
-    root.querySelector("[data-selection-search]")?.addEventListener("input", (event) => { if (this._selectionPopup) { this._selectionPopup.query = event.target.value; this._refreshSelectionGrid(); } });
-    root.querySelector("[data-clear-selection]")?.addEventListener("click", () => { if (this._selectionPopup) { this._selectionPopup.selected = []; this._refreshSelectionGrid(); } });
-    root.querySelector("[data-selection-apply]")?.addEventListener("click", () => this._closeSelectionPopup(true));
+    root.querySelectorAll("[data-selection-close]").forEach((button) => this._listen(button, "click", () => this._closeSelectionPopup()));
+    this._listen(root.querySelector("[data-selection-search]"), "input", (event) => { if (this._selectionPopup) { this._selectionPopup.query = event.target.value; this._refreshSelectionGrid(); } });
+    this._listen(root.querySelector("[data-clear-selection]"), "click", () => { if (this._selectionPopup) { this._selectionPopup.selected = []; this._refreshSelectionGrid(); } });
+    this._listen(root.querySelector("[data-selection-apply]"), "click", () => this._closeSelectionPopup(true));
     this._bindSelectionOptions();
   }
 
@@ -2565,6 +2609,7 @@ class HaListManagerShoppingCard extends HTMLElement {
     this.shadowRoot.querySelectorAll("[data-editor-notice]").forEach((host) => {
       const content = host.dataset.editorNotice === "labels" ? this._renderProductLabelNotice() : this._renderCategoryEditorNotice();
       if (host._haLmNoticeMarkup !== content) {
+        this._clearRenderListeners(host);
         host.innerHTML = content;
         host._haLmNoticeMarkup = content;
       }
@@ -2624,9 +2669,10 @@ class HaListManagerShoppingCard extends HTMLElement {
     if (!host) return;
     if (!this._productLabelPreferenceState().enabled) this._dialog.remember_product_labels = false;
     const returnFocus = this.shadowRoot.activeElement === host.querySelector("[data-remember-product-labels]");
+    this._clearRenderListeners(host);
     host.innerHTML = this._renderProductLabelPreferenceContent(host.dataset.labelNoticeExternal !== "true");
     const checkbox = host.querySelector("[data-remember-product-labels]");
-    checkbox?.addEventListener("change", (event) => {
+    this._listen(checkbox, "change", (event) => {
       this._dialog.remember_product_labels = event.target.checked && this._productLabelPreferenceState().enabled;
       this._updateProductLabelPreference();
       this._updateDialogDirtyState();
@@ -3731,6 +3777,7 @@ class HaListManagerShoppingCard extends HTMLElement {
   _refreshSearchView() {
     const suggestions = this.shadowRoot?.querySelector("[data-suggestions]");
     if (suggestions) {
+      this._clearRenderListeners(suggestions);
       suggestions.innerHTML = this._suggestionsHtml();
       suggestions.hidden = !this._suggestions.length || !this._suggestionsVisible;
       this._bindDynamicContent(suggestions);
@@ -3738,11 +3785,12 @@ class HaListManagerShoppingCard extends HTMLElement {
     const clear = this.shadowRoot?.querySelector("[data-clear-input]");
     if (clear) clear.hidden = !this._inputValue;
     const content = this.shadowRoot?.querySelector("main");
-    if (content) { content.innerHTML = this._contentHtml(); this._bindDynamicContent(content); }
+    if (content) { this._clearRenderListeners(content); content.innerHTML = this._contentHtml(); this._bindDynamicContent(content); }
     const categoryToggle = this.shadowRoot?.querySelector("[data-toggle-categories]");
     if (categoryToggle) categoryToggle.disabled = this._searchExpandsGroups() || !this._groups().length;
     const chips = this.shadowRoot?.querySelector(".quick-chips");
     if (chips) {
+      this._clearRenderListeners(chips);
       chips.outerHTML = this._renderChips();
       const nextChips = this.shadowRoot.querySelector(".quick-chips");
       if (nextChips) this._bindChipActions(nextChips);
@@ -3763,7 +3811,7 @@ class HaListManagerShoppingCard extends HTMLElement {
       .tandoor-search-options{display:flex;flex-wrap:wrap;gap:8px 18px}.tandoor-search-option{display:flex!important;flex-direction:row!important;align-items:center;gap:8px;width:max-content;margin:0!important;color:var(--secondary-text-color)!important;font-size:13px}.tandoor-recipe-small-units{margin-top:14px!important}.tandoor-search-option input{width:18px!important;min-height:18px!important;margin:0!important;padding:0!important;accent-color:var(--primary-color)}.tandoor-search-actions{display:flex;align-items:center;gap:2px}.tandoor-search-actions button{display:grid;place-items:center;width:34px;height:34px;padding:0;border:0;border-radius:50%;color:var(--secondary-text-color);background:transparent;cursor:pointer}.tandoor-search-actions button:hover{color:var(--primary-text-color);background:color-mix(in srgb,var(--primary-text-color) 8%,transparent)}.tandoor-search-actions ha-circular-progress{width:24px;height:24px}.tandoor-cookbooks{display:grid;gap:8px;margin-top:18px}.tandoor-cookbooks h3{margin:0 0 2px;font-size:16px}.tandoor-cookbooks .tandoor-cookbooks-heading{margin-top:10px}.tandoor-all-recipes{border-color:color-mix(in srgb,var(--primary-color) 55%,var(--divider-color));background:color-mix(in srgb,var(--primary-color) 7%,var(--secondary-background-color))}.tandoor-cookbook{display:grid;grid-template-columns:42px minmax(0,1fr) 28px;align-items:center;gap:10px;width:100%;min-height:60px;padding:8px 10px;border:1px solid var(--divider-color);border-radius:10px;color:var(--primary-text-color);background:var(--secondary-background-color);text-align:left;cursor:pointer}.tandoor-cookbook:hover{border-color:var(--primary-color)}.tandoor-cookbook-icon{display:grid;place-items:center;width:42px;height:42px;border-radius:9px;color:var(--primary-color);background:color-mix(in srgb,var(--primary-color) 12%,var(--card-background-color))}.tandoor-scope{display:flex;align-items:center;gap:10px;margin-top:16px;padding:9px 11px;border-radius:10px;background:color-mix(in srgb,var(--primary-color) 10%,var(--secondary-background-color))}.tandoor-scope button{display:grid;place-items:center;width:38px;height:38px;padding:0;border:1px solid var(--divider-color);border-radius:50%;color:var(--primary-text-color);background:var(--card-background-color);cursor:pointer}.tandoor-scope span{display:flex;min-width:0;flex-direction:column}.tandoor-scope small{color:var(--secondary-text-color)}.tandoor-scope strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.tandoor-recipe-header{display:grid!important;grid-template-columns:42px minmax(0,1fr) 42px;gap:10px}.tandoor-recipe-header>div{align-self:center}.tandoor-recipe-back{align-self:start}.tandoor-selection-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}.tandoor-selection-actions button{display:inline-flex;align-items:center;gap:6px;min-height:34px;padding:0 11px;border:1px solid var(--divider-color);border-radius:18px;color:var(--primary-text-color);background:var(--secondary-background-color);cursor:pointer}.tandoor-selection-actions button:hover{border-color:var(--primary-color)}.tandoor-selection-actions ha-icon{--mdc-icon-size:18px;color:var(--primary-color)}.tandoor-recipe-tabs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px;margin-top:14px;padding:4px;border:1px solid var(--divider-color);border-radius:10px;background:var(--secondary-background-color)}.tandoor-recipe-tabs button{display:flex;align-items:center;justify-content:center;gap:7px;min-height:42px;padding:0 12px;border:0;border-radius:7px;color:var(--secondary-text-color);background:transparent;font:inherit;cursor:pointer}.tandoor-recipe-tabs button.active{color:var(--primary-text-color);background:var(--card-background-color);box-shadow:0 1px 3px rgba(0,0,0,.18)}.tandoor-recipe-tabs button span{display:grid;place-items:center;min-width:22px;height:22px;padding:0 6px;border-radius:11px;background:color-mix(in srgb,var(--primary-text-color) 9%,transparent);font-size:12px}.tandoor-recipe-tabs ha-icon{--mdc-icon-size:19px;color:var(--primary-color)}.tandoor-steps{display:grid;gap:10px;margin-top:14px}.tandoor-step{display:grid;grid-template-columns:34px minmax(0,1fr);gap:11px;padding:13px;border:1px solid var(--divider-color);border-radius:10px;background:var(--secondary-background-color)}.tandoor-step-number{display:grid;place-items:center;align-self:start;width:32px;height:32px;border-radius:50%;color:var(--primary-text-color);background:color-mix(in srgb,var(--primary-color) 18%,var(--card-background-color));font-weight:700}.tandoor-step h3{margin:2px 0 7px;font-size:15px}.tandoor-step p{margin:2px 0;white-space:pre-wrap;line-height:1.5}.tandoor-servings{display:flex;align-items:center;justify-content:space-between;gap:14px;margin-top:14px;padding:10px 12px;border:1px solid var(--divider-color);border-radius:10px;background:var(--secondary-background-color)}.tandoor-servings>span{display:flex;min-width:0;flex-direction:column;gap:2px}.tandoor-servings small{color:var(--secondary-text-color);font-size:12px}.tandoor-servings>div{display:grid;grid-template-columns:38px 58px 38px;align-items:center}.tandoor-servings button{display:grid;place-items:center;width:38px;height:38px;padding:0;border:1px solid var(--divider-color);color:var(--primary-text-color);background:var(--card-background-color);cursor:pointer}.tandoor-servings button:first-child{border-radius:8px 0 0 8px}.tandoor-servings button:last-child{border-radius:0 8px 8px 0}.tandoor-servings input{width:58px!important;min-height:38px!important;padding:0 4px!important;border-width:1px 0!important;border-radius:0!important;text-align:center;background:var(--card-background-color)!important}@media(max-width:480px){.tandoor-servings{align-items:flex-start;flex-direction:column}.tandoor-servings>div{align-self:flex-end}}
       .tandoor-ingredient-head{display:grid;grid-template-columns:minmax(0,1fr) minmax(180px,280px);align-items:center;gap:10px}.tandoor-ingredient-main{justify-self:start;width:fit-content;max-width:100%;touch-action:pan-y}.tandoor-ingredient-head .dish-category-combo{grid-column:auto;grid-row:auto}.tandoor-category-locked{display:flex;min-width:0;flex-direction:column;align-items:flex-start;gap:2px;padding:4px 8px}.tandoor-category-locked strong{overflow:hidden;max-width:100%;font-size:13px;text-overflow:ellipsis;white-space:nowrap}.tandoor-category-locked small{color:var(--secondary-text-color);font-size:11px}@media(max-width:600px){.tandoor-ingredient-head{grid-template-columns:1fr}.tandoor-category-combo,.tandoor-category-locked{margin-left:30px}.tandoor-category-locked{padding-left:0}}
       .quick-chips{margin:14px 0 0;padding-top:12px;border-top:1px solid var(--divider-color)}.quick-chips h3{display:flex;align-items:center;gap:6px;margin:0 0 8px;color:var(--secondary-text-color);font-size:13px;font-weight:500}.quick-chips h3 span,.quick-chips h3 .chip-category-toggle-all{display:inline-grid;place-items:center;min-width:22px;height:22px;min-height:22px;padding:0 6px;border:0;border-radius:11px;color:inherit;background:var(--secondary-background-color);font-size:12px}.quick-chips h3 .chip-category-toggle-all:hover,.quick-chips h3 .chip-category-toggle-all:focus-visible{color:var(--primary-color);outline:1px solid var(--primary-color);background:color-mix(in srgb,var(--primary-color) 12%,var(--secondary-background-color))}.quick-chips>div{display:flex;flex-wrap:wrap;gap:7px}.quick-chips button{min-height:32px;padding:4px 11px;border:1px solid var(--divider-color);border-radius:17px;color:var(--primary-text-color);background:var(--secondary-background-color);cursor:pointer}.quick-chips button.colored{border-color:color-mix(in srgb,var(--chip-border-color,var(--chip-color)) 70%,var(--divider-color));background:color-mix(in srgb,var(--chip-color) 20%,var(--card-background-color))}.quick-chips button:hover{border-color:var(--primary-color);background:color-mix(in srgb,var(--primary-color) 12%,var(--card-background-color))}.quick-chips button.colored:hover{border-color:var(--chip-border-color,var(--chip-color));background:color-mix(in srgb,var(--chip-color) 30%,var(--card-background-color))}.quick-chips .chips-toggle{display:inline-flex;align-items:center;gap:4px;margin-top:9px;padding:3px 9px;color:var(--primary-color);background:transparent}.chips-toggle ha-icon{--mdc-icon-size:18px}.chips-empty{color:var(--secondary-text-color);font-size:13px}.chip-category-groups,.quick-chips>.chip-category-groups{display:grid;gap:7px;width:100%}.chip-category-group,.chip-category-expanded{min-width:0;overflow:hidden;border:1px solid var(--divider-color);border-radius:9px}.quick-chips .chip-category-header,.chip-category-header{display:grid;grid-template-columns:24px minmax(0,1fr) auto 22px;align-items:center;gap:7px;width:100%;min-height:40px;padding:6px 8px;border:0;border-radius:0;color:var(--primary-text-color);background:color-mix(in srgb,var(--category-chip-color,var(--primary-color)) 15%,var(--card-background-color));text-align:left;cursor:pointer}.quick-chips .chip-category-header:hover,.chip-category-header:hover{border:0;background:color-mix(in srgb,var(--category-chip-color,var(--primary-color)) 23%,var(--card-background-color))}.chip-category-header>ha-icon:first-child{--mdc-icon-size:20px;color:var(--category-chip-color,var(--primary-color))}.chip-category-header strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px}.chip-category-header>span{display:grid;place-items:center;min-width:22px;height:22px;padding:0 6px;border-radius:11px;color:var(--secondary-text-color);background:color-mix(in srgb,var(--primary-text-color) 8%,transparent);font-size:12px}.chip-category-chevron{--mdc-icon-size:19px;color:var(--secondary-text-color)}.chip-category-items{display:flex;flex-wrap:wrap;gap:7px;padding:8px;border-top:1px solid var(--divider-color);background:color-mix(in srgb,var(--secondary-background-color) 40%,transparent)}.chip-category-expanded .chip-category-items{border-top:0}.chip-category-flow{display:flex;flex-wrap:wrap;gap:7px;width:100%}.chip-category-flow>.chip-category-expanded{flex:0 0 100%;width:100%}.quick-chips .chip-category-selector,.chip-category-selector{display:grid;grid-template-columns:22px minmax(0,auto) auto 19px;align-items:center;gap:6px;max-width:100%;min-height:40px;padding:6px 9px;border:1px solid color-mix(in srgb,var(--category-chip-color,var(--primary-color)) 52%,var(--divider-color));border-radius:9px;color:var(--primary-text-color);background:color-mix(in srgb,var(--category-chip-color,var(--primary-color)) 15%,var(--card-background-color));text-align:left}.quick-chips .chip-category-selector:hover,.chip-category-selector:hover,.quick-chips .chip-category-selector.active,.chip-category-selector.active{border-color:var(--category-chip-color,var(--primary-color));background:color-mix(in srgb,var(--category-chip-color,var(--primary-color)) 27%,var(--card-background-color))}.chip-category-selector>ha-icon:first-child{--mdc-icon-size:19px;color:var(--category-chip-color,var(--primary-color))}.chip-category-selector strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px}.chip-category-selector>span{display:grid;place-items:center;min-width:21px;height:21px;padding:0 6px;border-radius:11px;color:var(--secondary-text-color);background:color-mix(in srgb,var(--primary-text-color) 8%,transparent);font-size:12px}.layout-compact .chip-category-selector{grid-template-columns:20px minmax(0,auto);min-height:34px;padding:4px 9px;border-radius:18px}.dialog-chip-categories{display:grid;gap:9px;margin-top:18px}.dialog-chip-categories .chip-category-header{min-height:46px;padding:7px 11px}.dialog-chip-categories .chip-category-items{padding:10px}.view-panel.chips-position-auto .card-layout,.chips-position-right .card-layout,:host([data-expanded-view]) .chips-position-auto .card-layout{display:grid;grid-template-columns:minmax(0,1fr) minmax(220px,300px);align-items:start;gap:16px}.view-panel.chips-position-auto .card-layout>.quick-chips,.chips-position-right .card-layout>.quick-chips,:host([data-expanded-view]) .chips-position-auto .card-layout>.quick-chips{grid-column:2;grid-row:1;margin:0;padding:0 0 0 16px;border-top:0;border-left:1px solid var(--divider-color)}.view-panel.chips-position-auto .card-layout>.list-column,.chips-position-right .card-layout>.list-column,:host([data-expanded-view]) .chips-position-auto .card-layout>.list-column{grid-column:1;grid-row:1;min-width:0}
-      *{box-sizing:border-box}[hidden]{display:none!important}.offer-only-choice{display:flex!important;flex-direction:row!important;align-items:center;gap:9px}.offer-only-choice input{width:20px!important;min-height:20px!important;height:20px}.offer-only-badge{display:inline-flex;align-items:center;gap:3px;padding:1px 6px;border-radius:10px;background:var(--warning-color,#e0a526);color:#111;font-size:10px;font-weight:600;line-height:1.5;white-space:nowrap;vertical-align:middle}.offer-only-badge ha-icon{--mdc-icon-size:13px}:host{display:block;color:var(--primary-text-color);font-family:var(--paper-font-body1_-_font-family,inherit);container-type:inline-size}:host([data-expanded-view]){position:fixed!important;top:var(--expanded-top,56px)!important;right:var(--expanded-right,0)!important;bottom:var(--expanded-bottom,0)!important;left:var(--expanded-left,0)!important;z-index:9998;min-width:0!important;max-width:none!important;padding:16px;overflow:hidden;background:var(--primary-background-color,#111)}:host([data-expanded-view]) ha-card{height:100%;min-height:0!important;overflow:auto;box-shadow:0 16px 48px rgba(0,0,0,.45)}button,input{font:inherit}button:disabled{opacity:.45;cursor:not-allowed}ha-card{padding:12px 14px 18px;overflow:visible}.view-panel{min-height:100vh;border:0!important;border-radius:0!important;background:var(--ha-card-background,var(--card-background-color))!important;box-shadow:none!important}.view-panel.list-collapsed{min-height:0}.card-title{display:flex;align-items:center;gap:8px;height:50px;min-height:50px;margin:0 0 8px}.list-collapsed{height:76px;padding:12px 14px}.list-collapsed .card-title{margin:0}.card-title-toggle{display:grid;grid-template-columns:auto minmax(0,1fr);column-gap:8px;flex:1;min-width:0;align-items:center}.title-icon{display:grid;grid-column:1;place-items:center;width:35px;height:35px;padding:5px;border-radius:50%;color:var(--primary-color)}.title-icon ha-icon{--mdc-icon-size:25px}.title-expand-toggle{border:0;background:transparent;cursor:pointer}.title-static-icon{pointer-events:none}.title-expand-toggle:hover,.title-expand-toggle:focus-visible{outline:0;background:color-mix(in srgb,var(--primary-text-color) 12%,transparent)}.card-title-copy{display:grid;grid-column:2;grid-template-rows:auto auto;row-gap:1px;min-width:0;padding:0;border:0;color:var(--primary-text-color);background:transparent;text-align:left}.card-title-copy[data-toggle-list],.card-title-copy[data-toggle-expanded-view]{cursor:pointer}.card-title-copy[data-toggle-list]:hover,.card-title-copy[data-toggle-expanded-view]:hover{background:color-mix(in srgb,var(--primary-text-color) 5%,transparent)}.card-title-copy>span{overflow:hidden;font-size:24px;font-weight:400;text-overflow:ellipsis;white-space:nowrap}.card-title-copy small{color:var(--secondary-text-color);font-size:13px;font-weight:400;white-space:nowrap}.title-actions{display:flex;flex:0 0 auto;flex-wrap:wrap;justify-content:flex-end;gap:6px}.title-action{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:38px;padding:0 11px;border:1px solid var(--divider-color);border-radius:19px;color:var(--primary-color);background:transparent;cursor:pointer}.title-action ha-icon{--mdc-icon-size:20px}.title-action span{font-size:13px}.send-status{display:flex;align-items:center;gap:7px;margin:8px 0;padding:8px 10px;border-left:3px solid var(--success-color,#43a047);border-radius:5px;background:color-mix(in srgb,var(--success-color,#43a047) 10%,transparent);font-size:13px}.send-status ha-icon{--mdc-icon-size:19px;color:var(--success-color,#43a047)}.option-row{display:flex;flex-wrap:wrap;gap:6px;margin:7px 0 10px;padding:6px;border-radius:8px;background:var(--secondary-background-color)}.option-row button{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:38px;padding:0 10px;border:1px solid var(--divider-color);border-radius:9px;color:var(--secondary-text-color);background:var(--card-background-color);cursor:pointer}.option-row button:not(:disabled):hover,.option-row button:not(:disabled):focus-visible{color:var(--primary-color);border-color:var(--primary-color);outline:0;background:color-mix(in srgb,var(--primary-color) 10%,var(--card-background-color))}.option-row button:disabled{opacity:.45;cursor:default}.option-row button.active{color:var(--primary-color);border-color:var(--primary-color);background:color-mix(in srgb,var(--primary-color) 14%,var(--card-background-color))}.option-row ha-icon{--mdc-icon-size:19px}.input-row{display:grid;grid-template-columns:92px minmax(160px,1fr) auto;gap:8px;margin:8px 0 14px}.input-row:not(:has(.quantity-input)){grid-template-columns:minmax(160px,1fr) auto}.input-row:not(:has(.submit-button)){grid-template-columns:92px minmax(160px,1fr)}.input-row:not(:has(.quantity-input)):not(:has(.submit-button)){grid-template-columns:1fr}.input-row input{width:100%;height:44px;padding:0 11px;border:1px solid var(--divider-color);border-radius:6px;color:var(--primary-text-color);background:var(--secondary-background-color)}.product-input{position:relative}.product-input>input.has-clear-input{padding-right:42px}.product-input>input.has-chip-trigger{padding-right:78px}.clear-input,.chip-popup-trigger{position:absolute;z-index:3;top:5px;display:grid;place-items:center;width:34px;height:34px;padding:0;border:0;border-radius:50%;background:transparent;cursor:pointer}.clear-input{right:5px;color:var(--secondary-text-color)}.clear-input.with-chip-trigger{right:39px}.chip-popup-trigger{right:5px;color:var(--primary-color)}.clear-input:hover,.chip-popup-trigger:hover{color:var(--primary-text-color);background:color-mix(in srgb,var(--primary-text-color) 10%,transparent)}.clear-input ha-icon{--mdc-icon-size:20px}.chip-popup-trigger ha-icon{--mdc-icon-size:21px}.submit-button{padding:0 16px;border:0;border-radius:6px;color:#fff;background:var(--primary-color);cursor:pointer}.suggestions{position:absolute;z-index:20;top:calc(100% + 4px);left:0;right:0;max-height:310px;overflow:auto;border:1px solid var(--divider-color);border-radius:7px;background:var(--card-background-color);box-shadow:0 8px 25px rgba(0,0,0,.35);overscroll-behavior:contain}.suggestions button{display:grid;grid-template-columns:auto minmax(0,1fr);align-items:center;gap:9px;width:100%;padding:9px 11px;border:0;border-bottom:1px solid var(--divider-color);color:var(--primary-text-color);background:transparent;text-align:left;cursor:pointer}.suggestions button:hover{background:var(--secondary-background-color)}.suggestions img,.suggestion-placeholder{display:grid;place-items:center;width:38px;height:38px;border-radius:5px;object-fit:contain;background:var(--secondary-background-color)}.suggestions button>span:last-child{display:flex;flex-direction:column;gap:2px}.suggestions small,.field-help{color:var(--secondary-text-color);font-size:13px}.meta{color:var(--secondary-text-color);font-size:var(--ha-list-manager-secondary-font-size);line-height:1}.error{display:flex;align-items:center;gap:7px;margin:8px 0;color:var(--error-color)}.category{margin-top:8px}.category-header{display:flex;align-items:center;gap:6px;width:100%;min-height:37px;padding:5px 8px;border:0;border-radius:4px;color:var(--primary-text-color);background:var(--category-color,var(--secondary-background-color));text-align:left;cursor:pointer}.category-header.colored{color:var(--category-text-color,#fff)}.category-header strong{font-size:var(--ha-list-manager-category-font-size)}.category-header>ha-icon{--mdc-icon-size:var(--ha-list-manager-category-icon-size)}.category-header .count{margin-left:2px;font-size:var(--ha-list-manager-category-secondary-font-size);font-weight:400}.category-source{font-size:var(--ha-list-manager-category-secondary-font-size);font-weight:400;opacity:.85}.category-header .chevron{margin-left:auto}.item{display:grid;align-items:center;padding:0 4px;border-bottom:0}.category-header+.item,.item+.item{padding-top:var(--ha-list-manager-item-divider-after-spacing)}.item:not(:last-child){padding-bottom:var(--ha-list-manager-item-divider-before-spacing)}.item-dividers .item{position:relative}.item-dividers .item:not(:last-child){padding-bottom:calc(var(--ha-list-manager-item-divider-before-spacing) + 1px)}.item-dividers .item:not(:last-child)::after{content:"";position:absolute;z-index:1;left:4px;right:4px;bottom:0;height:1px;background:color-mix(in srgb,var(--divider-color) 55%,transparent);pointer-events:none}.item.with-image{grid-template-columns:38px 46px minmax(0,1fr) auto}.item.without-image{grid-template-columns:38px minmax(0,1fr) auto}.item.completed{color:var(--success-color,#43a047);opacity:.7}.item.completed .item-name{text-decoration:line-through}.complete-button,.quantity-actions button,.item-image{display:grid;place-items:center;padding:0;border:0;color:inherit;background:transparent;cursor:pointer}.complete-button{align-self:center;width:34px;height:34px;font-size:18px}.item-image{align-self:center;width:42px;height:42px;border-radius:6px;overflow:hidden}.item-image img{width:100%;height:100%;object-fit:contain;background:var(--secondary-background-color)}.item-image.placeholder{color:var(--secondary-text-color);background:var(--secondary-background-color)}.item-main{display:flex;flex-direction:column;align-items:flex-start;align-self:center;gap:2px;min-width:0;padding:0 6px;border:0;color:inherit;background:transparent;text-align:left;cursor:pointer}.item-name{font-size:var(--ha-list-manager-item-font-size);line-height:1}.labels{display:flex;flex-wrap:wrap;gap:4px;margin-top:2px}.label{display:inline-flex;align-items:center;gap:3px;padding:2px 6px;line-height:1;border:1px solid color-mix(in srgb,var(--label-color,var(--primary-color)) 55%,var(--divider-color));border-radius:14px;color:var(--primary-text-color);background:color-mix(in srgb,var(--label-color,var(--primary-color)) 20%,transparent);font-size:var(--ha-list-manager-tertiary-font-size)}.label ha-icon{--mdc-icon-size:13px;color:var(--label-color,var(--primary-color))}.quantity-actions{align-self:center;display:flex;align-items:center;gap:2px}.quantity-actions button{width:38px;height:38px;font-size:19px}.controls-quantity{min-width:34px;text-align:center;font-size:var(--ha-list-manager-item-font-size)}.empty{padding:22px;text-align:center;color:var(--secondary-text-color)}
+      *{box-sizing:border-box}[hidden]{display:none!important}.offer-only-choice{display:flex!important;flex-direction:row!important;align-items:center;gap:9px}.offer-only-choice input{width:20px!important;min-height:20px!important;height:20px}.offer-only-badge{display:inline-flex;align-items:center;gap:3px;padding:1px 6px;border-radius:10px;background:var(--warning-color,#e0a526);color:#111;font-size:10px;font-weight:600;line-height:1.5;white-space:nowrap;vertical-align:middle}.offer-only-badge ha-icon{--mdc-icon-size:13px}:host{display:block;color:var(--primary-text-color);font-family:var(--paper-font-body1_-_font-family,inherit);container-type:inline-size}:host([data-expanded-view]){position:fixed!important;top:var(--expanded-top,56px)!important;right:var(--expanded-right,0)!important;bottom:var(--expanded-bottom,0)!important;left:var(--expanded-left,0)!important;z-index:9998;min-width:0!important;max-width:none!important;padding:16px;overflow:hidden;background:var(--primary-background-color,#111)}:host([data-expanded-view]) ha-card{height:100%;min-height:0!important;overflow:auto;box-shadow:0 16px 48px rgba(0,0,0,.45)}button,input{font:inherit}button:disabled{opacity:.45;cursor:not-allowed}ha-card{padding:12px 14px 18px;overflow:visible}.view-panel{min-height:100vh;border:0!important;border-radius:0!important;background:var(--ha-card-background,var(--card-background-color))!important;box-shadow:none!important}.view-panel.list-collapsed{min-height:0}.card-title{display:flex;align-items:center;gap:8px;height:50px;min-height:50px;margin:0 0 8px}.list-collapsed{height:76px;padding:12px 14px}.list-collapsed .card-title{margin:0}.card-title-toggle{display:grid;grid-template-columns:auto minmax(0,1fr);column-gap:8px;flex:1;min-width:0;align-items:center}.title-icon{display:grid;grid-column:1;place-items:center;width:35px;height:35px;padding:5px;border-radius:50%;color:var(--primary-color)}.title-icon ha-icon{--mdc-icon-size:25px}.title-expand-toggle{border:0;background:transparent;cursor:pointer}.title-static-icon{pointer-events:none}.title-expand-toggle:hover,.title-expand-toggle:focus-visible{outline:0;background:color-mix(in srgb,var(--primary-text-color) 12%,transparent)}.card-title-copy{display:grid;grid-column:2;grid-template-rows:auto auto;row-gap:1px;min-width:0;padding:0;border:0;color:var(--primary-text-color);background:transparent;text-align:left}.card-title-copy[data-toggle-list],.card-title-copy[data-toggle-expanded-view]{cursor:pointer}.card-title-copy[data-toggle-list]:hover,.card-title-copy[data-toggle-expanded-view]:hover{background:color-mix(in srgb,var(--primary-text-color) 5%,transparent)}.card-title-copy>span{overflow:hidden;font-size:24px;font-weight:400;text-overflow:ellipsis;white-space:nowrap}.card-title-copy small{color:var(--secondary-text-color);font-size:13px;font-weight:400;white-space:nowrap}.title-actions{display:flex;flex:0 0 auto;flex-wrap:wrap;justify-content:flex-end;gap:6px}.title-action{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:38px;padding:0 11px;border:1px solid var(--divider-color);border-radius:19px;color:var(--primary-color);background:transparent;cursor:pointer}.title-action ha-icon{--mdc-icon-size:20px}.title-action span{font-size:13px}.send-status{display:flex;align-items:center;gap:7px;margin:8px 0;padding:8px 10px;border-left:3px solid var(--success-color,#43a047);border-radius:5px;background:color-mix(in srgb,var(--success-color,#43a047) 10%,transparent);font-size:13px}.send-status ha-icon{--mdc-icon-size:19px;color:var(--success-color,#43a047)}.send-status>ha-icon{flex:0 0 19px;width:19px;height:19px}.option-row{display:flex;flex-wrap:wrap;gap:6px;margin:7px 0 10px;padding:6px;border-radius:8px;background:var(--secondary-background-color)}.option-row button{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:38px;padding:0 10px;border:1px solid var(--divider-color);border-radius:9px;color:var(--secondary-text-color);background:var(--card-background-color);cursor:pointer}.option-row button:not(:disabled):hover,.option-row button:not(:disabled):focus-visible{color:var(--primary-color);border-color:var(--primary-color);outline:0;background:color-mix(in srgb,var(--primary-color) 10%,var(--card-background-color))}.option-row button:disabled{opacity:.45;cursor:default}.option-row button.active{color:var(--primary-color);border-color:var(--primary-color);background:color-mix(in srgb,var(--primary-color) 14%,var(--card-background-color))}.option-row ha-icon{--mdc-icon-size:19px}.input-row{display:grid;grid-template-columns:92px minmax(160px,1fr) auto;gap:8px;margin:8px 0 14px}.input-row:not(:has(.quantity-input)){grid-template-columns:minmax(160px,1fr) auto}.input-row:not(:has(.submit-button)){grid-template-columns:92px minmax(160px,1fr)}.input-row:not(:has(.quantity-input)):not(:has(.submit-button)){grid-template-columns:1fr}.input-row input{width:100%;height:44px;padding:0 11px;border:1px solid var(--divider-color);border-radius:6px;color:var(--primary-text-color);background:var(--secondary-background-color)}.product-input{position:relative}.product-input>input.has-clear-input{padding-right:42px}.product-input>input.has-chip-trigger{padding-right:78px}.clear-input,.chip-popup-trigger{position:absolute;z-index:3;top:5px;display:grid;place-items:center;width:34px;height:34px;padding:0;border:0;border-radius:50%;background:transparent;cursor:pointer}.clear-input{right:5px;color:var(--secondary-text-color)}.clear-input.with-chip-trigger{right:39px}.chip-popup-trigger{right:5px;color:var(--primary-color)}.clear-input:hover,.chip-popup-trigger:hover{color:var(--primary-text-color);background:color-mix(in srgb,var(--primary-text-color) 10%,transparent)}.clear-input ha-icon{--mdc-icon-size:20px}.chip-popup-trigger ha-icon{--mdc-icon-size:21px}.submit-button{padding:0 16px;border:0;border-radius:6px;color:#fff;background:var(--primary-color);cursor:pointer}.suggestions{position:absolute;z-index:20;top:calc(100% + 4px);left:0;right:0;max-height:310px;overflow:auto;border:1px solid var(--divider-color);border-radius:7px;background:var(--card-background-color);box-shadow:0 8px 25px rgba(0,0,0,.35);overscroll-behavior:contain}.suggestions button{display:grid;grid-template-columns:auto minmax(0,1fr);align-items:center;gap:9px;width:100%;padding:9px 11px;border:0;border-bottom:1px solid var(--divider-color);color:var(--primary-text-color);background:transparent;text-align:left;cursor:pointer}.suggestions button:hover{background:var(--secondary-background-color)}.suggestions img,.suggestion-placeholder{display:grid;place-items:center;width:38px;height:38px;border-radius:5px;object-fit:contain;background:var(--secondary-background-color)}.suggestions button>span:last-child{display:flex;flex-direction:column;gap:2px}.suggestions small,.field-help{color:var(--secondary-text-color);font-size:13px}.meta{color:var(--secondary-text-color);font-size:var(--ha-list-manager-secondary-font-size);line-height:1}.error{display:flex;align-items:center;gap:7px;margin:8px 0;color:var(--error-color)}.category{margin-top:8px}.category-header{display:flex;align-items:center;gap:6px;width:100%;min-height:37px;padding:5px 8px;border:0;border-radius:4px;color:var(--primary-text-color);background:var(--category-color,var(--secondary-background-color));text-align:left;cursor:pointer}.category-header.colored{color:var(--category-text-color,#fff)}.category-header strong{font-size:var(--ha-list-manager-category-font-size)}.category-header>ha-icon{--mdc-icon-size:var(--ha-list-manager-category-icon-size)}.category-header .count{margin-left:2px;font-size:var(--ha-list-manager-category-secondary-font-size);font-weight:400}.category-source{font-size:var(--ha-list-manager-category-secondary-font-size);font-weight:400;opacity:.85}.category-header .chevron{margin-left:auto}.item{display:grid;align-items:center;padding:0 4px;border-bottom:0}.category-header+.item,.item+.item{padding-top:var(--ha-list-manager-item-divider-after-spacing)}.item:not(:last-child){padding-bottom:var(--ha-list-manager-item-divider-before-spacing)}.item-dividers .item{position:relative}.item-dividers .item:not(:last-child){padding-bottom:calc(var(--ha-list-manager-item-divider-before-spacing) + 1px)}.item-dividers .item:not(:last-child)::after{content:"";position:absolute;z-index:1;left:4px;right:4px;bottom:0;height:1px;background:color-mix(in srgb,var(--divider-color) 55%,transparent);pointer-events:none}.item.with-image{grid-template-columns:38px 46px minmax(0,1fr) auto}.item.without-image{grid-template-columns:38px minmax(0,1fr) auto}.item.completed{color:var(--success-color,#43a047);opacity:.7}.item.completed .item-name{text-decoration:line-through}.complete-button,.quantity-actions button,.item-image{display:grid;place-items:center;padding:0;border:0;color:inherit;background:transparent;cursor:pointer}.complete-button{align-self:center;width:34px;height:34px;font-size:18px}.item-image{align-self:center;width:42px;height:42px;border-radius:6px;overflow:hidden}.item-image img{width:100%;height:100%;object-fit:contain;background:var(--secondary-background-color)}.item-image.placeholder{color:var(--secondary-text-color);background:var(--secondary-background-color)}.item-main{display:flex;flex-direction:column;align-items:flex-start;align-self:center;gap:2px;min-width:0;padding:0 6px;border:0;color:inherit;background:transparent;text-align:left;cursor:pointer}.item-name{font-size:var(--ha-list-manager-item-font-size);line-height:1}.labels{display:flex;flex-wrap:wrap;gap:4px;margin-top:2px}.label{display:inline-flex;align-items:center;gap:3px;padding:2px 6px;line-height:1;border:1px solid color-mix(in srgb,var(--label-color,var(--primary-color)) 55%,var(--divider-color));border-radius:14px;color:var(--primary-text-color);background:color-mix(in srgb,var(--label-color,var(--primary-color)) 20%,transparent);font-size:var(--ha-list-manager-tertiary-font-size)}.label ha-icon{--mdc-icon-size:13px;color:var(--label-color,var(--primary-color))}.quantity-actions{align-self:center;display:flex;align-items:center;gap:2px}.quantity-actions button{width:38px;height:38px;font-size:19px}.controls-quantity{min-width:34px;text-align:center;font-size:var(--ha-list-manager-item-font-size)}.empty{padding:22px;text-align:center;color:var(--secondary-text-color)}
       .backdrop{--dialog-inset-top:max(18px,env(safe-area-inset-top,0px),var(--safe-area-inset-top,0px));--dialog-inset-bottom:max(18px,env(safe-area-inset-bottom,0px),var(--safe-area-inset-bottom,0px));position:fixed;inset:0;z-index:1000;display:grid;place-items:center;padding:var(--dialog-inset-top) max(18px,env(safe-area-inset-right,0px),var(--safe-area-inset-right,0px)) var(--dialog-inset-bottom) max(18px,env(safe-area-inset-left,0px),var(--safe-area-inset-left,0px));overflow:auto;background:rgba(0,0,0,.58);overscroll-behavior:contain}.dialog{position:relative;width:min(660px,100%);max-height:calc(100vh - var(--dialog-inset-top,18px) - var(--dialog-inset-bottom,18px));overflow:auto;padding:24px;border-radius:18px;color:var(--primary-text-color);background:var(--card-background-color);box-shadow:0 16px 50px rgba(0,0,0,.45);overscroll-behavior:contain}.dialog header{display:flex;align-items:center;gap:12px}.product-choice-dialog header{align-items:flex-start}.product-choice-dialog header>div{min-width:0;flex:1}.product-choice-dialog header p{margin:4px 0 14px;color:var(--secondary-text-color);line-height:1.4}.product-choices{display:grid;gap:7px}.product-choice{display:grid;grid-template-columns:48px minmax(0,1fr) auto;align-items:center;gap:11px;width:100%;padding:10px;border:1px solid var(--divider-color);border-radius:9px;color:var(--primary-text-color);background:var(--secondary-background-color);text-align:left;cursor:pointer}.product-choice:hover{border-color:var(--primary-color)}.product-choice>img,.product-choice-placeholder{display:grid;place-items:center;width:48px;height:48px;object-fit:contain;border-radius:7px;color:var(--secondary-text-color);background:var(--card-background-color)}.product-choice>span{display:flex;min-width:0;flex-direction:column;gap:3px}.product-choice strong{font-size:16px}.product-choice small{color:var(--secondary-text-color);font-size:13px}.product-choice>ha-icon{color:var(--secondary-text-color)}.dialog h2{flex:1;margin:0;font-size:25px}.dialog-heading{display:flex;flex:1;align-items:center;flex-wrap:wrap;gap:8px;min-width:0}.dialog-heading h2{flex:0 1 auto}.unsaved-indicator{display:inline-flex;align-items:center;gap:5px;padding:4px 8px;border-radius:18px;color:var(--warning-color,#ffa000);background:color-mix(in srgb,var(--warning-color,#ffa000) 13%,transparent);font-size:12px;font-weight:500}.unsaved-indicator[hidden]{display:none}.unsaved-indicator ha-icon{--mdc-icon-size:16px}.icon-button{display:grid;place-items:center;width:40px;height:40px;padding:0;border:0;border-radius:50%;color:var(--primary-text-color);background:transparent;cursor:pointer}.dialog label,.dialog-field{display:flex;flex-direction:column;gap:6px;margin-top:14px;color:var(--secondary-text-color)}.dialog input{width:100%;min-height:45px;padding:9px 11px;border:1px solid var(--divider-color);border-radius:7px;color:var(--primary-text-color);background:var(--secondary-background-color)}.item-quantity-fields{display:grid;grid-template-columns:minmax(0,256px) minmax(0,1fr);gap:12px;align-items:start}.item-quantity-controls{display:grid;grid-template-columns:minmax(0,150px) auto;gap:12px;align-items:end}.quantity-edit-field{align-self:start}.bring-format-help{margin:8px 0 0;line-height:1.45}.bring-live-preview{display:flex;flex-direction:column;gap:3px;margin-top:12px;padding:11px 13px;border-left:3px solid var(--primary-color);border-radius:7px;background:color-mix(in srgb,var(--primary-color) 9%,var(--secondary-background-color))}.bring-live-preview>span{color:var(--secondary-text-color);font-size:12px}.bring-live-preview>strong{font-size:15px}.bring-live-preview>small{color:var(--primary-text-color);font-size:14px}.dialog-quantity-actions{display:flex;gap:10px;margin-bottom:1.5px}.dialog-quantity-actions button{display:grid;place-items:center;width:42px;height:42px;padding:0;border:1px solid var(--divider-color);border-radius:50%;color:var(--primary-text-color);background:var(--card-background-color);font-size:24px;line-height:1;cursor:pointer}.dialog-quantity-actions button:hover{background:color-mix(in srgb,var(--primary-color) 12%,var(--card-background-color))}.product-dialog .name-field{padding-right:120px}.product-meta{margin-top:6px}.product-amount-summary{margin:10px 0 4px;padding:9px 11px;border-left:3px solid var(--primary-color);border-radius:5px;background:color-mix(in srgb,var(--primary-color) 10%,transparent);font-size:13px}.product-amount-warning{margin:8px 0;color:var(--error-color);font-size:13px}.increment-dialog{width:min(560px,100%)}.increment-product{display:flex;flex-direction:column;gap:4px;min-height:72px;margin-top:18px;padding-right:120px;font-size:18px}.increment-summary{display:grid;grid-template-columns:1fr 48px 110px 48px 1fr;align-items:stretch;gap:10px;margin-top:12px;padding:14px;border-radius:10px;background:var(--secondary-background-color)}.increment-term{display:grid!important;grid-template-rows:26px 48px;gap:0!important;min-width:0;margin:0!important;color:var(--secondary-text-color);font-size:13px}.increment-term>span{display:flex;align-items:start;white-space:nowrap}.increment-term>strong{display:flex;align-items:center;color:var(--primary-text-color);font-size:21px}.increment-term>input{height:48px;min-height:48px}.increment-operator{align-self:end;display:grid;place-items:center;width:48px;height:48px;padding:0;border:0;border-radius:50%;color:var(--primary-text-color);background:transparent;font-size:28px;line-height:1}.increment-plus{border:1px solid var(--divider-color);background:var(--card-background-color);cursor:pointer}.increment-plus:hover{background:color-mix(in srgb,var(--primary-color) 12%,var(--card-background-color))}.dialog-image-button{position:absolute;right:24px;top:70px;width:100px;height:100px;padding:0;border:0;border-radius:8px;background:transparent;cursor:pointer}.dialog-image{width:100%;height:100%;object-fit:contain;border-radius:8px;background:var(--secondary-background-color)}.picker-trigger-host{position:relative}.picker-trigger-host input{padding-right:44px!important}.picker-list-trigger{position:absolute!important;z-index:4;right:5px;top:50%;display:grid!important;place-items:center;width:34px!important;height:34px!important;min-width:34px!important;min-height:34px!important;padding:0!important;transform:translateY(-50%);border:0!important;border-radius:50%!important;color:var(--primary-color)!important;background:transparent!important;cursor:pointer}.picker-list-trigger:hover,.picker-list-trigger:focus-visible,.picker-list-trigger.active{outline:0;background:color-mix(in srgb,var(--primary-color) 16%,transparent)!important}.picker-list-trigger ha-icon{--mdc-icon-size:21px}.picker-current{box-shadow:inset 3px 0 0 var(--primary-color);background:color-mix(in srgb,var(--primary-color) 12%,var(--card-background-color))!important}.category-combo,.label-combo{position:relative}.category-picker-options,.label-picker-options{position:absolute;z-index:22;top:calc(100% + 4px);left:0;right:0;max-height:260px;overflow:auto;border:1px solid var(--divider-color);border-radius:8px;background:var(--card-background-color);box-shadow:0 8px 25px rgba(0,0,0,.35);overscroll-behavior:contain}.category-picker-options button,.label-picker-options button{display:grid;grid-template-columns:30px minmax(0,1fr);align-items:center;gap:8px;width:100%;padding:9px 11px;border:0;border-bottom:1px solid var(--divider-color);color:var(--primary-text-color);background:transparent;text-align:left;cursor:pointer}.category-picker-options button:hover,.label-picker-options button:hover{background:var(--secondary-background-color)}.label-picker-options button>span:last-child{display:flex;min-width:0;flex-direction:column;gap:2px}.label-picker-options button small{display:block;color:var(--secondary-text-color)}.category-picker-options button>span:not(.category-option-icon){display:flex;flex-direction:column}.category-picker-options small{color:var(--secondary-text-color)}.category-option-icon{display:grid;place-items:center;width:27px;height:27px;border-radius:50%;color:var(--category-color,var(--primary-color));background:color-mix(in srgb,var(--category-color,var(--primary-color)) 20%,transparent)}.picker-empty{margin:0;padding:12px;color:var(--secondary-text-color)}.label-selector{display:grid;gap:8px;margin-top:16px;padding:0;border:0;border-radius:0;color:var(--secondary-text-color)}.selected-labels{display:flex;flex-wrap:wrap;gap:7px}.selected-label{display:inline-flex;align-items:center;gap:5px;min-height:32px;padding:3px 8px;border:1px solid color-mix(in srgb,var(--label-color,var(--primary-color)) 58%,var(--divider-color));border-radius:18px;color:var(--primary-text-color);background:color-mix(in srgb,var(--label-color,var(--primary-color)) 24%,var(--card-background-color));cursor:pointer}.selected-label ha-icon{--mdc-icon-size:17px;color:var(--label-color,var(--primary-color))}.selected-label .remove-label{color:var(--secondary-text-color)}.label-search{display:grid;grid-template-columns:25px minmax(0,1fr);align-items:center;min-height:43px;padding:0 9px;border:1px solid var(--divider-color);border-radius:7px;background:var(--secondary-background-color)}.label-search input{min-height:40px!important;padding:0!important;border:0!important;outline:0;background:transparent!important}.label-option-icon{display:grid;place-items:center;width:27px;height:27px;border-radius:50%;color:var(--label-color,var(--primary-color));background:color-mix(in srgb,var(--label-color,var(--primary-color)) 20%,transparent)}.product-category-input-status{color:var(--error-color)!important}.ean-dialog-status{margin-top:7px}.product-category-move{display:grid;gap:10px;margin-top:14px;padding:12px;border:1px solid color-mix(in srgb,var(--warning-color,#f0a000) 65%,var(--divider-color));border-radius:9px;background:color-mix(in srgb,var(--warning-color,#f0a000) 10%,transparent)}.product-category-move>div{display:flex;align-items:flex-start;gap:9px}.product-category-move>div>ha-icon{flex:0 0 auto;color:var(--warning-color,#f0a000)}.product-category-move>div>span{display:flex;min-width:0;flex-direction:column;gap:3px}.product-category-move small{color:var(--secondary-text-color)}.product-category-move label{display:flex;flex-direction:row;align-items:flex-start;gap:9px;margin:0;color:var(--primary-text-color);cursor:pointer}.product-category-move input{flex:0 0 auto;width:19px;height:19px;min-height:0;margin:1px 0 0;accent-color:var(--primary-color)}.dialog-status{display:flex;align-items:center;gap:7px;margin-top:12px;font-size:14px}.dialog-status.success{color:var(--success-color,#43a047)}.dialog-status.warning{color:var(--warning-color,#f0a000)}.dialog-status.error{color:var(--error-color)}.dialog footer{display:flex;flex-wrap:wrap;gap:9px;margin-top:20px}.dialog footer button{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:42px;padding:0 16px;border:1px solid var(--divider-color);border-radius:21px;color:var(--primary-text-color);background:var(--card-background-color);cursor:pointer}.dialog footer .primary{color:#fff;border-color:var(--primary-color);background:var(--primary-color)}.dialog footer .danger{color:var(--error-color);border-color:var(--error-color)}.dialog footer .danger.filled{color:#fff;background:var(--error-color)}.confirmation-backdrop{z-index:1200}.confirmation-dialog{width:min(460px,100%);text-align:center}.confirmation-dialog h2{display:block}.confirmation-dialog p{color:var(--secondary-text-color);line-height:1.5}.confirmation-dialog footer{justify-content:center}.confirmation-icon{display:grid;place-items:center;width:54px;height:54px;margin:0 auto 12px;border-radius:50%;color:var(--error-color);background:color-mix(in srgb,var(--error-color) 14%,transparent)}.confirmation-icon ha-icon{--mdc-icon-size:31px}.share-confirmation .confirmation-icon{color:var(--primary-color);background:color-mix(in srgb,var(--primary-color) 14%,transparent)}.share-targets{display:flex;flex-direction:column;gap:7px;margin:10px 0}.share-targets label{display:flex;flex-direction:row;align-items:center;justify-content:flex-start;gap:10px;margin:0;padding:9px 12px;border-radius:8px;color:var(--primary-text-color);background:var(--secondary-background-color);cursor:pointer}.share-targets input{width:20px;height:20px;accent-color:var(--primary-color)}.chip-dialog-backdrop{z-index:1150}.chip-dialog{width:min(620px,100%)}.chip-dialog header{align-items:flex-start}.chip-dialog header>div{flex:1;min-width:0}.chip-dialog header p{margin:4px 0 0;color:var(--secondary-text-color)}.dialog-chip-grid{display:flex;flex-wrap:wrap;gap:9px;margin-top:18px}.dialog-chip{min-height:38px;padding:6px 13px;border:1px solid var(--divider-color);border-radius:20px;color:var(--primary-text-color);background:var(--secondary-background-color);cursor:pointer}.dialog-chip.colored{border-color:color-mix(in srgb,var(--chip-border-color,var(--chip-color)) 70%,var(--divider-color));background:color-mix(in srgb,var(--chip-color) 20%,var(--card-background-color))}.dialog-chip:hover{border-color:var(--primary-color);background:color-mix(in srgb,var(--primary-color) 12%,var(--card-background-color))}.dialog-chip.colored:hover{border-color:var(--chip-border-color,var(--chip-color));background:color-mix(in srgb,var(--chip-color) 30%,var(--card-background-color))}.browser-chip{touch-action:manipulation}.browser-chip-backdrop{z-index:1175}.browser-chip-menu{width:min(560px,100%)}.browser-chip-menu header{align-items:flex-start}.browser-chip-menu header>div{flex:1;min-width:0}.browser-chip-menu header p{margin:4px 0 0;color:var(--secondary-text-color)}.browser-chip-actions{display:grid;gap:8px;margin-top:18px}.browser-chip-actions>button{display:grid;grid-template-columns:32px minmax(0,1fr);align-items:center;gap:10px;width:100%;padding:11px 13px;border:1px solid var(--divider-color);border-radius:10px;color:var(--primary-text-color);background:var(--secondary-background-color);text-align:left;cursor:pointer}.browser-chip-actions>button:hover{border-color:var(--primary-color);background:color-mix(in srgb,var(--primary-color) 10%,var(--card-background-color))}.browser-chip-actions ha-icon{color:var(--primary-color)}.browser-chip-actions span{display:flex;min-width:0;flex-direction:column;gap:2px}.browser-chip-actions small{color:var(--secondary-text-color)}.image-backdrop{z-index:1300}.image-dialog{width:min(900px,100%)}.image-dialog>img{display:block;width:100%;height:auto;max-height:calc(100vh - 130px);margin:14px auto 0;object-fit:contain}
       .title-actions-wide{display:flex;gap:6px}.compact-header-actions{display:none;position:relative}.compact-actions-menu{position:absolute;z-index:30;top:calc(100% + 6px);right:0;display:grid;width:max-content;min-width:190px;overflow:hidden;border:1px solid var(--divider-color);border-radius:10px;background:var(--card-background-color);box-shadow:0 8px 26px rgba(0,0,0,.38)}.compact-actions-menu button{display:flex;align-items:center;gap:10px;min-height:44px;padding:0 14px;border:0;border-bottom:1px solid var(--divider-color);color:var(--primary-text-color);background:transparent;text-align:left;cursor:pointer}.compact-actions-menu button:last-child{border-bottom:0}.compact-actions-menu button:hover{background:var(--secondary-background-color)}.compact-actions-menu ha-icon{--mdc-icon-size:20px;color:var(--primary-color)}
       @container(max-width:600px){ha-card,.list-collapsed{padding:10px}.card-title{height:54px;min-height:54px;margin:0 0 4px}.list-collapsed .card-title{margin:0}.option-row button{display:grid;place-items:center;flex:0 0 38px;width:38px;height:38px;min-height:38px;padding:0;gap:0;border-radius:9px}.option-row button>span{display:none}.card-title-copy>span{font-size:21px}.title-actions-wide{display:none}.compact-header-actions{display:block}.compact-actions-toggle{width:38px;padding:0}.input-row{grid-template-columns:76px minmax(0,1fr)}.input-row .submit-button{grid-column:1/-1;min-height:42px}.input-row:not(:has(.quantity-input)){grid-template-columns:1fr}.item.with-image{grid-template-columns:34px 42px minmax(0,1fr) auto}.item.without-image{grid-template-columns:34px minmax(0,1fr) auto}.quantity-actions button{width:32px}.view-panel.chips-position-auto .card-layout,.chips-position-right .card-layout,:host([data-expanded-view]) .chips-position-auto .card-layout{display:block}.view-panel.chips-position-auto .card-layout>.quick-chips,.chips-position-right .card-layout>.quick-chips,:host([data-expanded-view]) .chips-position-auto .card-layout>.quick-chips{margin:14px 0 0;padding:12px 0 0;border-top:1px solid var(--divider-color);border-left:0}}
@@ -3778,6 +3826,7 @@ class HaListManagerShoppingCard extends HTMLElement {
   _render() {
     if (!this._hass || this._nativeTranslationState?.ready === false) return;
     if (!this.shadowRoot) return;
+    const pageAnchor = this._capturePageScrollAnchor();
     const previousCard = this.shadowRoot.querySelector("ha-card");
     if (this._expandedView && previousCard?.scrollTop > 0) this._expandedScrollTop = previousCard.scrollTop;
     const active = this.shadowRoot.activeElement;
@@ -3828,7 +3877,11 @@ class HaListManagerShoppingCard extends HTMLElement {
     const options = this._optionRowHtml();
     const listBody = `${this._config.input_row_position === "top" ? input : ""}${this._config.option_row_position === "top" ? options : ""}<div class="status-region" data-status-region>${this._notice(this._notificationStatus, "notification", "send-status", "check-circle-outline")}</div>${this._notice(this._error, "error", "error")}<main>${content}</main>${this._config.option_row_position === "bottom" ? options : ""}${this._config.input_row_position === "bottom" ? input : ""}`;
     const cardBody = collapsed ? "" : `<div class="card-layout"><div class="list-column">${listBody}</div>${this._renderChips()}</div>`;
-    this.shadowRoot.innerHTML = `<style>${this._styles()}</style><ha-card class="view-${view} chips-position-${esc(this._config.chips_position)} ${dividerClass} ${collapsed ? "list-collapsed" : ""}" style="${appearanceStyle}"><div class="card-title">${titleToggle}${titleActions}</div>${cardBody}${this._renderDialog()}${this._renderProductPicker()}${this._renderConfirmation()}${this._renderChipDialog()}${this._renderDishDialog()}${this._renderTandoorDialog()}${this._renderBrowserChipMenu()}${this._renderImageDialog()}${this._renderSelectionPopup()}</ha-card>`;
+    const markup = `<style>${this._styles()}</style><ha-card class="view-${view} chips-position-${esc(this._config.chips_position)} ${dividerClass} ${collapsed ? "list-collapsed" : ""}" style="${appearanceStyle}"><div class="card-title">${titleToggle}${titleActions}</div>${cardBody}${this._renderDialog()}${this._renderProductPicker()}${this._renderConfirmation()}${this._renderChipDialog()}${this._renderDishDialog()}${this._renderTandoorDialog()}${this._renderBrowserChipMenu()}${this._renderImageDialog()}${this._renderSelectionPopup()}</ha-card>`;
+    this._clearRenderListeners();
+    const template = document.createElement("template");
+    template.innerHTML = markup;
+    this._patchDom(this.shadowRoot, template.content);
     this._bind();
     if (focusAttribute) {
       const next = [...this.shadowRoot.querySelectorAll(`[${focusAttribute}]`)]
@@ -3839,6 +3892,57 @@ class HaListManagerShoppingCard extends HTMLElement {
       if (selection && next?.setSelectionRange) next.setSelectionRange(selection[0], selection[1]);
     }
     this._restoreExpandedScroll();
+    this._restorePageScrollAnchor(pageAnchor);
+    if (!this._pageActionAnchor?.isConnected) this._pageActionAnchor = null;
+  }
+
+  // Keep the live card, rows and chip controls mounted so HA and the browser
+  // retain their scroll anchors when a backend event refreshes the list.
+  _patchDom(parent, content) {
+    const key = (node) => {
+      if (node.nodeType !== 1) return String(node.nodeType);
+      const attribute = node.getAttributeNames().find((name) => name.startsWith("data-"));
+      return `${node.nodeName}:${attribute ? `${attribute}=${node.getAttribute(attribute)}` : node.getAttribute("class")?.split(/\s+/)[0] || ""}`;
+    };
+    const previous = [...parent.childNodes];
+    const used = new Set();
+    let position = parent.firstChild;
+    for (const desired of [...content.childNodes]) {
+      const current = previous.find((node) => !used.has(node) && key(node) === key(desired));
+      const node = current || desired.cloneNode(true);
+      if (node !== position) parent.insertBefore(node, position);
+      used.add(node);
+      if (current && node.nodeType === 1) {
+        for (const attribute of [...node.attributes]) {
+          if (!desired.hasAttribute(attribute.name)) node.removeAttribute(attribute.name);
+        }
+        for (const attribute of [...desired.attributes]) {
+          if (node.getAttribute(attribute.name) !== attribute.value) node.setAttribute(attribute.name, attribute.value);
+        }
+        this._patchDom(node, desired);
+        if (["INPUT", "TEXTAREA", "SELECT"].includes(node.nodeName)) {
+          if (node.value !== desired.value) node.value = desired.value;
+          if (node.nodeName === "INPUT") node.checked = desired.checked;
+        }
+      } else if (current && node.nodeValue !== desired.nodeValue) node.nodeValue = desired.nodeValue;
+      position = node.nextSibling;
+    }
+    for (const node of previous) if (!used.has(node)) node.remove();
+  }
+
+  _listen(target, type, listener, options) {
+    if (!target) return;
+    target.addEventListener(type, listener, options);
+    this._renderListeners.push({ target, type, listener, options });
+  }
+
+  _clearRenderListeners(subtree = null) {
+    const retained = [];
+    for (const entry of this._renderListeners) {
+      if (subtree && !subtree.contains(entry.target)) retained.push(entry);
+      else entry.target.removeEventListener(entry.type, entry.listener, entry.options);
+    }
+    this._renderListeners = retained;
   }
 
   _installPickerListTriggers(root = this.shadowRoot) {
@@ -3860,8 +3964,8 @@ class HaListManagerShoppingCard extends HTMLElement {
       trigger.title = haListManagerShoppingCardText("ui.open_picker_close_keyboard", {}, this._hass);
       trigger.setAttribute("aria-label", trigger.title);
       trigger.innerHTML = '<ha-icon icon="mdi:gesture-tap-button"></ha-icon>';
-      trigger.addEventListener("pointerdown", (event) => { event.preventDefault(); event.stopPropagation(); });
-      trigger.addEventListener("click", (event) => {
+      this._listen(trigger, "pointerdown", (event) => { event.preventDefault(); event.stopPropagation(); });
+      this._listen(trigger, "click", (event) => {
         event.preventDefault();
         event.stopPropagation();
         const focused = root.activeElement === input || this.shadowRoot.activeElement === input;
@@ -3921,12 +4025,13 @@ class HaListManagerShoppingCard extends HTMLElement {
     };
     const renderOptions = () => {
       const available = matches();
+      this._clearRenderListeners(menu);
       menu.innerHTML = available.length ? available.map((label) => `<button type="button" data-label-option="${esc(label.id)}" style="${label.color ? `--label-color:${esc(label.color)}` : ""}"><span class="label-option-icon"><ha-icon icon="${esc(label.icon || "mdi:label-outline")}"></ha-icon></span><span><strong>${esc(label.name)}</strong><small>${esc(this._labelScope(label))}</small></span></button>`).join("") : `<p class="picker-empty">${haListManagerShoppingCardText("labels.no_matches", {}, this._hass)}</p>`;
       menu.hidden = false;
-      menu.querySelectorAll("[data-label-option]").forEach((button) => button.addEventListener("mousedown", (event) => { event.preventDefault(); choose(this._labels.find((label) => label.id === button.dataset.labelOption)); }));
+      menu.querySelectorAll("[data-label-option]").forEach((button) => this._listen(button, "mousedown", (event) => { event.preventDefault(); choose(this._labels.find((label) => label.id === button.dataset.labelOption)); }));
     };
     const bindRemoveButtons = () => {
-      this.shadowRoot.querySelectorAll("[data-remove-label]").forEach((button) => button.addEventListener("click", () => {
+      this.shadowRoot.querySelectorAll("[data-remove-label]").forEach((button) => this._listen(button, "click", () => {
         const focused = this.shadowRoot.activeElement === button;
         const menuHidden = menu.hidden;
         draft.label_ids = draft.label_ids.filter((id) => id !== button.dataset.removeLabel);
@@ -3941,6 +4046,7 @@ class HaListManagerShoppingCard extends HTMLElement {
       // Keep the dialog and input mounted: remounting loses mobile scroll/focus.
       const host = this.shadowRoot.querySelector("[data-selected-labels]");
       if (host) {
+        this._clearRenderListeners(host);
         host.innerHTML = this._renderSelectedLabels(draft.label_ids);
         host.hidden = !host.innerHTML;
         bindRemoveButtons();
@@ -3949,10 +4055,10 @@ class HaListManagerShoppingCard extends HTMLElement {
       this._updateProductLabelPreference();
       this._updateDialogDirtyState();
     };
-    input.addEventListener("focus", renderOptions);
-    input.addEventListener("input", renderOptions);
-    input.addEventListener("keydown", (event) => { if (event.key === "Enter") { event.preventDefault(); choose(matches()[0]); } });
-    input.addEventListener("blur", () => setTimeout(() => { menu.hidden = true; }, 120));
+    this._listen(input, "focus", renderOptions);
+    this._listen(input, "input", renderOptions);
+    this._listen(input, "keydown", (event) => { if (event.key === "Enter") { event.preventDefault(); choose(matches()[0]); } });
+    this._listen(input, "blur", () => setTimeout(() => { menu.hidden = true; }, 120));
     bindRemoveButtons();
   }
 
@@ -3979,9 +4085,10 @@ class HaListManagerShoppingCard extends HTMLElement {
     };
     const renderOptions = () => {
       const available = matches();
+      this._clearRenderListeners(menu);
       menu.innerHTML = `<button type="button" data-category-option=""><span class="category-option-icon"><ha-icon icon="mdi:shape-outline"></ha-icon></span><span><strong>${haListManagerShoppingCardText("ui.general", {}, this._hass)}</strong><small>${haListManagerShoppingCardText("ui.no_category", {}, this._hass)}</small></span></button>${available.map((category) => `<button type="button" data-category-option="${esc(category.id)}"><span class="category-option-icon" style="${category.color ? `--category-color:${esc(category.color)}` : ""}"><ha-icon icon="${esc(category.icon || (category.scope === "global" ? "mdi:earth" : "mdi:format-list-bulleted"))}"></ha-icon></span><span><strong>${esc(category.name)}</strong><small>${esc(this._categoryScope(category))}</small></span></button>`).join("")}`;
       menu.hidden = false;
-      menu.querySelectorAll("[data-category-option]").forEach((button) => button.addEventListener("mousedown", (event) => {
+      menu.querySelectorAll("[data-category-option]").forEach((button) => this._listen(button, "mousedown", (event) => {
         event.preventDefault();
         const category = categories.find((entry) => entry.id === button.dataset.categoryOption);
         draft.category_id = category?.id || null;
@@ -3989,9 +4096,9 @@ class HaListManagerShoppingCard extends HTMLElement {
         this._render();
       }));
     };
-    input.addEventListener("focus", () => { renderOptions(); updateProductStatus(); });
-    input.addEventListener("input", (event) => { draft.category_id = null; draft.category_name = event.target.value; renderOptions(); updateProductStatus(); this._updateCategoryPreference(); this._updateDialogDirtyState(); });
-    input.addEventListener("keydown", (event) => {
+    this._listen(input, "focus", () => { renderOptions(); updateProductStatus(); });
+    this._listen(input, "input", (event) => { draft.category_id = null; draft.category_name = event.target.value; renderOptions(); updateProductStatus(); this._updateCategoryPreference(); this._updateDialogDirtyState(); });
+    this._listen(input, "keydown", (event) => {
       if (event.key !== "Enter") return;
       event.preventDefault();
       const exact = categories.find((category) => category.name.localeCompare(input.value.trim(), haListManagerShoppingCardTextLocale(this._hass), { sensitivity: "base" }) === 0);
@@ -4000,9 +4107,9 @@ class HaListManagerShoppingCard extends HTMLElement {
       draft.category_name = exact.name;
       this._render();
     });
-    input.addEventListener("blur", () => setTimeout(() => { menu.hidden = true; }, 120));
+    this._listen(input, "blur", () => setTimeout(() => { menu.hidden = true; }, 120));
     this._updateCategoryPreference();
-    this.shadowRoot.querySelector("[data-remember-product-category]")?.addEventListener("change", (event) => {
+    this._listen(this.shadowRoot.querySelector("[data-remember-product-category]"), "change", (event) => {
       draft.remember_product_category = event.target.checked && this._categoryPreferenceState(draft).enabled;
       this._updateDialogDirtyState();
     });
@@ -4036,18 +4143,19 @@ class HaListManagerShoppingCard extends HTMLElement {
       };
       const renderOptions = () => {
         const available = matches();
+        this._clearRenderListeners(menu);
         menu.innerHTML = `<button type="button" data-dish-category-option=""><span class="category-option-icon"><ha-icon icon="mdi:shape-outline"></ha-icon></span><span><strong>${haListManagerShoppingCardText("ui.general", {}, this._hass)}</strong><small>${haListManagerShoppingCardText("ui.no_category", {}, this._hass)}</small></span></button>${available.map((category) => `<button type="button" data-dish-category-option="${esc(category.id)}"><span class="category-option-icon" style="${category.color ? `--category-color:${esc(category.color)}` : ""}"><ha-icon icon="${esc(category.icon || (category.dynamic ? "mdi:shape-outline" : category.scope === "global" ? "mdi:earth" : "mdi:format-list-bulleted"))}"></ha-icon></span><span><strong>${esc(category.name)}</strong><small>${esc(this._categoryScope(category))}</small></span></button>`).join("")}`;
         menu.hidden = false;
-        menu.querySelectorAll("[data-dish-category-option]").forEach((button) => button.addEventListener("mousedown", (event) => {
+        menu.querySelectorAll("[data-dish-category-option]").forEach((button) => this._listen(button, "mousedown", (event) => {
           event.preventDefault();
           choose(categories.find((category) => category.id === button.dataset.dishCategoryOption));
         }));
       };
-      input.addEventListener("focus", () => {
+      this._listen(input, "focus", () => {
         if (choice.general) input.select();
         renderOptions();
       });
-      input.addEventListener("input", (event) => {
+      this._listen(input, "input", (event) => {
         choice.category_id = null;
         choice.category_name = event.target.value;
         choice.dynamic = Boolean(event.target.value.trim());
@@ -4056,7 +4164,7 @@ class HaListManagerShoppingCard extends HTMLElement {
         input.closest(".dish-category-combo")?.classList.remove("unresolved");
         renderOptions();
       });
-      input.addEventListener("keydown", (event) => {
+      this._listen(input, "keydown", (event) => {
         if (event.key !== "Enter") return;
         event.preventDefault();
         const exact = categories.find((category) => category.name.localeCompare(input.value.trim(), haListManagerShoppingCardTextLocale(this._hass), { sensitivity: "base" }) === 0);
@@ -4070,7 +4178,7 @@ class HaListManagerShoppingCard extends HTMLElement {
           this._render();
         }
       });
-      input.addEventListener("blur", () => setTimeout(() => { menu.hidden = true; }, 120));
+      this._listen(input, "blur", () => setTimeout(() => { menu.hidden = true; }, 120));
     });
   }
 
@@ -4102,18 +4210,19 @@ class HaListManagerShoppingCard extends HTMLElement {
       };
       const renderOptions = () => {
         const available = matches();
+        this._clearRenderListeners(menu);
         menu.innerHTML = `<button type="button" data-tandoor-category-option=""><span class="category-option-icon"><ha-icon icon="mdi:shape-outline"></ha-icon></span><span><strong>${haListManagerShoppingCardText("ui.general", {}, this._hass)}</strong><small>${haListManagerShoppingCardText("ui.no_category", {}, this._hass)}</small></span></button>${available.map((category) => `<button type="button" data-tandoor-category-option="${esc(category.id)}"><span class="category-option-icon" style="${category.color ? `--category-color:${esc(category.color)}` : ""}"><ha-icon icon="${esc(category.icon || (category.dynamic ? "mdi:shape-outline" : category.scope === "global" ? "mdi:earth" : "mdi:format-list-bulleted"))}"></ha-icon></span><span><strong>${esc(category.name)}</strong><small>${esc(this._categoryScope(category))}</small></span></button>`).join("")}`;
         menu.hidden = false;
-        menu.querySelectorAll("[data-tandoor-category-option]").forEach((button) => button.addEventListener("mousedown", (event) => {
+        menu.querySelectorAll("[data-tandoor-category-option]").forEach((button) => this._listen(button, "mousedown", (event) => {
           event.preventDefault();
           choose(categories.find((category) => category.id === button.dataset.tandoorCategoryOption));
         }));
       };
-      input.addEventListener("focus", () => {
+      this._listen(input, "focus", () => {
         if (choice.general) input.select();
         renderOptions();
       });
-      input.addEventListener("input", (event) => {
+      this._listen(input, "input", (event) => {
         const value = event.target.value.trim();
         const general = !value;
         choice.category_id = null;
@@ -4124,7 +4233,7 @@ class HaListManagerShoppingCard extends HTMLElement {
         input.closest(".dish-category-combo")?.classList.remove("unresolved");
         renderOptions();
       });
-      input.addEventListener("keydown", (event) => {
+      this._listen(input, "keydown", (event) => {
         if (event.key !== "Enter") return;
         event.preventDefault();
         const exact = categories.find((category) => category.name.localeCompare(input.value.trim(), haListManagerShoppingCardTextLocale(this._hass), { sensitivity: "base" }) === 0);
@@ -4140,28 +4249,28 @@ class HaListManagerShoppingCard extends HTMLElement {
           this._renderTandoorRecipePreservingScroll();
         }
       });
-      input.addEventListener("blur", () => setTimeout(() => { menu.hidden = true; }, 120));
+      this._listen(input, "blur", () => setTimeout(() => { menu.hidden = true; }, 120));
     });
   }
 
   _bindScrollGuard() {
     this.shadowRoot.querySelectorAll(".backdrop").forEach((backdrop) => {
-      backdrop.addEventListener("wheel", (event) => event.stopPropagation(), { passive: false });
-      backdrop.addEventListener("touchmove", (event) => event.stopPropagation(), { passive: false });
+      this._listen(backdrop, "wheel", (event) => event.stopPropagation(), { passive: false });
+      this._listen(backdrop, "touchmove", (event) => event.stopPropagation(), { passive: false });
     });
   }
 
   _bindDynamicContent(root = this.shadowRoot, bindCategories = true) {
-    root.querySelectorAll("[data-product-id]").forEach((button) => button.addEventListener("click", () => {
+    root.querySelectorAll("[data-product-id]").forEach((button) => this._listen(button, "click", () => {
       const product = this._suggestions.find((entry) => entry.id === button.dataset.productId);
       if (product) this._handleProduct(product, "", this._requestedQuantity());
     }));
-    root.querySelectorAll("[data-product-choice]").forEach((button) => button.addEventListener("click", () => this._chooseProduct(button.dataset.productChoice)));
-    if (bindCategories) root.querySelectorAll("[data-category]").forEach((button) => button.addEventListener("click", () => this._toggleCategory(button.dataset.category, button)));
-    root.querySelectorAll("[data-edit-item]").forEach((button) => button.addEventListener("click", () => { const item = this._items.find((entry) => entry.id === button.dataset.editItem); if (item) this._openDialog(item, this._products.find((product) => product.id === item.product_id)); }));
-    root.querySelectorAll("[data-complete]").forEach((button) => button.addEventListener("click", () => { const row = button.closest("[data-item-id]"); const item = this._items.find((entry) => entry.id === row?.dataset.itemId); if (item) this._complete(item, !item.completed, row); }));
-    root.querySelectorAll("[data-quantity-change]").forEach((button) => button.addEventListener("click", () => { const [id, delta] = button.dataset.quantityChange.split(":"); const item = this._items.find((entry) => entry.id === id); if (item) this._changeQuantity(item, Number(delta)); }));
-    root.querySelectorAll("[data-view-item-image]").forEach((button) => button.addEventListener("click", () => {
+    root.querySelectorAll("[data-product-choice]").forEach((button) => this._listen(button, "click", () => this._chooseProduct(button.dataset.productChoice)));
+    if (bindCategories) root.querySelectorAll("[data-category]").forEach((button) => this._listen(button, "click", () => this._toggleCategory(button.dataset.category, button)));
+    root.querySelectorAll("[data-edit-item]").forEach((button) => this._listen(button, "click", () => { const item = this._items.find((entry) => entry.id === button.dataset.editItem); if (item) this._openDialog(item, this._products.find((product) => product.id === item.product_id)); }));
+    root.querySelectorAll("[data-complete]").forEach((button) => this._listen(button, "click", () => { const row = button.closest("[data-item-id]"); const item = this._items.find((entry) => entry.id === row?.dataset.itemId); if (item) this._complete(item, !item.completed, row); }));
+    root.querySelectorAll("[data-quantity-change]").forEach((button) => this._listen(button, "click", () => { const [id, delta] = button.dataset.quantityChange.split(":"); const item = this._items.find((entry) => entry.id === id); if (item) this._changeQuantity(item, Number(delta)); }));
+    root.querySelectorAll("[data-view-item-image]").forEach((button) => this._listen(button, "click", () => {
       const item = this._items.find((entry) => entry.id === button.dataset.viewItemImage);
       const product = this._products.find((entry) => entry.id === item?.product_id);
       if (product?.image_url) {
@@ -4174,7 +4283,7 @@ class HaListManagerShoppingCard extends HTMLElement {
 
   _bindChipButton(button, chip, activate) {
     if (!button || !chip) return;
-    button.addEventListener("click", (event) => {
+    this._listen(button, "click", (event) => {
       if (Date.now() < this._suppressChipClickUntil) { event.preventDefault(); event.stopPropagation(); return; }
       activate();
     });
@@ -4191,17 +4300,17 @@ class HaListManagerShoppingCard extends HTMLElement {
         this._render();
       }, 650);
     };
-    button.addEventListener("pointerdown", start);
-    button.addEventListener("mousedown", start);
-    button.addEventListener("touchstart", start, { passive: true });
-    ["pointerup", "pointercancel", "pointerleave", "mouseup", "mouseleave", "touchend", "touchcancel"].forEach((type) => button.addEventListener(type, cancel));
-    button.addEventListener("contextmenu", (event) => event.preventDefault());
+    this._listen(button, "pointerdown", start);
+    this._listen(button, "mousedown", start);
+    this._listen(button, "touchstart", start, { passive: true });
+    ["pointerup", "pointercancel", "pointerleave", "mouseup", "mouseleave", "touchend", "touchcancel"].forEach((type) => this._listen(button, type, cancel));
+    this._listen(button, "contextmenu", (event) => event.preventDefault());
   }
 
   _bindChipActions(root = this.shadowRoot) {
     const chips = this._displayChips();
-    root.querySelector("[data-toggle-chip-categories]")?.addEventListener("click", () => this._toggleAllChipCategories());
-    root.querySelectorAll("[data-chip-category]").forEach((button) => button.addEventListener("click", () => this._toggleChipCategory(button.dataset.chipCategory, button.dataset.chipCategoryDialog === "1")));
+    this._listen(root.querySelector("[data-toggle-chip-categories]"), "click", () => this._toggleAllChipCategories());
+    root.querySelectorAll("[data-chip-category]").forEach((button) => this._listen(button, "click", () => this._toggleChipCategory(button.dataset.chipCategory, button.dataset.chipCategoryDialog === "1")));
     root.querySelectorAll("[data-quick-chip]").forEach((button) => {
       const chip = chips.find((entry) => entry.id === button.dataset.quickChip);
       this._bindChipButton(button, chip, () => this._useChip(chip));
@@ -4214,26 +4323,29 @@ class HaListManagerShoppingCard extends HTMLElement {
         await this._useChip(chip);
       });
     });
-    root.querySelector("[data-toggle-chips]")?.addEventListener("click", () => {
+    this._listen(root.querySelector("[data-toggle-chips]"), "click", () => {
       this._chipsExpanded = !this._chipsExpanded;
       this._render();
     });
-    root.querySelectorAll("[data-dish]").forEach((button) => button.addEventListener("click", () => this._useDish(this._dishes.find((dish) => dish.id === button.dataset.dish))));
-    root.querySelectorAll("[data-dialog-dish]").forEach((button) => button.addEventListener("click", () => this._useDish(this._dishes.find((dish) => dish.id === button.dataset.dialogDish))));
+    root.querySelectorAll("[data-dish]").forEach((button) => this._listen(button, "click", () => this._useDish(this._dishes.find((dish) => dish.id === button.dataset.dish))));
+    root.querySelectorAll("[data-dialog-dish]").forEach((button) => this._listen(button, "click", () => this._useDish(this._dishes.find((dish) => dish.id === button.dataset.dialogDish))));
   }
 
   _bind() {
     const root = this.shadowRoot;
+    this._listen(root, "pointerdown", (event) => {
+      this._pageActionAnchor = event.target.closest?.("[data-item-id],[data-chip-category],[data-quick-chip],[data-dish],[data-category]") || null;
+    });
     this._bindNotices();
     this._bindSelectionPopup();
     this._bindSelectionTriggers(root);
-    root.querySelector("[data-toggle-item-actions]")?.addEventListener("click", () => this._toggleItemActions());
-    root.querySelectorAll("[data-item-action]").forEach((button) => button.addEventListener("click", () => this._openItemAction(button.dataset.itemAction)));
-    root.querySelectorAll("[data-item-shortcut]").forEach((button) => button.addEventListener("click", () => this._openItemAction(button.dataset.itemShortcut, button)));
-    root.querySelector("[data-confirm-item-action]")?.addEventListener("click", () => this._confirmItemAction());
-    root.querySelector("[data-item-action-target]")?.addEventListener("change", (event) => { if (this._itemAction) this._itemAction.target_list_id = event.target.value; });
-    root.querySelector("[data-item-action-quantity]")?.addEventListener("input", (event) => { if (this._itemAction) this._itemAction.quantity = event.target.value; });
-    root.querySelector("[data-dialog]")?.addEventListener("keydown", (event) => {
+    this._listen(root.querySelector("[data-toggle-item-actions]"), "click", () => this._toggleItemActions());
+    root.querySelectorAll("[data-item-action]").forEach((button) => this._listen(button, "click", () => this._openItemAction(button.dataset.itemAction)));
+    root.querySelectorAll("[data-item-shortcut]").forEach((button) => this._listen(button, "click", () => this._openItemAction(button.dataset.itemShortcut, button)));
+    this._listen(root.querySelector("[data-confirm-item-action]"), "click", () => this._confirmItemAction());
+    this._listen(root.querySelector("[data-item-action-target]"), "change", (event) => { if (this._itemAction) this._itemAction.target_list_id = event.target.value; });
+    this._listen(root.querySelector("[data-item-action-quantity]"), "input", (event) => { if (this._itemAction) this._itemAction.quantity = event.target.value; });
+    this._listen(root.querySelector("[data-dialog]"), "keydown", (event) => {
       if (event.key === "Escape" && (this._itemAction || this._dialog?.item_actions_open)) {
         event.preventDefault(); event.stopPropagation();
         if (this._itemAction) this._closeItemAction(); else this._toggleItemActions();
@@ -4241,7 +4353,7 @@ class HaListManagerShoppingCard extends HTMLElement {
         event.preventDefault(); event.stopPropagation(); this._closeDialog();
       }
     });
-    root.querySelector(".item-actions-menu")?.addEventListener("keydown", (event) => {
+    this._listen(root.querySelector(".item-actions-menu"), "keydown", (event) => {
       if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
       const buttons = [...root.querySelectorAll("[data-item-action]:not(:disabled)")];
       if (!buttons.length) return;
@@ -4251,50 +4363,50 @@ class HaListManagerShoppingCard extends HTMLElement {
         : (current + (event.key === "ArrowUp" ? -1 : 1) + buttons.length) % buttons.length;
       buttons[index]?.focus({ preventScroll: true });
     });
-    root.querySelector("ha-card")?.addEventListener("scroll", (event) => {
+    this._listen(root.querySelector("ha-card"), "scroll", (event) => {
       if (this._expandedView) this._expandedScrollTop = event.currentTarget.scrollTop;
     }, { passive: true });
-    root.querySelectorAll("[data-toggle-expanded-view]").forEach((element) => element.addEventListener("click", (event) => this._toggleExpandedView(event)));
-    root.querySelector("[data-toggle-list]")?.addEventListener("click", () => { if (!this._expandedView) this._toggleList(); });
+    root.querySelectorAll("[data-toggle-expanded-view]").forEach((element) => this._listen(element, "click", (event) => this._toggleExpandedView(event)));
+    this._listen(root.querySelector("[data-toggle-list]"), "click", () => { if (!this._expandedView) this._toggleList(); });
     const productInput = root.querySelector("[data-product-input]");
-    productInput?.addEventListener("input", (event) => this._searchProducts(event.target.value));
-    productInput?.addEventListener("focus", () => {
+    this._listen(productInput, "input", (event) => this._searchProducts(event.target.value));
+    this._listen(productInput, "focus", () => {
       this._suggestionsVisible = true;
       const suggestions = this.shadowRoot.querySelector("[data-suggestions]");
       if (suggestions) suggestions.hidden = !this._suggestions.length;
     });
-    productInput?.addEventListener("blur", () => setTimeout(() => {
+    this._listen(productInput, "blur", () => setTimeout(() => {
       this._suggestionsVisible = false;
       const suggestions = this.shadowRoot.querySelector("[data-suggestions]");
       if (suggestions) suggestions.hidden = true;
     }, 120));
-    productInput?.addEventListener("keydown", (event) => { if (event.key === "Enter") { event.preventDefault(); this._useInput(); } });
-    root.querySelector("[data-clear-input]")?.addEventListener("click", () => this._clearInput());
-    root.querySelector("[data-open-chip-dialog]")?.addEventListener("click", () => {
+    this._listen(productInput, "keydown", (event) => { if (event.key === "Enter") { event.preventDefault(); this._useInput(); } });
+    this._listen(root.querySelector("[data-clear-input]"), "click", () => this._clearInput());
+    this._listen(root.querySelector("[data-open-chip-dialog]"), "click", () => {
       this._chipDialog = true;
       this._lockScroll();
       this._render();
     });
-    root.querySelector("[data-add]")?.addEventListener("click", () => this._useInput());
+    this._listen(root.querySelector("[data-add]"), "click", () => this._useInput());
     this._bindChipActions(root);
-    root.querySelector("[data-toggle-header-menu]")?.addEventListener("click", () => { this._headerMenuOpen = !this._headerMenuOpen; this._render(); });
-    root.querySelectorAll("[data-send-list]").forEach((button) => button.addEventListener("click", () => { this._headerMenuOpen = false; this._requestShare(); }));
-    root.querySelectorAll("[data-export-pdf]").forEach((button) => button.addEventListener("click", () => { this._headerMenuOpen = false; this._exportPdf(); }));
-    root.querySelectorAll("[data-open-tandoor]").forEach((button) => button.addEventListener("click", () => this._openTandoorDialog()));
-    root.querySelector("ha-card")?.addEventListener("click", (event) => {
+    this._listen(root.querySelector("[data-toggle-header-menu]"), "click", () => { this._headerMenuOpen = !this._headerMenuOpen; this._render(); });
+    root.querySelectorAll("[data-send-list]").forEach((button) => this._listen(button, "click", () => { this._headerMenuOpen = false; this._requestShare(); }));
+    root.querySelectorAll("[data-export-pdf]").forEach((button) => this._listen(button, "click", () => { this._headerMenuOpen = false; this._exportPdf(); }));
+    root.querySelectorAll("[data-open-tandoor]").forEach((button) => this._listen(button, "click", () => this._openTandoorDialog()));
+    this._listen(root.querySelector("ha-card"), "click", (event) => {
       if (this._headerMenuOpen && !event.target.closest(".compact-header-actions")) { this._headerMenuOpen = false; this._render(); }
       if (this._offerFilterOpen && !event.target.closest(".offer-filter")) this._closeOfferFilter();
     });
-    root.querySelector("[data-toggle-offer-filter]")?.addEventListener("click", () => this._toggleOfferFilter());
+    this._listen(root.querySelector("[data-toggle-offer-filter]"), "click", () => this._toggleOfferFilter());
     root.querySelectorAll("[data-offer-filter]").forEach((button) => {
       // Keep touch focus loss from hiding the option before its click arrives.
-      button.addEventListener("pointerdown", (event) => { if (event.button === 0) event.preventDefault(); });
-      button.addEventListener("click", () => this._setOfferFilter(button.dataset.offerFilter));
+      this._listen(button, "pointerdown", (event) => { if (event.button === 0) event.preventDefault(); });
+      this._listen(button, "click", () => this._setOfferFilter(button.dataset.offerFilter));
     });
-    root.querySelector(".offer-filter")?.addEventListener("focusout", (event) => {
+    this._listen(root.querySelector(".offer-filter"), "focusout", (event) => {
       if (!event.currentTarget.contains(event.relatedTarget)) this._closeOfferFilter();
     });
-    root.querySelector(".offer-filter")?.addEventListener("keydown", (event) => {
+    this._listen(root.querySelector(".offer-filter"), "keydown", (event) => {
       if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); this._closeOfferFilter(true); return; }
       if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
       event.preventDefault();
@@ -4305,23 +4417,24 @@ class HaListManagerShoppingCard extends HTMLElement {
         : (current + (event.key === "ArrowUp" ? -1 : 1) + options.length) % options.length;
       options[next]?.focus({ preventScroll: true });
     });
-    root.querySelector("[data-dialog]")?.addEventListener("click", (event) => {
+    this._listen(root.querySelector("[data-dialog]"), "click", (event) => {
       event.stopPropagation();
       if (this._dialog?.item_actions_open && !event.target.closest(".item-actions")) {
         this._dialog.item_actions_open = false;
-        root.querySelector(".item-actions-menu")?.remove();
+        const menu = root.querySelector(".item-actions-menu");
+        if (menu) { this._clearRenderListeners(menu); menu.remove(); }
         root.querySelector("[data-toggle-item-actions]")?.setAttribute("aria-expanded", "false");
       }
     });
-    root.querySelector(".backdrop[data-close-product-picker]")?.addEventListener("click", (event) => { if (event.target === event.currentTarget) this._closeProductPicker(); });
-    root.querySelectorAll("button[data-close-product-picker]").forEach((element) => element.addEventListener("click", () => this._closeProductPicker()));
-    root.querySelector(".backdrop[data-close-chip-dialog]")?.addEventListener("click", (event) => { if (event.target === event.currentTarget) this._closeChipDialog(); });
-    root.querySelectorAll("button[data-close-chip-dialog]").forEach((element) => element.addEventListener("click", () => this._closeChipDialog()));
-    root.querySelector(".backdrop[data-close-dish-dialog]")?.addEventListener("click", (event) => { if (event.target === event.currentTarget) this._closeDishDialog(); });
-    root.querySelectorAll("button[data-close-dish-dialog]").forEach((element) => element.addEventListener("click", () => this._closeDishDialog()));
-    root.querySelector(".backdrop[data-close-tandoor]")?.addEventListener("click", (event) => { if (event.target === event.currentTarget) this._closeTandoorDialog(); });
-    root.querySelectorAll("button[data-close-tandoor]").forEach((element) => element.addEventListener("click", () => this._closeTandoorDialog()));
-    root.querySelector("[data-tandoor-search]")?.addEventListener("input", (event) => {
+    this._listen(root.querySelector(".backdrop[data-close-product-picker]"), "click", (event) => { if (event.target === event.currentTarget) this._closeProductPicker(); });
+    root.querySelectorAll("button[data-close-product-picker]").forEach((element) => this._listen(element, "click", () => this._closeProductPicker()));
+    this._listen(root.querySelector(".backdrop[data-close-chip-dialog]"), "click", (event) => { if (event.target === event.currentTarget) this._closeChipDialog(); });
+    root.querySelectorAll("button[data-close-chip-dialog]").forEach((element) => this._listen(element, "click", () => this._closeChipDialog()));
+    this._listen(root.querySelector(".backdrop[data-close-dish-dialog]"), "click", (event) => { if (event.target === event.currentTarget) this._closeDishDialog(); });
+    root.querySelectorAll("button[data-close-dish-dialog]").forEach((element) => this._listen(element, "click", () => this._closeDishDialog()));
+    this._listen(root.querySelector(".backdrop[data-close-tandoor]"), "click", (event) => { if (event.target === event.currentTarget) this._closeTandoorDialog(); });
+    root.querySelectorAll("button[data-close-tandoor]").forEach((element) => this._listen(element, "click", () => this._closeTandoorDialog()));
+    this._listen(root.querySelector("[data-tandoor-search]"), "input", (event) => {
       if (!this._tandoorDialog) return;
       const query = event.currentTarget.value;
       this._tandoorDialog.query = query;
@@ -4331,20 +4444,20 @@ class HaListManagerShoppingCard extends HTMLElement {
       if (clearButton) clearButton.hidden = !query;
       this._tandoorSearchTimer = setTimeout(() => this._searchTandoorRecipes(query, true), 300);
     });
-    root.querySelector("[data-tandoor-clear]")?.addEventListener("click", () => {
+    this._listen(root.querySelector("[data-tandoor-clear]"), "click", () => {
       if (!this._tandoorDialog) return;
       clearTimeout(this._tandoorSearchTimer);
       this._tandoorDialog.query = "";
       this._setTandoorSearchPending(false);
       this._searchTandoorRecipes("", true);
     });
-    root.querySelector("[data-tandoor-include-ingredients]")?.addEventListener("change", (event) => {
+    this._listen(root.querySelector("[data-tandoor-include-ingredients]"), "change", (event) => {
       if (!this._tandoorDialog) return;
       clearTimeout(this._tandoorSearchTimer);
       this._tandoorDialog.includeIngredients = event.currentTarget.checked;
       if (this._tandoorDialog.query.trim() || this._tandoorDialog.categoryId || this._tandoorDialog.browseAll) this._searchTandoorRecipes(this._tandoorDialog.query);
     });
-    root.querySelector("[data-tandoor-skip-small-units]")?.addEventListener("change", (event) => {
+    this._listen(root.querySelector("[data-tandoor-skip-small-units]"), "change", (event) => {
       const dialog = this._tandoorDialog;
       if (!dialog) return;
       dialog.skipSmallUnits = event.currentTarget.checked;
@@ -4357,7 +4470,7 @@ class HaListManagerShoppingCard extends HTMLElement {
       }
       this._renderTandoorRecipePreservingScroll();
     });
-    root.querySelector("[data-tandoor-all-recipes]")?.addEventListener("click", () => {
+    this._listen(root.querySelector("[data-tandoor-all-recipes]"), "click", () => {
       if (!this._tandoorDialog) return;
       this._tandoorDialog.categoryId = null;
       this._tandoorDialog.categoryName = haListManagerShoppingCardText("ui.all_recipes", {}, this._hass);
@@ -4365,7 +4478,7 @@ class HaListManagerShoppingCard extends HTMLElement {
       this._tandoorDialog.query = "";
       this._searchTandoorRecipes("");
     });
-    root.querySelectorAll("[data-tandoor-cookbook]").forEach((button) => button.addEventListener("click", () => {
+    root.querySelectorAll("[data-tandoor-cookbook]").forEach((button) => this._listen(button, "click", () => {
       if (!this._tandoorDialog) return;
       this._tandoorDialog.categoryId = Number(button.dataset.tandoorCookbook);
       this._tandoorDialog.categoryName = button.dataset.tandoorCookbookName || "";
@@ -4373,7 +4486,7 @@ class HaListManagerShoppingCard extends HTMLElement {
       this._tandoorDialog.query = "";
       this._searchTandoorRecipes("");
     }));
-    root.querySelector("[data-tandoor-all-cookbooks]")?.addEventListener("click", () => {
+    this._listen(root.querySelector("[data-tandoor-all-cookbooks]"), "click", () => {
       if (!this._tandoorDialog) return;
       this._tandoorDialog.categoryId = null;
       this._tandoorDialog.categoryName = "";
@@ -4383,8 +4496,8 @@ class HaListManagerShoppingCard extends HTMLElement {
       this._tandoorDialog.loading = false;
       this._render();
     });
-    root.querySelectorAll("[data-tandoor-recipe]").forEach((button) => button.addEventListener("click", () => this._selectTandoorRecipe(button.dataset.tandoorRecipe)));
-    root.querySelectorAll("[data-tandoor-recipe-tab]").forEach((button) => button.addEventListener("click", () => {
+    root.querySelectorAll("[data-tandoor-recipe]").forEach((button) => this._listen(button, "click", () => this._selectTandoorRecipe(button.dataset.tandoorRecipe)));
+    root.querySelectorAll("[data-tandoor-recipe-tab]").forEach((button) => this._listen(button, "click", () => {
       const dialog = this._tandoorDialog;
       if (!dialog?.recipe) return;
       dialog.recipeTab = button.dataset.tandoorRecipeTab === "preparation" ? "preparation" : "ingredients";
@@ -4392,35 +4505,35 @@ class HaListManagerShoppingCard extends HTMLElement {
       const recipeDialog = this.shadowRoot.querySelector(".tandoor-recipe-dialog");
       if (recipeDialog) recipeDialog.scrollTop = 0;
     }));
-    root.querySelector("[data-tandoor-servings]")?.addEventListener("change", (event) => {
+    this._listen(root.querySelector("[data-tandoor-servings]"), "change", (event) => {
       this._setTandoorServings(event.currentTarget.value);
     });
-    root.querySelector("[data-tandoor-servings]")?.addEventListener("keydown", (event) => {
+    this._listen(root.querySelector("[data-tandoor-servings]"), "keydown", (event) => {
       if (event.key !== "Enter") return;
       event.preventDefault();
       this._setTandoorServings(event.currentTarget.value);
     });
-    root.querySelectorAll("[data-tandoor-servings-change]").forEach((button) => button.addEventListener("click", () => {
+    root.querySelectorAll("[data-tandoor-servings-change]").forEach((button) => this._listen(button, "click", () => {
       const current = Number(this._tandoorDialog?.servings) || 1;
       this._setTandoorServings(current + Number(button.dataset.tandoorServingsChange || 0));
     }));
-    root.querySelector("[data-tandoor-select-all]")?.addEventListener("click", () => {
+    this._listen(root.querySelector("[data-tandoor-select-all]"), "click", () => {
       if (!this._tandoorDialog?.recipe) return;
       this._tandoorDialog.selected = new Set(this._tandoorDialog.recipe.ingredients.map((ingredient) => String(ingredient.id)));
       this._renderTandoorRecipePreservingScroll();
     });
-    root.querySelector("[data-tandoor-select-none]")?.addEventListener("click", () => {
+    this._listen(root.querySelector("[data-tandoor-select-none]"), "click", () => {
       if (!this._tandoorDialog) return;
       this._tandoorDialog.selected.clear();
       this._renderTandoorRecipePreservingScroll();
     });
-    root.querySelectorAll("[data-tandoor-ingredient]").forEach((checkbox) => checkbox.addEventListener("change", () => {
+    root.querySelectorAll("[data-tandoor-ingredient]").forEach((checkbox) => this._listen(checkbox, "change", () => {
       if (!this._tandoorDialog) return;
       if (checkbox.checked) this._tandoorDialog.selected.add(checkbox.dataset.tandoorIngredient);
       else this._tandoorDialog.selected.delete(checkbox.dataset.tandoorIngredient);
       this._renderTandoorRecipePreservingScroll();
     }));
-    root.querySelectorAll("[data-tandoor-product]").forEach((checkbox) => checkbox.addEventListener("change", () => {
+    root.querySelectorAll("[data-tandoor-product]").forEach((checkbox) => this._listen(checkbox, "change", () => {
       const dialog = this._tandoorDialog;
       if (!dialog) return;
       const id = checkbox.dataset.tandoorProduct;
@@ -4435,29 +4548,29 @@ class HaListManagerShoppingCard extends HTMLElement {
       }
       this._renderTandoorRecipePreservingScroll();
     }));
-    root.querySelectorAll("[data-tandoor-amount]").forEach((checkbox) => checkbox.addEventListener("change", () => {
+    root.querySelectorAll("[data-tandoor-amount]").forEach((checkbox) => this._listen(checkbox, "change", () => {
       if (!this._tandoorDialog) return;
       if (checkbox.checked) this._tandoorDialog.includeAmounts.add(checkbox.dataset.tandoorAmount);
       else this._tandoorDialog.includeAmounts.delete(checkbox.dataset.tandoorAmount);
       this._renderTandoorRecipePreservingScroll();
     }));
-    root.querySelectorAll("[data-tandoor-back]").forEach((button) => button.addEventListener("click", () => {
+    root.querySelectorAll("[data-tandoor-back]").forEach((button) => this._listen(button, "click", () => {
       if (!this._tandoorDialog) return;
       this._tandoorDialog.mode = "search";
       this._tandoorDialog.recipe = null;
       this._render();
     }));
-    root.querySelector("[data-add-tandoor]")?.addEventListener("click", () => this._addTandoorSelection());
-    root.querySelectorAll("[data-dish-choice]").forEach((checkbox) => checkbox.addEventListener("change", () => {
+    this._listen(root.querySelector("[data-add-tandoor]"), "click", () => this._addTandoorSelection());
+    root.querySelectorAll("[data-dish-choice]").forEach((checkbox) => this._listen(checkbox, "change", () => {
       if (!this._dishDialog) return;
       if (checkbox.checked) this._dishDialog.selected.add(checkbox.dataset.dishChoice);
       else this._dishDialog.selected.delete(checkbox.dataset.dishChoice);
       this._render();
     }));
-    root.querySelectorAll("[data-dish-quantity]").forEach((input) => input.addEventListener("input", () => { if (this._dishDialog) this._dishDialog.quantities[input.dataset.dishQuantity] = input.value; }));
+    root.querySelectorAll("[data-dish-quantity]").forEach((input) => this._listen(input, "input", () => { if (this._dishDialog) this._dishDialog.quantities[input.dataset.dishQuantity] = input.value; }));
     this._configureTandoorCategorySelectors(root);
     this._configureDishCategorySelectors(root);
-    root.querySelector("[data-add-dish-to-list]")?.addEventListener("click", () => {
+    this._listen(root.querySelector("[data-add-dish-to-list]"), "click", () => {
       const dialog = this._dishDialog;
       if (!dialog) return;
       const availableCategories = this._availableCategories();
@@ -4478,32 +4591,32 @@ class HaListManagerShoppingCard extends HTMLElement {
       });
       this._addDishToList(dialog.dish, items);
     });
-    root.querySelector(".backdrop[data-close-browser-chip-menu]")?.addEventListener("click", (event) => { if (event.target === event.currentTarget) this._closeBrowserChipMenu(); });
-    root.querySelectorAll("button[data-close-browser-chip-menu]").forEach((element) => element.addEventListener("click", () => this._closeBrowserChipMenu()));
-    root.querySelector("[data-delete-browser-chip]")?.addEventListener("click", () => {
+    this._listen(root.querySelector(".backdrop[data-close-browser-chip-menu]"), "click", (event) => { if (event.target === event.currentTarget) this._closeBrowserChipMenu(); });
+    root.querySelectorAll("button[data-close-browser-chip-menu]").forEach((element) => this._listen(element, "click", () => this._closeBrowserChipMenu()));
+    this._listen(root.querySelector("[data-delete-browser-chip]"), "click", () => {
       this._removeBrowserChip(this._browserChipMenu?.chip);
       this._closeBrowserChipMenu();
     });
-    root.querySelector("[data-delete-all-browser-chips]")?.addEventListener("click", () => { this._browserChipMenu.confirmAll = true; this._render(); });
-    root.querySelector("[data-save-browser-chip]")?.addEventListener("click", () => this._saveBrowserChipPermanently());
-    root.querySelector("[data-toggle-important-chip]")?.addEventListener("click", () => this._toggleImportantChip(this._browserChipMenu?.chip));
-    root.querySelector("[data-cancel-browser-chip-confirmation]")?.addEventListener("click", () => { this._browserChipMenu.confirmAll = false; this._render(); });
-    root.querySelector("[data-confirm-delete-browser-chips]")?.addEventListener("click", () => { this._clearBrowserChips(); this._closeBrowserChipMenu(); });
-    root.querySelectorAll("[data-close-dialog]").forEach((element) => element.addEventListener("click", () => this._closeDialog()));
-    root.querySelectorAll("[data-close-image]").forEach((element) => element.addEventListener("click", () => { this._imageDialog = null; if (!this._dialog && !this._chipDialog) this._unlockScroll(); this._render(); }));
-    root.querySelector("[data-view-image]")?.addEventListener("click", () => { const product = this._dialog?.product; if (product?.image_url) { this._imageDialog = { url: largeImageUrl(product.image_url), name: this._dialog.name }; this._render(); } });
-    root.querySelector("[data-view-transfer-image]")?.addEventListener("click", () => {
+    this._listen(root.querySelector("[data-delete-all-browser-chips]"), "click", () => { this._browserChipMenu.confirmAll = true; this._render(); });
+    this._listen(root.querySelector("[data-save-browser-chip]"), "click", () => this._saveBrowserChipPermanently());
+    this._listen(root.querySelector("[data-toggle-important-chip]"), "click", () => this._toggleImportantChip(this._browserChipMenu?.chip));
+    this._listen(root.querySelector("[data-cancel-browser-chip-confirmation]"), "click", () => { this._browserChipMenu.confirmAll = false; this._render(); });
+    this._listen(root.querySelector("[data-confirm-delete-browser-chips]"), "click", () => { this._clearBrowserChips(); this._closeBrowserChipMenu(); });
+    root.querySelectorAll("[data-close-dialog]").forEach((element) => this._listen(element, "click", () => this._closeDialog()));
+    root.querySelectorAll("[data-close-image]").forEach((element) => this._listen(element, "click", () => { this._imageDialog = null; if (!this._dialog && !this._chipDialog) this._unlockScroll(); this._render(); }));
+    this._listen(root.querySelector("[data-view-image]"), "click", () => { const product = this._dialog?.product; if (product?.image_url) { this._imageDialog = { url: largeImageUrl(product.image_url), name: this._dialog.name }; this._render(); } });
+    this._listen(root.querySelector("[data-view-transfer-image]"), "click", () => {
       const draft = this._dialog;
       if (draft?.mode === "product-transfer" && draft.image_url) {
         this._imageDialog = { url: largeImageUrl(draft.image_url), name: draft.name };
         this._render();
       }
     });
-    root.querySelector("[data-d-offer-only]")?.addEventListener("change", (event) => { this._dialog.offer_only = event.target.checked; this._updateDialogDirtyState(); });
-    root.querySelector("[data-d-name]")?.addEventListener("input", (event) => { this._dialog.name = event.target.value; this._updateBringPreview(); this._updateDialogDirtyState(); });
-    root.querySelector("[data-d-description]")?.addEventListener("input", (event) => { this._dialog.description = event.target.value; this._updateBringPreview(); this._updateProductAmountDetails(); this._updateDialogDirtyState(); });
-    root.querySelector("[data-d-quantity]")?.addEventListener("input", (event) => { this._dialog.quantity = event.target.value; this._updateBringPreview(); this._updateProductAmountDetails(); this._updateDialogDirtyState(); });
-    root.querySelectorAll("[data-dialog-quantity]").forEach((button) => button.addEventListener("click", () => {
+    this._listen(root.querySelector("[data-d-offer-only]"), "change", (event) => { this._dialog.offer_only = event.target.checked; this._updateDialogDirtyState(); });
+    this._listen(root.querySelector("[data-d-name]"), "input", (event) => { this._dialog.name = event.target.value; this._updateBringPreview(); this._updateDialogDirtyState(); });
+    this._listen(root.querySelector("[data-d-description]"), "input", (event) => { this._dialog.description = event.target.value; this._updateBringPreview(); this._updateProductAmountDetails(); this._updateDialogDirtyState(); });
+    this._listen(root.querySelector("[data-d-quantity]"), "input", (event) => { this._dialog.quantity = event.target.value; this._updateBringPreview(); this._updateProductAmountDetails(); this._updateDialogDirtyState(); });
+    root.querySelectorAll("[data-dialog-quantity]").forEach((button) => this._listen(button, "click", () => {
       const input = root.querySelector("[data-d-quantity]");
       if (!input) return;
       const delta = Number(button.dataset.dialogQuantity || 0);
@@ -4511,54 +4624,54 @@ class HaListManagerShoppingCard extends HTMLElement {
       input.dispatchEvent(new Event("input", { bubbles: true }));
       input.focus();
     }));
-    root.querySelector("[data-d-increment]")?.addEventListener("input", (event) => {
+    this._listen(root.querySelector("[data-d-increment]"), "input", (event) => {
       this._dialog.increment = event.target.value;
       const current = Math.max(0, Number(this._dialog.item?.quantity || 0));
       const increment = Math.max(1, Number.parseInt(event.target.value, 10) || 1);
       const total = root.querySelector("[data-increment-total]");
       if (total) total.textContent = String(current + increment);
     });
-    root.querySelector("[data-increment-plus]")?.addEventListener("click", () => {
+    this._listen(root.querySelector("[data-increment-plus]"), "click", () => {
       const input = root.querySelector("[data-d-increment]");
       if (!input) return;
       input.value = String(Math.max(1, Number.parseInt(input.value, 10) || 1) + 1);
       input.dispatchEvent(new Event("input", { bubbles: true }));
       input.focus();
     });
-    root.querySelector("[data-save-dialog]")?.addEventListener("click", () => this._saveDialog());
-    root.querySelector("[data-open-product-transfer]")?.addEventListener("click", () => this._openProductTransferDialog());
-    root.querySelectorAll("[data-product-transfer-back]").forEach((button) => button.addEventListener("click", () => this._backToItemDialog()));
-    root.querySelector("[data-create-product-anyway]")?.addEventListener("click", () => {
+    this._listen(root.querySelector("[data-save-dialog]"), "click", () => this._saveDialog());
+    this._listen(root.querySelector("[data-open-product-transfer]"), "click", () => this._openProductTransferDialog());
+    root.querySelectorAll("[data-product-transfer-back]").forEach((button) => this._listen(button, "click", () => this._backToItemDialog()));
+    this._listen(root.querySelector("[data-create-product-anyway]"), "click", () => {
       const parent = this._dialog?.parent;
       if (!parent) return;
       this._dialog = this._productTransferDraft(parent);
       this._render();
     });
-    root.querySelectorAll("[data-link-existing-product]").forEach((button) => button.addEventListener("click", () => {
+    root.querySelectorAll("[data-link-existing-product]").forEach((button) => this._listen(button, "click", () => {
       const product = this._dialog?.matches?.find((entry) => entry.id === button.dataset.linkExistingProduct);
       if (product) this._linkProductToItem(product);
     }));
-    root.querySelectorAll("[data-product-field]").forEach((input) => input.addEventListener("input", () => {
+    root.querySelectorAll("[data-product-field]").forEach((input) => this._listen(input, "input", () => {
       if (this._dialog?.mode !== "product-transfer") return;
       this._dialog[input.dataset.productField] = input.value;
       if (input.dataset.productField === "ean") this._dialog.eanStatus = "";
       this._updateDialogDirtyState();
     }));
-    root.querySelector("[data-move-product-category]")?.addEventListener("change", (event) => { this._dialog.move_item_category = event.target.checked; this._updateDialogDirtyState(); });
-    root.querySelector("[data-lookup-product-ean]")?.addEventListener("click", () => this._lookupProductTransferEan());
-    root.querySelectorAll("[data-off-change]").forEach((input) => input.addEventListener("change", () => this._applyProductRefresh(input.dataset.offChange, input.checked, this._dialog)));
-    root.querySelector("[data-save-product-transfer]")?.addEventListener("click", () => this._saveProductTransfer());
-    root.querySelector("[data-edit-existing]")?.addEventListener("click", () => {
+    this._listen(root.querySelector("[data-move-product-category]"), "change", (event) => { this._dialog.move_item_category = event.target.checked; this._updateDialogDirtyState(); });
+    this._listen(root.querySelector("[data-lookup-product-ean]"), "click", () => this._lookupProductTransferEan());
+    root.querySelectorAll("[data-off-change]").forEach((input) => this._listen(input, "change", () => this._applyProductRefresh(input.dataset.offChange, input.checked, this._dialog)));
+    this._listen(root.querySelector("[data-save-product-transfer]"), "click", () => this._saveProductTransfer());
+    this._listen(root.querySelector("[data-edit-existing]"), "click", () => {
       const { item, product } = this._dialog;
       this._openDialog(item, product);
     });
-    root.querySelector("[data-delete-item]")?.addEventListener("click", () => this._delete(this._dialog.item));
-    root.querySelector("[data-confirm-delete]")?.addEventListener("click", () => this._confirmDelete());
-    root.querySelector("[data-clear-completed]")?.addEventListener("click", () => this._requestClearCompleted());
-    root.querySelector("[data-toggle-grouping]")?.addEventListener("click", () => this._toggleGrouping());
-    root.querySelector("[data-toggle-categories]")?.addEventListener("click", () => this._toggleAllCategories());
-    root.querySelector("[data-confirm-share]")?.addEventListener("click", () => this._confirmShare());
-    root.querySelectorAll("[data-share-profile]").forEach((checkbox) => checkbox.addEventListener("change", () => {
+    this._listen(root.querySelector("[data-delete-item]"), "click", () => this._delete(this._dialog.item));
+    this._listen(root.querySelector("[data-confirm-delete]"), "click", () => this._confirmDelete());
+    this._listen(root.querySelector("[data-clear-completed]"), "click", () => this._requestClearCompleted());
+    this._listen(root.querySelector("[data-toggle-grouping]"), "click", () => this._toggleGrouping());
+    this._listen(root.querySelector("[data-toggle-categories]"), "click", () => this._toggleAllCategories());
+    this._listen(root.querySelector("[data-confirm-share]"), "click", () => this._confirmShare());
+    root.querySelectorAll("[data-share-profile]").forEach((checkbox) => this._listen(checkbox, "change", () => {
       const selected = new Set(this._confirmation?.selectedIds || []);
       if (checkbox.checked) selected.add(checkbox.dataset.shareProfile);
       else selected.delete(checkbox.dataset.shareProfile);
@@ -4568,7 +4681,7 @@ class HaListManagerShoppingCard extends HTMLElement {
     }));
     this._bindDiscardConfirmation();
     if (this._confirmation?.type !== "discard_dialog") {
-      root.querySelectorAll("[data-cancel-delete],[data-cancel-confirmation]").forEach((button) => button.addEventListener("click", () => this._cancelConfirmation()));
+      root.querySelectorAll("[data-cancel-delete],[data-cancel-confirmation]").forEach((button) => this._listen(button, "click", () => this._cancelConfirmation()));
     }
     this._configureCategorySelector();
     this._configureLabelSelector();
