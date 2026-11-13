@@ -87,5 +87,52 @@
     return `.product-editor-fields{min-width:0}.product-editor-top{display:grid;grid-template-columns:minmax(0,1fr) 112px;gap:16px;align-items:start}.product-editor-main{min-width:0}.product-editor-fields .product-editor-field{display:flex;flex-direction:column;gap:6px;margin-top:14px;padding-right:0!important}.product-editor-fields input{min-width:0;width:100%;box-sizing:border-box}.product-editor-image{display:grid;place-items:center;position:static;align-self:start;width:112px;height:112px;margin-top:14px;padding:0;border:1px solid var(--divider-color);border-radius:8px;background:var(--secondary-background-color);color:var(--secondary-text-color);overflow:hidden}.product-editor-image img{display:block;width:100%;height:100%;object-fit:contain}.product-editor-image>ha-icon{--mdc-icon-size:40px}.product-editor-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.product-editor-ean-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:end}.product-editor-lookup{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:45px;padding:0 14px;border:1px solid var(--divider-color);border-radius:24px;background:var(--card-background-color);color:var(--primary-text-color);cursor:pointer}.product-editor-ean .dialog-status,.product-editor-ean .lookup-status{display:block;margin-top:6px}.product-editor-fields .name-options{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}.product-editor-fields .name-options button{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:38px;padding:0 14px;border:1px solid var(--divider-color);border-radius:21px;background:var(--card-background-color);color:var(--primary-text-color);cursor:pointer}.product-editor-fields .name-options button.active{border-color:var(--primary-color);background:var(--primary-color);color:#fff}.product-editor-fields .off-refresh{margin:14px 0;padding:12px;border:1px solid var(--divider-color);border-left:3px solid var(--primary-color);border-radius:8px}.product-editor-fields .off-refresh>p{margin:6px 0 10px;color:var(--secondary-text-color);font-size:14px;line-height:1.4}.product-editor-fields .off-refresh label{display:flex!important;flex-direction:row!important;align-items:flex-start;gap:10px;margin:10px 0!important}.product-editor-fields .off-refresh input[type=checkbox]{flex:0 0 auto;width:20px!important;min-height:20px!important;height:20px;margin:2px 0 0;padding:0;accent-color:var(--primary-color)}.product-editor-fields .off-refresh label>span{display:flex;flex-direction:column;min-width:0;gap:4px}.product-editor-fields .off-refresh small{overflow-wrap:anywhere;white-space:normal;color:var(--secondary-text-color)}.product-editor-fields .field-error{color:var(--error-color);font-size:12px}.product-editor-fields input.invalid{border-color:var(--error-color)}@media(max-width:600px){.product-editor-top{grid-template-columns:minmax(0,1fr)}.product-editor-image{grid-row:1;justify-self:end;width:90px;height:90px;margin:8px 0 0}.product-editor-grid{grid-template-columns:minmax(0,1fr)}}`;
   }
 
-  globalThis.HaListManagerProductEditor = Object.freeze({renderFields,renderRefresh,stageRefresh,applyRefresh,snapshot,parseName,buildName,styles});
+  function cancelRename(host) { host._productRenamePrompt?.(null); }
+
+  function confirmChipRename(host, info) {
+    cancelRename(host);
+    if (!host.isConnected) return Promise.resolve(null);
+    const text = (key, values = {}) => host._hass.localize(`component.ha_list_manager.config_panel.${key}`, values);
+    const previousFocus = host.shadowRoot?.activeElement;
+    const portal = document.createElement('div');
+    portal.setAttribute('data-product-chip-rename', '');
+    const root = portal.attachShadow({mode:'open'});
+    root.innerHTML = `<style>:host{position:fixed;inset:0;z-index:20000;display:block;color:var(--primary-text-color);font-family:var(--paper-font-body1_-_font-family,Roboto,sans-serif)}*{box-sizing:border-box}.backdrop{display:flex;align-items:center;justify-content:center;min-height:100%;padding:max(18px,env(safe-area-inset-top)) 18px max(18px,env(safe-area-inset-bottom));background:rgba(0,0,0,.55);overflow:auto;height:100dvh}.dialog{width:100%;max-width:540px;max-height:100%;overflow:auto;padding:24px;border-radius:16px;background:var(--card-background-color,#fff);box-shadow:0 12px 40px rgba(0,0,0,.35)}h2{margin:0 0 16px;font-size:22px;font-weight:500}p{line-height:1.5;overflow-wrap:anywhere}small{display:block;line-height:1.5;color:var(--secondary-text-color)}footer{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:10px;margin-top:24px}button{min-height:44px;padding:10px 20px;border:1px solid var(--divider-color);border-radius:24px;font:inherit;color:var(--primary-text-color);background:transparent;cursor:pointer}button.primary{background:var(--primary-color);border-color:var(--primary-color);color:var(--text-primary-color,#fff)}button:focus-visible{outline:2px solid var(--primary-color);outline-offset:3px}</style><div class="backdrop"><section class="dialog" role="dialog" aria-modal="true" aria-labelledby="rename-title"><h2 id="rename-title">${escapeHtml(text('products.rename_chips_title'))}</h2><p>${escapeHtml(text('products.rename_chips_body', info))}</p><small>${escapeHtml(text('products.rename_chips_hint'))}</small><footer><button class="primary" data-rename-yes>${escapeHtml(text('products.rename_chips_yes'))}</button><button data-rename-no>${escapeHtml(text('products.rename_chips_no'))}</button><button data-rename-cancel>${escapeHtml(text('ui.cancel'))}</button></footer></section></div>`;
+    return new Promise(resolve => {
+      const finish = choice => {
+        if (host._productRenamePrompt !== finish) return;
+        host._productRenamePrompt = null;
+        portal.remove();
+        if (previousFocus?.isConnected) previousFocus.focus({preventScroll:true});
+        resolve(choice);
+      };
+      host._productRenamePrompt = finish;
+      root.querySelector('[data-rename-yes]').addEventListener('click', () => finish(true));
+      root.querySelector('[data-rename-no]').addEventListener('click', () => finish(false));
+      root.querySelector('[data-rename-cancel]').addEventListener('click', () => finish(null));
+      root.querySelector('.backdrop').addEventListener('click', event => { if (event.target === event.currentTarget) finish(null); });
+      root.addEventListener('keydown', event => {
+        if (event.key === 'Escape') {event.preventDefault();event.stopPropagation();finish(null);}
+        if (event.key !== 'Tab') return;
+        const buttons = [...root.querySelectorAll('button')], first = buttons[0], last = buttons.at(-1);
+        if (event.shiftKey && root.activeElement === first) {event.preventDefault();last.focus({preventScroll:true});}
+        else if (!event.shiftKey && root.activeElement === last) {event.preventDefault();first.focus({preventScroll:true});}
+      });
+      document.body.appendChild(portal);
+      root.querySelector('[data-rename-cancel]').focus({preventScroll:true});
+    });
+  }
+
+  async function saveProduct(host, request) {
+    let result = await request({confirm_chip_rename:true});
+    while (result?.chip_rename_confirmation) {
+      const info = result.chip_rename_confirmation;
+      const choice = await confirmChipRename(host, info);
+      if (choice === null || !host.isConnected) return null;
+      result = await request({rename_matching_chips:choice, chip_rename_from:info.old_name});
+    }
+    return result;
+  }
+
+  globalThis.HaListManagerProductEditor = Object.freeze({renderFields,renderRefresh,stageRefresh,applyRefresh,snapshot,parseName,buildName,styles,saveProduct,cancelRename});
 })();

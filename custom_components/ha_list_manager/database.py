@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable, Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from contextvars import copy_context
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
@@ -29,6 +29,7 @@ from .const import (
     SCANNER_ACTIONS,
     SCANNER_ROUTING,
 )
+from .mqtt_scanner import validate_config, validate_shared_topic
 from .script_events import SCRIPT_OPERATION, SCRIPT_CHAIN, event_options, item_script_action
 from .models import (
     CategoryRecord,
@@ -75,6 +76,14 @@ def _product_text(value: str | None) -> str:
 
 class HaListManagerDatabaseError(Exception):
     """Base class for database errors."""
+
+
+class ProductChipRenameRequired(HaListManagerDatabaseError):
+    """A product rename needs an explicit decision about matching chip names."""
+
+    def __init__(self, old_name: str, new_name: str, count: int):
+        self.confirmation = {"old_name": old_name, "new_name": new_name, "count": count}
+        super().__init__("Product chip rename confirmation required")
 
 
 class DuplicateListNameError(HaListManagerDatabaseError):
@@ -1152,6 +1161,8 @@ class HaListManagerDatabase:
         label_ids: list[str],
         category_ids: list[str] | None = None,
         list_id: str | None = None,
+        rename_matching_chips: bool | None = False,
+        chip_rename_from: str | None = None,
     ) -> ProductRecord:
         """Update a product, retaining labels hidden in an optional list context."""
         return await self._async_run(
@@ -1167,6 +1178,8 @@ class HaListManagerDatabase:
             label_ids,
             category_ids,
             list_id,
+            rename_matching_chips,
+            chip_rename_from,
         )
 
     async def async_delete_product(self, product_id: str) -> None:
@@ -1623,21 +1636,23 @@ class HaListManagerDatabase:
 
     async def async_create_scanner(
         self, *, name: str, address: str, enabled: bool, routing: str,
-        list_id: str | None, action: str | None,
+        list_id: str | None, action: str | None, source_type: str = "eyoyo",
+        mqtt: dict | None = None,
     ) -> ScannerRecord:
         """Create and return a scanner configuration."""
         return await self._async_run(
-            self._create_scanner, name, address, enabled, routing, list_id, action
+            self._create_scanner, name, address, enabled, routing, list_id, action, source_type, mqtt
         )
 
     async def async_update_scanner(
         self, scanner_id: str, *, name: str, address: str, enabled: bool,
-        routing: str, list_id: str | None, action: str | None,
+        routing: str, list_id: str | None, action: str | None, source_type: str = "eyoyo",
+        mqtt: dict | None = None,
     ) -> ScannerRecord:
         """Update and return a scanner configuration."""
         return await self._async_run(
             self._update_scanner, scanner_id, name, address, enabled, routing,
-            list_id, action,
+            list_id, action, source_type, mqtt,
         )
 
     async def async_delete_scanner(self, scanner_id: str) -> None:
@@ -1654,9 +1669,110 @@ class HaListManagerDatabase:
         """Persist the single active scanner target."""
         return await self._async_run(self._set_scanner_target, list_id, action)
 
+    async def async_set_product_scanner_target(self) -> ScannerTargetRecord:
+        return await self._async_run(self._set_product_scanner_target)
+
+    async def async_resolve_product_scan(self, scan_id, product_id, details):
+        return await self._async_run(self._resolve_product_scan, scan_id, product_id, details)
+
     async def async_clear_scanner_target(self) -> None:
         """Clear the active scanner target."""
         await self._async_run(self._clear_scanner_target)
+
+    async def async_preview_shopping_scan(self, list_id, ean):
+        return await self._async_run(self._preview_shopping_scan, list_id, ean)
+
+    def _preview_shopping_scan(self, list_id, ean):
+        with self._connect() as connection:
+            target = self._require_scanner_list(connection, list_id, "add")
+            if target["list_type"] != "shopping":
+                raise ValueError(localized_text("scan.shopping_required"))
+            row = connection.execute("SELECT * FROM products WHERE ean=?", (ean,)).fetchone()
+            if row is None:
+                return {"product": None, "existing": False}
+            product = self._product_record_from_row(row,
+                self._labels_for(connection,"product_labels","product_id",row["id"],list_id),
+                self._product_category_assignments(connection,row["id"]))
+            existing = connection.execute("SELECT 1 FROM list_items WHERE list_id=? AND product_id=?",(list_id,row["id"])).fetchone()
+            return {"product": product.as_dict(), "existing": existing is not None}
+
+    async def async_add_shopping_scan(self, scan_id, list_id, product_id, quantity,
+                                     scanner_id, scanner_name, address, source,
+                                     category_id=None, category=None, item_data=None, product_data=None):
+        return await self._async_run(self._add_shopping_scan, scan_id, list_id,
+            product_id, quantity, scanner_id, scanner_name, address, source, category_id, category, item_data, product_data)
+
+    def _add_shopping_scan(self, scan_id, list_id, product_id, quantity,
+                           scanner_id, scanner_name, address, source, category_id, category, item_data=None, product_data=None):
+        now = self._now()
+        before = None
+        product_created = False
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            target = self._require_scanner_list(connection, list_id, "add")
+            if target["list_type"] != "shopping":
+                raise ValueError(localized_text("scan.shopping_required"))
+            previous = connection.execute("SELECT * FROM scan_history WHERE id=?", (scan_id,)).fetchone()
+            if previous:
+                return {"history": self._scan_history_from_row(previous).as_dict(), "duplicate": True}
+            if product_id is None and product_data:
+                row = connection.execute("SELECT id FROM products WHERE ean=?", (product_data["ean"],)).fetchone()
+                if row:
+                    product_id = row["id"]
+                else:
+                    created = self._create_product(product_data["ean"], product_data["name"],
+                        product_data.get("original_name") or product_data["name"], product_data.get("brand"),
+                        product_data.get("package_quantity"), None, product_data.get("image_url"),
+                        product_data.get("source", "manual"), item_data["label_ids"], [], connection=connection)
+                    product_id = created.id
+                    product_created = True
+            product = connection.execute("SELECT * FROM products WHERE id=?", (product_id,)).fetchone()
+            if product is None:
+                raise ProductNotFoundError(product_id)
+            if type(quantity) is not int or not 1 <= quantity <= 1000000:
+                raise ValueError(localized_text("backend.quantity_range"))
+            existing = connection.execute(
+                "SELECT * FROM list_items WHERE list_id=? AND product_id=? "
+                "ORDER BY completed,position,id LIMIT 1", (list_id, product_id)
+            ).fetchone()
+            if existing:
+                before = self._item_record_from_row(existing, self._labels_for(
+                    connection, "list_item_labels", "item_id", existing["id"], list_id))
+                item_id = existing["id"]
+                if existing["quantity"] + quantity > 1000000:
+                    raise ValueError(localized_text("backend.quantity_range"))
+                connection.execute("UPDATE list_items SET quantity=quantity+?,completed=0,updated_at=? WHERE id=?",
+                                   (quantity, now, item_id))
+            else:
+                if item_data is None and category_id is None and category is None:
+                    category_id, category = self._resolve_product_category_for_list(connection, product_id, list_id)
+                if item_data is None and category_id is None and category is None:
+                    category_id, category = self._resolve_category_rule_for_list(connection, list_id, product["name"])
+                category_id, category = self._resolve_item_category(connection, list_id, category_id, category)
+                item_id = str(uuid4())
+                position = connection.execute("SELECT COALESCE(MAX(position),-1)+1 FROM list_items WHERE list_id=?", (list_id,)).fetchone()[0]
+                name = self._format_list_item_name(connection, list_id, (item_data or {}).get("name") or product["name"], product_id)
+                connection.execute(
+                    "INSERT INTO list_items(id,list_id,product_id,name,quantity,category_id,category,completed,position,created_at,updated_at) "
+                    "VALUES(?,?,?,?,?,?,?,0,?,?,?)", (item_id,list_id,product_id,name,quantity,category_id,category,position,now,now))
+                if item_data:
+                    connection.execute("UPDATE list_items SET offer_only=?,description=? WHERE id=?",
+                        (int(bool(item_data.get("offer_only"))), item_data.get("description"), item_id))
+                    if item_data.get("remember_product_category"):
+                        category_id, category = self._remember_item_product_category(connection, list_id, product_id, category_id)
+                        connection.execute("UPDATE list_items SET category_id=?,category=? WHERE id=?", (category_id,category,item_id))
+                    if item_data.get("remember_product_labels"):
+                        self._remember_item_product_labels(connection,list_id,product_id,item_data["label_ids"])
+                labels = self._labels_for(connection, "product_labels", "product_id", product_id, list_id)
+                self._replace_labels(connection, "list_item_labels", "item_id", item_id, item_data["label_ids"] if item_data is not None else [label.id for label in labels])
+            row = connection.execute("SELECT * FROM list_items WHERE id=?", (item_id,)).fetchone()
+            item = self._item_record_from_row(row, self._labels_for(connection, "list_item_labels", "item_id", item_id, list_id))
+            history = self._add_scan_history(scanner_id, scanner_name, address, source,
+                product["ean"], "add", list_id, product_id, product["name"], None, quantity,
+                None, None, "success", localized_text("scan.added", quantity=quantity, name=item.name),
+                history_id=scan_id, connection=connection)
+        return {"history": history.as_dict(), "item": item.as_dict(),
+                "_before": before, "_after": item, "duplicate": False, "product_created": product_created}
 
     async def async_add_scan_history(
         self, *, scanner_id: str | None, scanner_name: str | None,
@@ -1664,14 +1780,14 @@ class HaListManagerDatabase:
         action: str | None, list_id: str | None, product_id: str | None,
         product_name: str | None, inventory_entry_id: str | None,
         quantity: int, stock_before: int | None, stock_after: int | None,
-        status: str, message: str | None,
+        status: str, message: str | None, history_id: str | None = None,
     ) -> ScanHistoryRecord:
         """Append one scan result to the audit log."""
         return await self._async_run(
             self._add_scan_history, scanner_id, scanner_name, scanner_address,
             source, ean, action, list_id, product_id, product_name,
             inventory_entry_id, quantity, stock_before, stock_after, status,
-            message,
+            message, history_id,
         )
 
     async def async_list_scan_history(
@@ -1717,7 +1833,9 @@ class HaListManagerDatabase:
         cancelled = None
         async with async_use_language(self._hass), self._lock:
             self._check_available()
-            if target.__name__ == "_add_dish_to_list":
+            if target.__name__ == "_add_shopping_scan":
+                worker, worker_args = self._scripted_shopping_scan, (target, args)
+            elif target.__name__ == "_add_dish_to_list":
                 worker, worker_args = self._scripted_dish_write, (target, args)
             elif target.__name__ in mutations:
                 worker, worker_args = self._scripted_inventory_write, (target, args)
@@ -1749,6 +1867,8 @@ class HaListManagerDatabase:
                 })
             except Exception:
                 logging.getLogger(__name__).exception("Unable to publish a committed script action")
+        if target.__name__ == "_add_shopping_scan" and not result.get("duplicate"):
+            self._fire_item_mutated(result.pop("_before"), result.pop("_after"))
         if ((target.__name__ == "_accept_alexa_item" and result.get("accepted"))
                 or (target.__name__ == "_apply_alexa_sync_local" and result.get("applied"))):
             # A cancellation cannot undo the SQLite commit. Publish its one
@@ -1760,6 +1880,15 @@ class HaListManagerDatabase:
         if cancelled is not None:
             raise cancelled
         return result
+
+    def _scripted_shopping_scan(self, target, args):
+        result = target(*args)
+        events = []
+        if not result.get("duplicate"):
+            before = result["_before"]
+            events.append(item_script_action(before.as_dict() if before else None,
+                                            result["_after"].as_dict(), "scanner"))
+        return result, events
 
     def _scripted_dish_write(self, target, args):
         before = {record.id: record.as_dict() for record in self._list_items(args[1])}
@@ -1950,7 +2079,7 @@ class HaListManagerDatabase:
                         "The existing database has no supported schema metadata"
                     )
                 version = self._read_schema_version(connection)
-                if version not in (1, 2, 3, 4, 5, DATABASE_SCHEMA_VERSION):
+                if version not in (1, 2, 3, 4, 5, 6, DATABASE_SCHEMA_VERSION):
                     raise UnsupportedSchemaVersionError(
                         f"Database schema {version} is not supported; "
                         f"expected {DATABASE_SCHEMA_VERSION}"
@@ -1987,12 +2116,53 @@ class HaListManagerDatabase:
                     self._create_alexa_outbox_schema(connection)
                 if version < 5:
                     self._create_label_filters_schema(connection)
-                self._create_completed_cleanup_schema(connection)
+                if version < 6:
+                    self._create_completed_cleanup_schema(connection)
+                self._create_mqtt_scanner_schema(connection)
                 connection.execute(
                     "UPDATE schema_metadata SET value = ? WHERE key = 'schema_version'",
                     (str(DATABASE_SCHEMA_VERSION),),
                 )
             self._prune_alexa_tombstones_in(connection, self._now())
+
+    @staticmethod
+    def _create_mqtt_scanner_schema(connection):
+        connection.execute("ALTER TABLE scanners ADD COLUMN source_type TEXT NOT NULL DEFAULT 'eyoyo'")
+        connection.execute("ALTER TABLE scanners ADD COLUMN mqtt_json TEXT")
+        connection.execute("""CREATE TABLE mqtt_scan_receipts (
+            scanner_id TEXT NOT NULL REFERENCES scanners(id) ON DELETE CASCADE,
+            message_id TEXT NOT NULL,
+            received_at TEXT NOT NULL,
+            ean TEXT NOT NULL,
+            finished INTEGER NOT NULL DEFAULT 0 CHECK(finished IN (0, 1)),
+            PRIMARY KEY(scanner_id, message_id)
+        )""")
+
+    async def async_claim_mqtt_scan(self, scanner_id, message_id, ean):
+        return await self._async_run(self._claim_mqtt_scan, scanner_id, message_id, ean)
+
+    async def async_finish_mqtt_scan(self, scanner_id, message_id):
+        await self._async_run(self._finish_mqtt_scan, scanner_id, message_id)
+
+    def _finish_mqtt_scan(self, scanner_id, message_id):
+        with self._connect() as connection:
+            connection.execute("UPDATE mqtt_scan_receipts SET finished=1 WHERE scanner_id=? AND message_id=?", (scanner_id, message_id))
+
+    async def async_interrupted_mqtt_scans(self):
+        return await self._async_run(self._interrupted_mqtt_scans)
+
+    def _interrupted_mqtt_scans(self):
+        with self._connect() as connection:
+            return [dict(row) for row in connection.execute("SELECT * FROM mqtt_scan_receipts WHERE finished=0")]
+
+    def _claim_mqtt_scan(self, scanner_id, message_id, ean):
+        # Reserve before any inventory side effect. Replays remain suppressed
+        # across reconnects/restarts, including interrupted deliveries.
+        with self._connect() as connection:
+            return connection.execute(
+                "INSERT OR IGNORE INTO mqtt_scan_receipts(scanner_id, message_id, received_at, ean) VALUES (?, ?, ?, ?)",
+                (scanner_id, message_id, self._now(), ean),
+            ).rowcount == 1
 
     @staticmethod
     def _create_completed_cleanup_schema(connection):
@@ -2559,6 +2729,7 @@ CREATE UNIQUE INDEX chips_list_name_unique ON chips(list_id, priority_name) WHER
         self._create_alexa_outbox_schema(connection)
         self._create_label_filters_schema(connection)
         self._create_completed_cleanup_schema(connection)
+        self._create_mqtt_scanner_schema(connection)
 
     @staticmethod
     def _create_label_filters_schema(connection: sqlite3.Connection) -> None:
@@ -5792,6 +5963,7 @@ WHERE registry_entry_id IS NOT NULL;
         source: str,
         label_ids: list[str],
         category_ids: list[str] | None = None,
+        connection: sqlite3.Connection | None = None,
     ) -> ProductRecord:
         now = self._now()
         record = ProductRecord(
@@ -5809,7 +5981,7 @@ WHERE registry_entry_id IS NOT NULL;
             labels=(),
         )
         try:
-            with self._connect() as connection:
+            with (self._connect() if connection is None else nullcontext(connection)) as connection:
                 connection.execute(
                     """
                     INSERT INTO products(
@@ -5865,9 +6037,33 @@ WHERE registry_entry_id IS NOT NULL;
         label_ids: list[str],
         category_ids: list[str] | None,
         list_id: str | None = None,
+        rename_matching_chips: bool | None = False,
+        chip_rename_from: str | None = None,
+        connection: sqlite3.Connection | None = None,
     ) -> ProductRecord:
+        owns_connection = connection is None
         try:
-            with self._connect() as connection:
+            with (self._connect() if owns_connection else nullcontext(connection)) as connection:
+                # Hold the write transaction across the comparison and both updates.
+                if owns_connection:
+                    connection.execute("BEGIN IMMEDIATE")
+                previous = connection.execute("SELECT name FROM products WHERE id=?", (product_id,)).fetchone()
+                if previous is None:
+                    raise ProductNotFoundError(product_id)
+                old_name = previous["name"]
+                matching = connection.execute(
+                    "SELECT COUNT(*) FROM chips WHERE product_id=? AND name=? COLLATE BINARY",
+                    (product_id, old_name),
+                ).fetchone()[0] if old_name != name else 0
+                if matching and (rename_matching_chips is None or
+                                 chip_rename_from is not None and chip_rename_from != old_name):
+                    raise ProductChipRenameRequired(old_name, name, matching)
+                if matching and rename_matching_chips:
+                    connection.execute(
+                        "UPDATE chips SET name=?,priority_name=?,updated_at=? "
+                        "WHERE product_id=? AND name=? COLLATE BINARY",
+                        (name, self._normalize_priority_name(name), self._now(), product_id, old_name),
+                    )
                 cursor = connection.execute(
                     """
                     UPDATE products
@@ -5914,6 +6110,8 @@ WHERE registry_entry_id IS NOT NULL;
         except sqlite3.IntegrityError as error:
             if "products.ean" in str(error) or "products_ean_unique" in str(error):
                 raise DuplicateEANError(ean) from error
+            if "chips" in str(error):
+                raise ValueError(localized_text("products.chip_rename_conflict")) from error
             raise
         return self._product_record_from_row(row, labels, category_assignments)
 
@@ -8592,24 +8790,40 @@ WHERE registry_entry_id IS NOT NULL;
             return
         if list_id is None or action not in SCANNER_ACTIONS:
             raise ValueError(localized_text("backend.fixed_scanner_route_required"))
-        self._require_inventory_list(connection, list_id)
+        self._require_scanner_list(connection, list_id, action)
+
+    @staticmethod
+    def _require_scanner_list(connection, list_id, action):
+        row = connection.execute("SELECT * FROM lists WHERE id=?", (list_id,)).fetchone()
+        if row is None:
+            raise ListNotFoundError(list_id)
+        if not row["enabled"] or row["provider"] != "local" or row["list_type"] not in {"inventory", "shopping"}:
+            raise ValueError(localized_text("scan.target_required"))
+        if row["list_type"] == "shopping" and action != "add":
+            raise ValueError(localized_text("scan.shopping_add_only"))
+        return row
 
     def _create_scanner(
         self, name: str, address: str, enabled: bool, routing: str,
-        list_id: str | None, action: str | None,
+        list_id: str | None, action: str | None, source_type: str = "eyoyo",
+        mqtt: dict | None = None,
     ) -> ScannerRecord:
         now = self._now()
         try:
             with self._connect() as connection:
+                connection.execute("BEGIN IMMEDIATE")
                 self._validate_scanner_route(connection, routing, list_id, action)
                 scanner_id = str(uuid4())
+                mqtt = self._validate_scanner_source(connection, scanner_id, source_type, mqtt)
+                if source_type == "mqtt":
+                    address = "mqtt:" + scanner_id
                 connection.execute(
                     """INSERT INTO scanners(
                         id, name, address, enabled, routing, list_id, action,
-                        created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        created_at, updated_at, source_type, mqtt_json
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (scanner_id, name, address, int(enabled), routing, list_id,
-                     action, now, now),
+                     action, now, now, source_type, json.dumps(mqtt) if mqtt else None),
                 )
                 row = connection.execute(
                     "SELECT * FROM scanners WHERE id = ?", (scanner_id,)
@@ -8622,17 +8836,22 @@ WHERE registry_entry_id IS NOT NULL;
 
     def _update_scanner(
         self, scanner_id: str, name: str, address: str, enabled: bool,
-        routing: str, list_id: str | None, action: str | None,
+        routing: str, list_id: str | None, action: str | None, source_type: str = "eyoyo",
+        mqtt: dict | None = None,
     ) -> ScannerRecord:
         try:
             with self._connect() as connection:
+                connection.execute("BEGIN IMMEDIATE")
                 self._validate_scanner_route(connection, routing, list_id, action)
+                mqtt = self._validate_scanner_source(connection, scanner_id, source_type, mqtt)
+                if source_type == "mqtt":
+                    address = "mqtt:" + scanner_id
                 cursor = connection.execute(
                     """UPDATE scanners
                     SET name = ?, address = ?, enabled = ?, routing = ?,
-                        list_id = ?, action = ?, updated_at = ? WHERE id = ?""",
+                        list_id = ?, action = ?, updated_at = ?, source_type = ?, mqtt_json = ? WHERE id = ?""",
                     (name, address, int(enabled), routing, list_id, action,
-                     self._now(), scanner_id),
+                     self._now(), source_type, json.dumps(mqtt) if mqtt else None, scanner_id),
                 )
                 if cursor.rowcount != 1:
                     raise ScannerNotFoundError(scanner_id)
@@ -8645,6 +8864,19 @@ WHERE registry_entry_id IS NOT NULL;
             raise
         return self._scanner_record_from_row(row)
 
+    @staticmethod
+    def _validate_scanner_source(connection, scanner_id, source_type, config):
+        if source_type not in {"eyoyo", "mqtt"}:
+            raise ValueError(localized_text("mqtt.source_invalid"))
+        if source_type != "mqtt":
+            return None
+        config = validate_config(config)
+        peers = [json.loads(row[0]) for row in connection.execute(
+            "SELECT mqtt_json FROM scanners WHERE source_type='mqtt' AND id != ?", (scanner_id,)
+        )]
+        validate_shared_topic(config, peers)
+        return config
+
     def _delete_scanner(self, scanner_id: str) -> None:
         with self._connect() as connection:
             cursor = connection.execute("DELETE FROM scanners WHERE id = ?", (scanner_id,))
@@ -8653,6 +8885,11 @@ WHERE registry_entry_id IS NOT NULL;
 
     def _get_scanner_target(self) -> ScannerTargetRecord | None:
         with self._connect() as connection:
+            product_target = connection.execute(
+                "SELECT value FROM schema_metadata WHERE key='scanner_product_target'"
+            ).fetchone()
+            if product_target:
+                return ScannerTargetRecord(None, "product", product_target["value"])
             row = connection.execute(
                 "SELECT list_id, action, updated_at FROM scanner_target WHERE singleton = 1"
             ).fetchone()
@@ -8663,7 +8900,8 @@ WHERE registry_entry_id IS NOT NULL;
             raise ValueError(localized_text("backend.scanner_action_unsupported", action=action))
         now = self._now()
         with self._connect() as connection:
-            self._require_inventory_list(connection, list_id)
+            self._require_scanner_list(connection, list_id, action)
+            connection.execute("DELETE FROM schema_metadata WHERE key='scanner_product_target'")
             connection.execute(
                 """INSERT INTO scanner_target(singleton, list_id, action, updated_at)
                 VALUES (1, ?, ?, ?)
@@ -8677,9 +8915,38 @@ WHERE registry_entry_id IS NOT NULL;
             ).fetchone()
         return self._scanner_target_from_row(row)
 
+    def _set_product_scanner_target(self) -> ScannerTargetRecord:
+        now = self._now()
+        with self._connect() as connection:
+            connection.execute("DELETE FROM scanner_target WHERE singleton = 1")
+            # The active backend destination has no list FK. Keep its marker in
+            # the existing metadata store rather than inventing a hidden list.
+            connection.execute(
+                "INSERT INTO schema_metadata(key,value) VALUES('scanner_product_target',?) "
+                "ON CONFLICT(key) DO UPDATE SET value=excluded.value", (now,)
+            )
+        return ScannerTargetRecord(None, "product", now)
+
     def _clear_scanner_target(self) -> None:
         with self._connect() as connection:
             connection.execute("DELETE FROM scanner_target WHERE singleton = 1")
+            connection.execute("DELETE FROM schema_metadata WHERE key='scanner_product_target'")
+
+    def _resolve_product_scan(self, scan_id, product_id, details):
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            scan = connection.execute("SELECT * FROM scan_history WHERE id=?", (scan_id,)).fetchone()
+            if scan is None or scan["action"] != "product" or scan["status"] not in {"queued", "offered", "needs_input"}:
+                raise ValueError(localized_text("backend.scan_already_handled"))
+            if product_id:
+                product = self._update_product(product_id, **details, connection=connection)
+            else:
+                product = self._create_product(**details, connection=connection)
+            connection.execute(
+                "UPDATE scan_history SET product_id=?,product_name=?,status='resolved',message=NULL WHERE id=?",
+                (product.id, product.name, scan_id),
+            )
+        return product
 
     def _add_scan_history(
         self, scanner_id: str | None, scanner_name: str | None,
@@ -8687,10 +8954,11 @@ WHERE registry_entry_id IS NOT NULL;
         action: str | None, list_id: str | None, product_id: str | None,
         product_name: str | None, inventory_entry_id: str | None,
         quantity: int, stock_before: int | None, stock_after: int | None,
-        status: str, message: str | None,
+        status: str, message: str | None, history_id: str | None = None,
+        connection=None,
     ) -> ScanHistoryRecord:
         record = ScanHistoryRecord(
-            id=str(uuid4()), scanned_at=self._now(), scanner_id=scanner_id,
+            id=history_id or str(uuid4()), scanned_at=self._now(), scanner_id=scanner_id,
             scanner_name=scanner_name, scanner_address=scanner_address,
             source=source, ean=ean, action=action, list_id=list_id,
             product_id=product_id, product_name=product_name,
@@ -8698,7 +8966,7 @@ WHERE registry_entry_id IS NOT NULL;
             stock_before=stock_before, stock_after=stock_after,
             status=status, message=message,
         )
-        with self._connect() as connection:
+        with (self._connect() if connection is None else nullcontext(connection)) as connection:
             connection.execute(
                 """INSERT INTO scan_history(
                     id, scanned_at, scanner_id, scanner_name, scanner_address,
@@ -9591,6 +9859,8 @@ WHERE registry_entry_id IS NOT NULL;
             enabled=bool(row["enabled"]), routing=row["routing"],
             list_id=row["list_id"], action=row["action"],
             created_at=row["created_at"], updated_at=row["updated_at"],
+            source_type=row["source_type"],
+            mqtt=json.loads(row["mqtt_json"]) if row["mqtt_json"] else None,
         )
 
     @staticmethod

@@ -59,6 +59,7 @@ from .database import (
     ListNotFoundError,
     NotificationProfileNotFoundError,
     ProductNotFoundError,
+    ProductChipRenameRequired,
     DuplicateScannerAddressError,
     ScannerNotFoundError,
     ScopeChangeConfirmationRequired,
@@ -354,6 +355,9 @@ def async_register_websocket_commands(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, websocket_create_inventory_group)
     websocket_api.async_register_command(hass, websocket_update_inventory_group)
     websocket_api.async_register_command(hass, websocket_delete_inventory_group)
+    websocket_api.async_register_command(hass, websocket_camera_scan)
+    websocket_api.async_register_command(hass, websocket_product_camera_scan)
+    websocket_api.async_register_command(hass, websocket_product_scanner_target)
     websocket_api.async_register_command(hass, websocket_list_scanners)
     websocket_api.async_register_command(hass, websocket_create_scanner)
     websocket_api.async_register_command(hass, websocket_update_scanner)
@@ -1976,9 +1980,22 @@ async def websocket_lookup_product(
     )
 
 
+async def _save_product_request(hass, connection, msg, product_id=None, **details):
+    runtime = _runtime(hass)
+    if msg.get("scan_id"):
+        return await runtime.scanner.async_resolve_product_scan(
+            msg["scan_id"], _clean_scan_session(msg.get("session_id", "")), connection,
+            product_id=product_id, **details)
+    if product_id is not None:
+        return await runtime.database.async_update_product(product_id, **details)
+    return await runtime.database.async_create_product(**details)
+
+
 @localized_command(
     {
         probatio.Required("type"): f"{DOMAIN}/products/create",
+        probatio.Optional("scan_id"): str,
+        probatio.Optional("session_id"): str,
         probatio.Optional("ean"): probatio.Any(str, None),
         probatio.Required("name"): str,
         probatio.Optional("original_name"): probatio.Any(str, None),
@@ -1996,8 +2013,11 @@ async def websocket_create_product(
     msg: dict[str, Any],
 ) -> None:
     """Create a product."""
+    if msg.get("scan_id") and not connection.user.is_admin:
+        _send_error(connection, msg["id"], websocket_api.ERR_UNAUTHORIZED, localized_text("errors.unauthorized"))
+        return
     try:
-        product = await _runtime(hass).database.async_create_product(
+        product = await _save_product_request(hass, connection, msg,
             ean=_clean_ean(msg.get("ean")),
             name=_clean_text(msg["name"], maximum=200, required=True),
             original_name=_clean_text(
@@ -2031,8 +2051,13 @@ async def websocket_create_product(
 @localized_command(
     {
         probatio.Required("type"): f"{DOMAIN}/products/update",
+        probatio.Optional("scan_id"): str,
+        probatio.Optional("session_id"): str,
         probatio.Required("product_id"): str,
         probatio.Optional("list_id"): str,
+        probatio.Optional("confirm_chip_rename"): bool,
+        probatio.Optional("rename_matching_chips"): bool,
+        probatio.Optional("chip_rename_from"): str,
         probatio.Optional("ean"): probatio.Any(str, None),
         probatio.Required("name"): str,
         probatio.Optional("original_name"): probatio.Any(str, None),
@@ -2050,9 +2075,14 @@ async def websocket_update_product(
     msg: dict[str, Any],
 ) -> None:
     """Update a product."""
+    if msg.get("scan_id") and not connection.user.is_admin:
+        _send_error(connection, msg["id"], websocket_api.ERR_UNAUTHORIZED, localized_text("errors.unauthorized"))
+        return
     try:
-        product = await _runtime(hass).database.async_update_product(
+        product = await _save_product_request(hass, connection, msg,
             msg["product_id"],
+            rename_matching_chips=msg.get("rename_matching_chips", None if msg.get("confirm_chip_rename") else False),
+            chip_rename_from=msg.get("chip_rename_from"),
             ean=_clean_ean(msg.get("ean")),
             name=_clean_text(msg["name"], maximum=200, required=True),
             original_name=_clean_text(
@@ -2071,6 +2101,9 @@ async def websocket_update_product(
                 if "category_ids" in msg else None
             ),
         )
+    except ProductChipRenameRequired as error:
+        connection.send_result(msg["id"], {"chip_rename_confirmation": error.confirmation})
+        return
     except ValueError as error:
         _send_input_error(connection, msg, error)
         return
@@ -4306,12 +4339,92 @@ def _scanner_route_values(msg: dict[str, Any]) -> tuple[str, str | None, str | N
 
 
 @websocket_api.require_admin
+@localized_command({
+    probatio.Required("type"): f"{DOMAIN}/scanner/products/camera",
+    probatio.Required("ean"): str,
+    probatio.Required("request_id"): str,
+})
+async def websocket_product_camera_scan(hass, connection, msg):
+    from uuid import UUID, uuid5, NAMESPACE_URL
+    try:
+        request_id = str(UUID(msg["request_id"]))
+        scan_id = str(uuid5(NAMESPACE_URL, f"ha-list-manager:product-camera:{connection.user.id}:{request_id}"))
+        result = await _runtime(hass).scanner.async_queue_product_scan(
+            _clean_ean(msg["ean"]), scan_id=scan_id)
+    except ValueError as error:
+        _send_input_error(connection, msg, error)
+        return
+    connection.send_result(msg["id"], result)
+
+
+@websocket_api.require_admin
+@localized_command({probatio.Required("type"): f"{DOMAIN}/scanner/products/target/set"})
+async def websocket_product_scanner_target(hass, connection, msg):
+    target = await _runtime(hass).scanner.async_set_product_target()
+    connection.send_result(msg["id"], {"target": target.as_dict()})
+
+
+@localized_command({
+    probatio.Required("type"): f"{DOMAIN}/scanner/camera",
+    probatio.Required("list_id"): str,
+    probatio.Required("ean"): str,
+    probatio.Required("request_id"): str,
+    probatio.Optional("quantity", default=1): int,
+    probatio.Optional("confirm", default=False): bool,
+    probatio.Optional("name"): str,
+    probatio.Optional("description"): probatio.Any(str,None),
+    probatio.Optional("category_id"): probatio.Any(str,None),
+    probatio.Optional("category"): probatio.Any(str,None),
+    probatio.Optional("label_ids", default=[]): [str],
+    probatio.Optional("offer_only", default=False): bool,
+    probatio.Optional("remember_product_category", default=False): bool,
+    probatio.Optional("remember_product_labels", default=False): bool,
+    probatio.Optional("brand"): probatio.Any(str,None),
+    probatio.Optional("package_quantity"): probatio.Any(str,None),
+    probatio.Optional("image_url"): probatio.Any(str,None),
+    probatio.Optional("product_source"): probatio.In(["manual","open_food_facts"]),
+})
+async def websocket_camera_scan(hass, connection, msg):
+    try:
+        from uuid import UUID
+        request_id = str(UUID(msg["request_id"]))
+        details = None
+        product_data = None
+        if msg["confirm"]:
+            details = {
+                "name": _clean_text(msg.get("name"), maximum=200, required=True),
+                "description": _clean_text(msg.get("description"), maximum=2000, required=False),
+                "category_id": _clean_text(msg.get("category_id"),maximum=64,required=False),
+                "category": _clean_text(msg.get("category"),maximum=100,required=False),
+                "label_ids": _clean_label_ids(msg["label_ids"]),
+                "offer_only": msg["offer_only"],
+                "remember_product_category": msg["remember_product_category"],
+                "remember_product_labels": msg["remember_product_labels"],
+            }
+            product_data = {"name": details["name"],
+                "brand": _clean_text(msg.get("brand"),maximum=200,required=False),
+                "package_quantity": _clean_text(msg.get("package_quantity"),maximum=100,required=False),
+                "image_url": _clean_text(msg.get("image_url"),maximum=1000,required=False),
+                "source": msg.get("product_source","manual"),
+            }
+        result = await _runtime(hass).scanner.async_camera_scan(
+            msg["list_id"], msg["ean"], request_id, connection.user.id,
+            _clean_quantity(msg["quantity"]), confirm=msg["confirm"],
+            item_data=details, product_data=product_data)
+    except (ValueError, ListNotFoundError) as error:
+        _send_input_error(connection, msg, error)
+        return
+    connection.send_result(msg["id"], result)
+
+
+@websocket_api.require_admin
 @localized_command(
     {probatio.Required("type"): f"{DOMAIN}/scanners/list"}
 )
 async def websocket_list_scanners(hass, connection, msg) -> None:
     records = await _runtime(hass).database.async_list_scanners()
-    connection.send_result(msg["id"], {"scanners": [item.as_dict() for item in records]})
+    manager = _runtime(hass).scanner
+    connection.send_result(msg["id"], {"scanners": [item.as_dict() for item in records], "mqtt_error": manager.mqtt_error if manager else None})
 
 
 @websocket_api.require_admin
@@ -4319,7 +4432,9 @@ async def websocket_list_scanners(hass, connection, msg) -> None:
     {
         probatio.Required("type"): f"{DOMAIN}/scanners/create",
         probatio.Required("name"): str,
-        probatio.Required("address"): str,
+        probatio.Optional("address", default=""): str,
+        probatio.Optional("source_type", default="eyoyo"): probatio.In(("eyoyo", "mqtt")),
+        probatio.Optional("mqtt"): probatio.Any(dict, None),
         probatio.Required("enabled"): bool,
         probatio.Required("routing"): probatio.In(SCANNER_ROUTING),
         probatio.Optional("list_id"): probatio.Any(str, None),
@@ -4331,7 +4446,8 @@ async def websocket_create_scanner(hass, connection, msg) -> None:
         routing, list_id, action = _scanner_route_values(msg)
         record = await _runtime(hass).database.async_create_scanner(
             name=_clean_text(msg["name"], maximum=100, required=True),
-            address=_clean_scanner_address(msg["address"]),
+            address=_clean_scanner_address(msg["address"]) if msg["source_type"] == "eyoyo" else "",
+            source_type=msg["source_type"], mqtt=msg.get("mqtt"),
             enabled=msg["enabled"], routing=routing,
             list_id=list_id, action=action,
         )
@@ -4344,6 +4460,8 @@ async def websocket_create_scanner(hass, connection, msg) -> None:
     except (ListNotFoundError, InventoryListRequiredError):
         _send_error(connection, msg["id"], websocket_api.ERR_NOT_FOUND, localized_text("errors.inventory_list_missing"))
         return
+    if _runtime(hass).scanner is not None:
+        await _runtime(hass).scanner.async_refresh_mqtt()
     connection.send_result(msg["id"], {"scanner": record.as_dict()})
 
 
@@ -4353,7 +4471,9 @@ async def websocket_create_scanner(hass, connection, msg) -> None:
         probatio.Required("type"): f"{DOMAIN}/scanners/update",
         probatio.Required("scanner_id"): str,
         probatio.Required("name"): str,
-        probatio.Required("address"): str,
+        probatio.Optional("address", default=""): str,
+        probatio.Optional("source_type", default="eyoyo"): probatio.In(("eyoyo", "mqtt")),
+        probatio.Optional("mqtt"): probatio.Any(dict, None),
         probatio.Required("enabled"): bool,
         probatio.Required("routing"): probatio.In(SCANNER_ROUTING),
         probatio.Optional("list_id"): probatio.Any(str, None),
@@ -4366,7 +4486,8 @@ async def websocket_update_scanner(hass, connection, msg) -> None:
         record = await _runtime(hass).database.async_update_scanner(
             msg["scanner_id"],
             name=_clean_text(msg["name"], maximum=100, required=True),
-            address=_clean_scanner_address(msg["address"]),
+            address=_clean_scanner_address(msg["address"]) if msg["source_type"] == "eyoyo" else "",
+            source_type=msg["source_type"], mqtt=msg.get("mqtt"),
             enabled=msg["enabled"], routing=routing,
             list_id=list_id, action=action,
         )
@@ -4379,6 +4500,8 @@ async def websocket_update_scanner(hass, connection, msg) -> None:
     except (ScannerNotFoundError, ListNotFoundError, InventoryListRequiredError):
         _send_error(connection, msg["id"], websocket_api.ERR_NOT_FOUND, localized_text("errors.scanner_inventory_missing"))
         return
+    if _runtime(hass).scanner is not None:
+        await _runtime(hass).scanner.async_refresh_mqtt()
     connection.send_result(msg["id"], {"scanner": record.as_dict()})
 
 
@@ -4395,6 +4518,8 @@ async def websocket_delete_scanner(hass, connection, msg) -> None:
     except ScannerNotFoundError:
         _send_error(connection, msg["id"], websocket_api.ERR_NOT_FOUND, localized_text("errors.scanner_not_found"))
         return
+    if _runtime(hass).scanner is not None:
+        await _runtime(hass).scanner.async_refresh_mqtt()
     connection.send_result(msg["id"])
 
 
@@ -4418,6 +4543,9 @@ async def websocket_set_scanner_target(hass, connection, msg) -> None:
         target = await _runtime(hass).scanner.async_set_target(
             msg["list_id"], msg["action"]
         )
+    except ValueError as error:
+        _send_input_error(connection, msg, error)
+        return
     except (ListNotFoundError, InventoryListRequiredError):
         _send_error(connection, msg["id"], websocket_api.ERR_NOT_FOUND, localized_text("errors.inventory_list_missing"))
         return
@@ -4428,6 +4556,10 @@ async def websocket_set_scanner_target(hass, connection, msg) -> None:
     {probatio.Required("type"): f"{DOMAIN}/scanner/target/clear"}
 )
 async def websocket_clear_scanner_target(hass, connection, msg) -> None:
+    target = await _runtime(hass).database.async_get_scanner_target()
+    if target and target.action == "product" and not connection.user.is_admin:
+        _send_error(connection, msg["id"], websocket_api.ERR_UNAUTHORIZED, localized_text("errors.unauthorized"))
+        return
     await _runtime(hass).scanner.async_clear_target()
     connection.send_result(msg["id"], {"target": None})
 
@@ -4505,7 +4637,7 @@ async def websocket_pending_scans(hass, connection, msg) -> None:
     }
 )
 async def websocket_pending_scans_for_list(hass, connection, msg) -> None:
-    """Return actionable scans for one inventory card."""
+    """Return actionable scans for one inventory or shopping list."""
     scans = await _runtime(hass).scanner.async_pending_scans(msg["list_id"])
     connection.send_result(msg["id"], {"scans": scans})
 
@@ -4518,11 +4650,23 @@ async def websocket_pending_scans_for_list(hass, connection, msg) -> None:
 )
 async def websocket_hold_pending_scan(hass, connection, msg) -> None:
     """Legacy view notification; opening a scan never claims its editor slot."""
+    if not await _require_product_scan_admin(hass, connection, msg):
+        return
     record = await _runtime(hass).database.async_get_scan_history_record(msg["scan_id"])
     if record is None or record.status not in {"queued", "offered", "needs_input"}:
         _send_error(connection, msg["id"], websocket_api.ERR_NOT_FOUND, localized_text("errors.offered_scan_missing"))
         return
     connection.send_result(msg["id"], {"scan": record.as_dict()})
+
+
+async def _require_product_scan_admin(hass, connection, msg):
+    if connection.user.is_admin:
+        return True
+    record = await _runtime(hass).database.async_get_scan_history_record(msg["scan_id"])
+    if record and record.action == "product":
+        _send_error(connection, msg["id"], websocket_api.ERR_UNAUTHORIZED, localized_text("errors.unauthorized"))
+        return False
+    return True
 
 
 def _clean_scan_session(value: str) -> str:
@@ -4536,6 +4680,8 @@ def _clean_scan_session(value: str) -> str:
     probatio.Optional("open", default=True): bool,
 })
 async def websocket_view_pending_scan(hass, connection, msg) -> None:
+    if not await _require_product_scan_admin(hass, connection, msg):
+        return
     try:
         record = await _runtime(hass).scanner.async_view_pending_scan(
             msg["scan_id"], _clean_scan_session(msg["session_id"]), connection, msg["open"])
@@ -4551,6 +4697,8 @@ async def websocket_view_pending_scan(hass, connection, msg) -> None:
     probatio.Required("session_id"): str,
 })
 async def websocket_edit_pending_scan(hass, connection, msg) -> None:
+    if not await _require_product_scan_admin(hass, connection, msg):
+        return
     try:
         record = await _runtime(hass).scanner.async_edit_pending_scan(
             msg["scan_id"], _clean_scan_session(msg["session_id"]), connection)
@@ -4566,6 +4714,8 @@ async def websocket_edit_pending_scan(hass, connection, msg) -> None:
     probatio.Required("session_id"): str,
 })
 async def websocket_release_pending_scan(hass, connection, msg) -> None:
+    if not await _require_product_scan_admin(hass, connection, msg):
+        return
     try:
         record = await _runtime(hass).scanner.async_release_pending_scan(
             msg["scan_id"], _clean_scan_session(msg["session_id"]), connection)
@@ -4581,6 +4731,8 @@ async def websocket_release_pending_scan(hass, connection, msg) -> None:
     probatio.Required("session_id"): str,
 })
 async def websocket_discard_pending_scan(hass, connection, msg) -> None:
+    if not await _require_product_scan_admin(hass, connection, msg):
+        return
     try:
         record = await _runtime(hass).scanner.async_discard_pending_scan(
             msg["scan_id"], session_id=_clean_scan_session(msg["session_id"]), connection=connection)
@@ -4613,6 +4765,8 @@ async def websocket_discard_pending_scan(hass, connection, msg) -> None:
 )
 async def websocket_resolve_pending_scan(hass, connection, msg) -> None:
     """Complete one pending scan from a card or the administration panel."""
+    if not await _require_product_scan_admin(hass, connection, msg):
+        return
     try:
         corrected_stock = _clean_stock(msg.get("corrected_stock"), optional=True)
         product_data = None

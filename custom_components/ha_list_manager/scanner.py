@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import logging
+from hashlib import sha256
 from contextlib import asynccontextmanager
 from dataclasses import replace
 from time import monotonic
-from uuid import uuid4
+from uuid import uuid4, uuid5, NAMESPACE_URL
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
@@ -29,8 +31,12 @@ from .database import (
     HaListManagerDatabase,
 )
 from .models import ScanHistoryRecord, ScannerRecord
+from .mqtt_scanner import extract_scan
+
 from .open_facts import OpenFactsLookupError, async_lookup_open_facts
 from .script_events import SCRIPT_OPERATION, scanner_operation
+
+_LOGGER = logging.getLogger(__name__)
 
 SCANNER_EVENT = "eyoyo_barcode_scanned"
 INVENTORY_CONTROL_PREFIX = "HA-LM:INVENTORY:"
@@ -86,6 +92,10 @@ class ScannerManager:
         self.database = database
         self.config_entry = config_entry
         self._unsubscribe = None
+        self._mqtt_subscriptions = {}
+        self._mqtt_lock = asyncio.Lock()
+        self._mqtt_events_unsubscribe = None
+        self.mqtt_error = None
         self._scan_views: dict[str, dict[str, dict[str, Any]]] = {}
         self._scan_editors: dict[str, dict[str, Any]] = {}
         self._scan_operations: dict[str, list[Any]] = {}
@@ -101,14 +111,117 @@ class ScannerManager:
     async def async_start(self) -> None:
         """Start the single backend event listener."""
         self._stopped = False
+        # Never blindly replay an interrupted booking: its stock write may have
+        # committed before the power loss. Keep an explicit reviewable history.
+        receipts = await self.database.async_interrupted_mqtt_scans()
+        scanners = await self.database.async_list_scanners() if receipts else []
+        for receipt in receipts:
+            scanner = next((row for row in scanners if row.id == receipt["scanner_id"]), None)
+            await self._history(scanner=scanner, address=scanner.address if scanner else None,
+                source="mqtt", ean=receipt["ean"], action=None, list_id=None,
+                status="error", message=localized_text("mqtt.interrupted"))
+            await self.database.async_finish_mqtt_scan(receipt["scanner_id"], receipt["message_id"])
         if self._unsubscribe is None:
             self._unsubscribe = self.hass.bus.async_listen(
                 SCANNER_EVENT, self._handle_scanner_event
             )
 
+        if self._mqtt_events_unsubscribe is None:
+            self._mqtt_events_unsubscribe = self.hass.bus.async_listen(
+                "component_loaded", self._mqtt_component_loaded
+            )
+        await self.async_refresh_mqtt()
+
+    @callback
+    def _mqtt_component_loaded(self, event):
+        if event.data.get("component") == "mqtt" and not self._stopped:
+            self._track_scan_task(self.async_refresh_mqtt())
+
+    def _track_scan_task(self, coroutine):
+        task = self.hass.async_create_task(coroutine)
+        self._scan_tasks.add(task)
+        task.add_done_callback(self._scan_tasks.discard)
+
+    async def async_refresh_mqtt(self):
+        """Keep one native HA subscription per exact topic, not per dashboard."""
+        async with self._mqtt_lock:
+            if self._stopped:
+                return
+            scanners = [row for row in await self.database.async_list_scanners()
+                        if row.enabled and row.source_type == "mqtt"]
+            topics = {row.mqtt["topic"] for row in scanners}
+            for topic in set(self._mqtt_subscriptions) - topics:
+                self._mqtt_subscriptions.pop(topic)()
+            self.mqtt_error = None
+            if not topics:
+                return
+            try:
+                from homeassistant.components import mqtt
+                if not mqtt.mqtt_config_entry_enabled(self.hass):
+                    self.mqtt_error = "mqtt.unavailable"
+                    return
+                for topic in topics - set(self._mqtt_subscriptions):
+                    self._mqtt_subscriptions[topic] = await mqtt.async_subscribe(
+                        self.hass, topic, self._mqtt_message, qos=1
+                    )
+            except Exception:
+                self.mqtt_error = "mqtt.unavailable"
+                _LOGGER.warning("MQTT scanner subscription unavailable", exc_info=True)
+
+    @callback
+    def _mqtt_message(self, message):
+        if not self._stopped and not message.retain:
+            self._track_scan_task(self.async_process_mqtt(message.topic, message.payload))
+
+    async def async_process_mqtt(self, topic, payload):
+        """Resolve a configured identity and deduplicate before the scan pipeline."""
+        await async_prepare(self.hass)
+        # A single queue also keeps QR mode switches ordered with the next scan.
+        async with self._scan_operation("mqtt-input"):
+            scanners = [row for row in await self.database.async_list_scanners()
+                        if row.enabled and row.source_type == "mqtt" and row.mqtt["topic"] == topic]
+            for scanner in scanners:
+                try:
+                    scan = extract_scan(scanner.mqtt, payload)
+                    if scanner.mqtt["scanner_path"] and scan["scanner"] != scanner.mqtt["scanner_value"]:
+                        continue
+                    if not parse_inventory_control_code(scan["ean"]):
+                        normalize_ean(scan["ean"])
+                    if scan["scan_id"]:
+                        # Topic and identity scope allow the same message ID on
+                        # another physical scanner without suppressing its scan.
+                        identity = sha256((topic + "\0" + (scan["scanner"] or "") + "\0" + scan["scan_id"]).encode()).hexdigest()
+                        if not await self.database.async_claim_mqtt_scan(scanner.id, identity, scan["ean"]):
+                            return
+                    try:
+                        result = await self.async_process_scan(
+                            ean=scan["ean"], scanner_id=scanner.id,
+                            address=scanner.address, source="mqtt",
+                        )
+                    except Exception:
+                        _LOGGER.exception("MQTT scanner processing failed for %s", scanner.id)
+                        result = await self._history(scanner=scanner, address=scanner.address,
+                            source="mqtt", ean=scan["ean"], action=None, list_id=None,
+                            status="error", message=localized_text("mqtt.interrupted"))
+                    if scan["scan_id"]:
+                        await self.database.async_finish_mqtt_scan(scanner.id, identity)
+                    return result
+                except (ValueError, UnicodeError):
+                    # Bad payloads never reach OFF or an inventory booking.
+                    _LOGGER.warning("Invalid MQTT scan for configured scanner %s", scanner.id)
+                    return
+            return None
+
     async def async_stop(self) -> None:
         """Stop new scans and finish bookings before clearing their dialogs."""
         self._stopped = True
+        if self._mqtt_events_unsubscribe is not None:
+            self._mqtt_events_unsubscribe()
+            self._mqtt_events_unsubscribe = None
+        async with self._mqtt_lock:
+            for unsubscribe in self._mqtt_subscriptions.values():
+                unsubscribe()
+            self._mqtt_subscriptions.clear()
         if self._unsubscribe is not None:
             self._unsubscribe()
             self._unsubscribe = None
@@ -360,15 +473,10 @@ class ScannerManager:
         if self._stopped:
             return
         data = event.data or {}
-        task = self.hass.async_create_task(
-            self.async_process_scan(
-                ean=data.get("code"),
-                address=data.get("address"),
-                source=str(data.get("source") or SCANNER_EVENT),
-            )
-        )
-        self._scan_tasks.add(task)
-        task.add_done_callback(self._scan_tasks.discard)
+        self._track_scan_task(self.async_process_scan(
+            ean=data.get("code"), address=data.get("address"),
+            source=str(data.get("source") or SCANNER_EVENT),
+        ))
 
     def _product_name(
         self, original_name: str, brand: str | None, quantity: str | None
@@ -414,6 +522,7 @@ class ScannerManager:
         entry_id: str | None = None, quantity: int = 1,
         stock_before: int | None = None, stock_after: int | None = None,
         status: str, message: str | None, event_extra: dict[str, Any] | None = None,
+        history_id: str | None = None,
     ) -> ScanHistoryRecord:
         history = await self.database.async_add_scan_history(
             scanner_id=scanner.id if scanner else None,
@@ -430,7 +539,7 @@ class ScannerManager:
             stock_before=stock_before,
             stock_after=stock_after,
             status=status,
-            message=message,
+            message=message, history_id=history_id,
         )
         self.hass.bus.async_fire(
             EVENT_SCAN_PROCESSED, {**history.as_dict(), **(event_extra or {})}
@@ -453,6 +562,7 @@ class ScannerManager:
         product_label_ids: list[str] | None = None,
         queue_on_failure: bool = True,
         offer_to_card: bool = True,
+        shopping_scan_id: str | None = None,
     ) -> dict[str, Any]:
         """Resolve and process a real or simulated scan exactly once."""
         await async_prepare(self.hass)
@@ -488,6 +598,13 @@ class ScannerManager:
         target_list_id, target_action = await self._route(scanner, list_id, action)
         if SCRIPT_OPERATION.get() is not None:
             SCRIPT_OPERATION.get()["scan_mode"] = target_action
+        if target_action == "product":
+            if scanner is not None and not scanner.enabled:
+                return {"history": (await self._history(scanner=scanner, address=normalized_address,
+                    source=source, ean=normalized_ean, action="product", list_id=None,
+                    status="ignored", message=localized_text("backend.scanner_unavailable"))).as_dict()}
+            return await self.async_queue_product_scan(normalized_ean, scanner=scanner,
+                address=normalized_address, source=source)
         if not target_list_id or target_action not in SCANNER_ACTIONS:
             history = await self._history(
                 scanner=scanner, address=normalized_address, source=source,
@@ -496,6 +613,25 @@ class ScannerManager:
                 message=localized_text("backend.inventory_target_missing"),
             )
             return {"history": history.as_dict()}
+
+        try:
+            target = await self.database.async_get_list(target_list_id)
+        except ListNotFoundError:
+            target = None
+        if target and target.list_type == "shopping":
+            try:
+                if target_action != "add":
+                    raise ValueError(localized_text("scan.shopping_add_only"))
+                return await self._async_shopping_scan(normalized_ean, target_list_id, quantity,
+                    scanner=scanner, address=normalized_address, source=source,
+                    product_data=product_data, product_label_ids=product_label_ids,
+                    category_id=category_id, category=category, queue_on_failure=queue_on_failure,
+                    scan_id=shopping_scan_id)
+            except (ValueError, ListNotFoundError) as error:
+                history = await self._history(scanner=scanner, address=normalized_address,
+                    source=source, ean=normalized_ean, action=target_action,
+                    list_id=target_list_id, quantity=quantity, status="error", message=str(error))
+                return {"history": history.as_dict()}
 
         try:
             entries = await self.database.async_list_inventory(target_list_id)
@@ -893,7 +1029,9 @@ class ScannerManager:
     ) -> dict[str, Any]:
         """Serialize completion against discard and require the current editor."""
         async with self._scan_operation(scan_id):
-            await self._pending_scan(scan_id)
+            pending = await self._pending_scan(scan_id)
+            if pending.action == "product":
+                raise ValueError(localized_text("backend.scan_already_handled"))
             self._require_scan_editor(scan_id, session_id, connection)
             result = await self._async_apply_pending_scan(scan_id, **details)
             record = await self.database.async_get_scan_history_record(scan_id)
@@ -966,6 +1104,7 @@ class ScannerManager:
                 product_label_ids=product_label_ids,
                 queue_on_failure=False,
                 offer_to_card=False,
+                shopping_scan_id=str(uuid5(NAMESPACE_URL, f"ha-list-manager:queue:{scan_id}")),
             )
             status = result.get("history", {}).get("status")
             if status != "success":
@@ -983,6 +1122,123 @@ class ScannerManager:
                 scan_id, previous_status, pending.message
             )
             raise
+
+    async def async_camera_scan(self, list_id, ean, request_id, user_id, quantity=1,
+                                *, confirm=False, item_data=None, product_data=None):
+        """A retry of one camera capture can never become a second addition."""
+        await async_prepare(self.hass)
+        code = normalize_ean(ean)
+        scan_id = str(uuid5(NAMESPACE_URL, f"ha-list-manager:camera:{user_id}:{request_id}"))
+        async with self._scan_operation(scan_id):
+            previous = await self.database.async_get_scan_history_record(scan_id)
+            if previous:
+                if previous.list_id != list_id or previous.ean != code or previous.quantity != quantity:
+                    raise ValueError(localized_text("scan.request_conflict"))
+                return {"history": previous.as_dict(), "duplicate": True}
+            preview = await self.database.async_preview_shopping_scan(list_id, code)
+            if not confirm and not preview["existing"]:
+                product = preview["product"]
+                if product is None:
+                    try:
+                        lookup = await async_lookup_open_facts(self.hass, code)
+                    except OpenFactsLookupError:
+                        lookup = None
+                    product = {"ean": code, "name": "", "labels": [], **(lookup or {}),
+                               "source": "open_food_facts" if lookup else "manual"}
+                return {"preview": product}
+            if confirm and (not item_data or not item_data.get("name")):
+                raise ValueError(localized_text("scan.missing_name"))
+            token = SCRIPT_OPERATION.set({"source": "scanner", "scanner_source": "camera",
+                "scanner_address": "", "scanner_id": "", "scan_mode": "add",
+                "scan_quantity": quantity, "ean": code})
+            try:
+                return await self._async_shopping_scan(code, list_id, quantity,
+                    scanner=None, address=None, source="camera", scan_id=scan_id,
+                    item_data=item_data if confirm else None, product_data=product_data,
+                    product_label_ids=(item_data or {}).get("label_ids"),
+                    category_id=(item_data or {}).get("category_id"), category=(item_data or {}).get("category"))
+            finally:
+                SCRIPT_OPERATION.reset(token)
+
+    async def _async_shopping_scan(self, ean, list_id, quantity, *, scanner, address,
+        source, scan_id=None, product_data=None, product_label_ids=None,
+        category_id=None, category=None, queue_on_failure=True, item_data=None):
+        target = await self.database.async_get_list(list_id)
+        if target.list_type != "shopping" or target.provider != "local" or not target.enabled:
+            raise ValueError(localized_text("scan.shopping_required"))
+        scan_id = scan_id or str(uuid4())
+        new_product_data = None
+        product = await self.database.async_get_product_by_ean(ean)
+        if product is None:
+            data = product_data
+            if not data or not data.get("name"):
+                try:
+                    data = await async_lookup_open_facts(self.hass, ean)
+                except OpenFactsLookupError:
+                    data = None
+            if not data or not data.get("name"):
+                history = await self._history(scanner=scanner, address=address, source=source,
+                    ean=ean, action="add", list_id=list_id, quantity=quantity,
+                    status="queued" if queue_on_failure else "not_found",
+                    message=localized_text("scan.details_required"), history_id=scan_id,
+                    event_extra={"queued": queue_on_failure})
+                return {"history": history.as_dict()}
+            if item_data is not None:
+                new_product_data = {"ean": ean, **data}
+            else:
+                try:
+                    product = await self.database.async_create_product(ean=ean,
+                        name=data["name"], original_name=data.get("original_name") or data["name"],
+                        brand=data.get("brand"), package_quantity=data.get("package_quantity"),
+                        category=None, image_url=data.get("image_url"),
+                        source=data.get("source", "manual") if product_data else "open_food_facts",
+                        label_ids=list(product_label_ids or []))
+                except DuplicateEANError:
+                    product = await self.database.async_get_product_by_ean(ean)
+        result = await self.database.async_add_shopping_scan(scan_id, list_id, product.id if product else None,
+            quantity, scanner.id if scanner else None, scanner.name if scanner else None,
+            address, source, category_id, category, item_data, new_product_data)
+        if not result.get("duplicate"):
+            if result.get("product_created") or item_data and (item_data.get("remember_product_category") or item_data.get("remember_product_labels")):
+                self.hass.bus.async_fire(EVENT_LISTS_CHANGED, {"list_id": None})
+            self.hass.bus.async_fire(EVENT_ITEMS_CHANGED, {"list_id": list_id})
+            self.hass.bus.async_fire(EVENT_SCAN_PROCESSED, result["history"])
+        return result
+
+    async def async_queue_product_scan(self, ean, *, scanner=None, address=None, source="camera", scan_id=None):
+        """Queue only; even a known product must be reviewed before saving."""
+        ean = normalize_ean(ean)
+        scan_id = scan_id or str(uuid4())
+        async with self._scan_operation(scan_id):
+            previous = await self.database.async_get_scan_history_record(scan_id)
+            if previous:
+                if previous.ean != ean or previous.action != "product":
+                    raise ValueError(localized_text("backend.scan_already_handled"))
+                return {"scan": self._scan_payload(previous), "duplicate": True}
+            product = await self.database.async_get_product_by_ean(ean)
+            record = await self._history(scanner=scanner, address=address, source=source,
+                ean=ean, action="product", list_id=None, product_id=product.id if product else None,
+                product_name=product.name if product else None, status="queued", message=None,
+                history_id=scan_id, event_extra={"queued": True})
+            return {"scan": self._scan_payload(record)}
+
+    async def async_resolve_product_scan(self, scan_id, session_id, connection, product_id=None, **details):
+        async with self._scan_operation(scan_id):
+            record = await self._pending_scan(scan_id)
+            if record.action != "product":
+                raise ValueError(localized_text("backend.scan_already_handled"))
+            self._require_scan_editor(scan_id, session_id, connection)
+            product = await self.database.async_resolve_product_scan(scan_id, product_id, details)
+            self._clear_scan_sessions(scan_id)
+            record = await self.database.async_get_scan_history_record(scan_id)
+            self._emit_scan_update(record)
+            self.hass.bus.async_fire(EVENT_LISTS_CHANGED, {"list_id": None})
+            return product
+
+    async def async_set_product_target(self):
+        target = await self.database.async_set_product_scanner_target()
+        self.hass.bus.async_fire(EVENT_SCANNER_TARGET_CHANGED, target.as_dict())
+        return target
 
     async def async_set_target(self, list_id: str, action: str):
         """Set the one persistent target shared by all active-target scanners."""

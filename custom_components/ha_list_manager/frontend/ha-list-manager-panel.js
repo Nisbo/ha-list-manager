@@ -1,3 +1,4 @@
+import "./ha-list-manager-shopping-scanner.js";
 import "./ha-list-manager-product-editor.js";
 
 // Text is loaded and formatted by Home Assistant from translations/*.json.
@@ -72,7 +73,7 @@ function haListManagerPanelTextRequest(hass, message) {
   return hass.callWS(message.type?.startsWith("ha_list_manager/") ? { ...message, language: haListManagerPanelTextLanguage(hass) } : message);
 }
 
-const PANEL_VERSION = "1.1.0b1";
+const PANEL_VERSION = "1.1.0b2";
 const GROUP_PICKER_RESULT_LIMIT = 100;
 const API = "ha_list_manager";
 const ITEMS_EVENT = "ha_list_manager_items_changed";
@@ -315,6 +316,14 @@ class HaListManagerPanel extends HTMLElement {
   }
 
   disconnectedCallback() {
+    this._shoppingScanOpenToken = null;
+    this._productScanOpenToken = null;
+    this._productCamera?.stop();
+    this._unsubscribeProductTarget?.();
+    this._unsubscribeProductTarget = null;
+    this._productTargetSubscription = null;
+    this._shoppingScanView?.stop();
+    globalThis.HaListManagerProductEditor.cancelRename(this);
     this._unsubscribeAlexa?.();
     this._unsubscribeAlexa = null;
     this._alexaSubscriptionRequested = false;
@@ -380,6 +389,7 @@ class HaListManagerPanel extends HTMLElement {
   }
 
   async _ensureScannerSubscription() {
+    this._ensureProductTargetSubscription();
     if (!this._hass?.connection || this._scannerSubscriptionRequested) return;
     this._scannerSubscriptionRequested = true;
     const token = this._scannerSubscriptionToken = {};
@@ -391,6 +401,128 @@ class HaListManagerPanel extends HTMLElement {
       else unsubscribe();
     } catch (_error) {
       if (this._scannerSubscriptionToken === token) this._scannerSubscriptionRequested = false;
+    }
+  }
+
+  async _ensureProductTargetSubscription() {
+    if (!this._hass?.connection || this._productTargetSubscription) return;
+    const token = this._productTargetSubscription = {};
+    try {
+      const unsubscribe = await this._hass.connection.subscribeEvents(event => {
+        if (!this.isConnected || this._productTargetSubscription !== token) return;
+        this._scannerTarget = event.data?.action ? event.data : null;
+        this._updateProductScanControls();
+      }, "ha_list_manager_scanner_target_changed");
+      if (this.isConnected && this._productTargetSubscription === token) this._unsubscribeProductTarget = unsubscribe;
+      else unsubscribe();
+    } catch (_) { if (this._productTargetSubscription === token) this._productTargetSubscription = null; }
+  }
+
+  _productScans() { return this._pendingScans.filter(scan => scan.action === "product"); }
+
+  _updateProductScanControls() {
+    const active = this._scannerTarget?.action === "product";
+    const target = this.shadowRoot.querySelector("[data-product-scanner-target]");
+    if (target) { target.classList.toggle("scanner-active", active); target.setAttribute("aria-pressed", String(active)); }
+    const queue = this.shadowRoot.querySelector("[data-product-scan-queue]");
+    if (queue) {
+      queue.hidden = !this._productScans().length;
+      queue.querySelector("span").textContent = haListManagerPanelText("product_scan.pending", {count:this._productScans().length}, this._hass);
+    }
+    const rows = this.shadowRoot.querySelector("[data-product-scan-rows]");
+    if (rows) {
+      const markup = this._productScanRowsMarkup();
+      if (rows._scanMarkup !== markup) {
+        const panel = this.shadowRoot.querySelector("[data-dialog-panel]");
+        const scrollTop = panel?.scrollTop;
+        const focused = this.shadowRoot.activeElement;
+        const scanId = focused?.dataset.openProductScan || focused?.dataset.productScanDiscard;
+        const action = focused?.hasAttribute("data-product-scan-discard") ? "productScanDiscard" : "openProductScan";
+        rows.innerHTML = markup;
+        rows._scanMarkup = markup;
+        if (scanId) Array.from(rows.querySelectorAll("button")).find(button => button.dataset[action] === scanId)?.focus({preventScroll:true});
+        if (panel) panel.scrollTop = scrollTop;
+      }
+    }
+  }
+
+  async _toggleProductScannerTarget() {
+    if (this._busy) return;
+    try {
+      const current = await haListManagerPanelTextRequest(this._hass, {type:`${API}/scanner/target/get`});
+      const result = await haListManagerPanelTextRequest(this._hass, {type:`${API}/scanner/${current.target?.action === "product" ? "target/clear" : "products/target/set"}`});
+      this._scannerTarget = result.target || null;
+      this._updateProductScanControls();
+    } catch (error) { this._error = this._formatError(error); this._render(); }
+  }
+
+  async _startProductCamera() {
+    if (this._busy || this._dialog) return;
+    if (!this._productCamera) this._productCamera = new globalThis.HaListManagerCamera({
+      hass: () => this._hass,
+      onCapture: async capture => {
+        try {
+          const result = await haListManagerPanelTextRequest(this._hass, {type:`${API}/scanner/products/camera`, ean:capture.ean, request_id:capture.request_id});
+          if (this.isConnected && this._activeSection === "products" && document.visibilityState === "visible" && result.scan) await this._openPendingScanEditor(result.scan);
+        } catch (error) { this._error = this._formatError(error); this._render(); }
+      },
+      onError: message => {this._error = message; this._render();},
+    });
+    await this._productCamera.open({});
+  }
+
+  _productScanRowsMarkup() {
+    return this._productScans().map(scan => `<div class="product-scan-row"><button class="ha-button" data-open-product-scan="${this._escape(scan.id)}">${this._escape(scan.product_name || scan.ean)}</button><button class="icon-button danger" data-product-scan-discard="${this._escape(scan.id)}" title="${haListManagerPanelText("scanner.discard",{},this._hass)}"><ha-icon icon="mdi:delete-outline"></ha-icon></button></div>`).join("");
+  }
+
+  _renderProductScanQueue() {
+    return `<div class="dialog-backdrop" data-close-dialog><section class="dialog" role="dialog" aria-modal="true" data-dialog-panel>
+      ${this._dialogHeader(haListManagerPanelText("product_scan.queue",{},this._hass))}
+      <div data-product-scan-rows>${this._productScanRowsMarkup()}</div>
+      <div class="dialog-actions"><button class="ha-button" data-cancel-dialog>${haListManagerPanelText("ui.close",{},this._hass)}</button></div>
+    </section></div>`;
+  }
+
+  async _openProductScanEditor(scan) {
+    if (this._productScanOpenToken) return;
+    const token = this._productScanOpenToken = {};
+    const section = this._activeSection;
+    const current = () => this._productScanOpenToken === token && this.isConnected
+      && this._activeSection === section && document.visibilityState === "visible"
+      && !this._finishedScanIds.has(scan.id) && !this._dialog;
+    try {
+      const viewed = await haListManagerPanelTextRequest(this._hass,{type:`${API}/scanner/queue/view`,scan_id:scan.id,session_id:this._scanSessionId,open:true});
+      let pending = viewed.scan;
+      let result;
+      try { result = await haListManagerPanelTextRequest(this._hass,{type:`${API}/products/lookup`,ean:scan.ean}); }
+      catch (error) {
+        if (!["product_not_found", "lookup_unavailable"].includes(error.code)) throw error;
+        result = {product:null};
+      }
+      if (!current()) return;
+      if (!pending.collaboration?.editor_session || pending.collaboration.editor_session === this._scanSessionId) {
+        try { pending = (await haListManagerPanelTextRequest(this._hass,{type:`${API}/scanner/queue/edit`,scan_id:scan.id,session_id:this._scanSessionId})).scan; }
+        catch (_) { pending = (await haListManagerPanelTextRequest(this._hass,{type:`${API}/scanner/queue/view`,scan_id:scan.id,session_id:this._scanSessionId,open:true})).scan; }
+      }
+      if (!current()) return;
+      this._openProductDialog(result.duplicate || null);
+      const dialog = this._dialog;
+      if (!result.duplicate) {
+        const product = result.product || {};
+        Object.assign(dialog.draft, {ean:scan.ean,name:product.name || "",base_name:product.name || "",original_name:product.name || "",brand:product.brand || "",package_quantity:product.package_quantity || "",image_url:product.image_url || ""});
+        this._applyProductNameOptions(false);
+      }
+      dialog.pendingScan = pending;
+      dialog.initialState = this._productDialogState();
+      this._startPendingScanPresence(scan.id);
+      this._render();
+    } catch (error) {
+      if (this._productScanOpenToken === token) {this._error=this._formatError(error);this._render();}
+    } finally {
+      if (!this._pendingScanDialog() || this._pendingScanDialog().pendingScan.id !== scan.id) {
+        haListManagerPanelTextRequest(this._hass,{type:`${API}/scanner/queue/view`,scan_id:scan.id,session_id:this._scanSessionId,open:false}).catch(()=>{});
+      }
+      if (this._productScanOpenToken === token) this._productScanOpenToken = null;
     }
   }
 
@@ -429,11 +561,12 @@ class HaListManagerPanel extends HTMLElement {
       edit.hidden = editing;
       edit.disabled = Boolean(this._busy || dialog.scan_claiming || dialog.pendingScan.collaboration?.editor_session && !editing);
     }
-    const save = this.shadowRoot.querySelector("[data-save-inventory]");
+    const save = this.shadowRoot.querySelector("[data-save-inventory]") || this.shadowRoot.querySelector("[data-save-product]");
     if (save) save.disabled = !editing || this._busy;
   }
 
   _updatePendingScanQueueLabel() {
+    this._updateProductScanControls();
     const tab = this.shadowRoot.querySelector('[data-history-tab="queue"]');
     const text = Array.from(tab?.childNodes || []).find((node) => node.nodeType === 3);
     if (text) text.textContent = haListManagerPanelText("scanner.queue_with_suffix", { p0: this._pendingScans.length ? ` (${this._pendingScans.length})` : "" }, this._hass);
@@ -459,6 +592,7 @@ class HaListManagerPanel extends HTMLElement {
       const dialog = this._pendingScanDialog();
       const matchingConfirmation = this._dialog?.kind === "discard-pending-scan" && this._dialog.scan_id === scan.id;
       if (dialog?.pendingScan.id === scan.id || matchingConfirmation) {
+        globalThis.HaListManagerProductEditor.cancelRename(this);
         this._stopPendingScanPresence(scan.id);
         this._dialog = null;
         this._error = "";
@@ -479,6 +613,8 @@ class HaListManagerPanel extends HTMLElement {
       dialog.scan_sync_error = false;
       if (wasEditing && !this._canEditPendingScan(dialog)) dialog.scan_lease_lost = true;
       this._updatePendingScanControls();
+    } else if (!this._dialog && !this._busy && !this._productScanOpenToken && scan.action === "product" && this._activeSection === "products" && document.visibilityState === "visible" && !scan.collaboration_update) {
+      this._openPendingScanEditor(scan);
     } else if (!this._dialog && this._activeSection === "history" && this._scanHistoryTab === "queue") this._render();
   }
 
@@ -605,6 +741,7 @@ class HaListManagerPanel extends HTMLElement {
       this._settings = settings;
       this._settingsLoaded = true;
       this._scanners = scannerRecords.scanners || [];
+      this._mqttScannerError = scannerRecords.mqtt_error;
       this._scannersLoaded = true;
       this._scannerTarget = scannerTarget.target || null;
       this._pendingScans = pendingScans.scans || [];
@@ -963,6 +1100,7 @@ class HaListManagerPanel extends HTMLElement {
         haListManagerPanelTextRequest(this._hass, { type: `${API}/scanner/queue/list` }),
       ]);
       this._scanners = records.scanners || [];
+      this._mqttScannerError = records.mqtt_error;
       this._scannerTarget = target.target || null;
       this._pendingScans = pending.scans || [];
       this._scannersLoaded = true;
@@ -2008,7 +2146,9 @@ class HaListManagerPanel extends HTMLElement {
     if (this._productsLoading && !this._productsLoaded) content = this._loadingCard(haListManagerPanelText("ui.loading_products", {}, this._hass));
     else if (this._products.length) content = `<ha-card class="list-card product-card">${rows}</ha-card>${this._renderProductPagination()}`;
     else content = `<ha-card class="empty-state"><ha-icon icon="mdi:barcode-off"></ha-icon><h3>${filtered ? haListManagerPanelText("ui.no_product_matches", {}, this._hass) : haListManagerPanelText("ui.no_products", {}, this._hass)}</h3><p>${filtered ? haListManagerPanelText("ui.change_search_or_label_filter", {}, this._hass) : haListManagerPanelText("help.products_independent", {}, this._hass)}</p><button class="ha-button primary" data-add-product><ha-icon icon="mdi:plus"></ha-icon>${haListManagerPanelText("products.create", {}, this._hass)}</button></ha-card>`;
-    return `<section class="content-header with-action"><div class="heading-wrap"><ha-icon icon="mdi:barcode-scan"></ha-icon><div><h2>${haListManagerPanelText("ui.products", {}, this._hass)}</h2><p>${haListManagerPanelText("products.local_data_help", {}, this._hass)}</p></div></div><button class="ha-button primary" data-add-product><ha-icon icon="mdi:plus"></ha-icon>${haListManagerPanelText("products.create", {}, this._hass)}</button></section>
+    return `<section class="content-header with-action"><div class="heading-wrap"><ha-icon icon="mdi:barcode-scan"></ha-icon><div><h2>${haListManagerPanelText("ui.products", {}, this._hass)}</h2><p>${haListManagerPanelText("products.local_data_help", {}, this._hass)}</p></div></div><div class="product-scan-actions"><button class="ha-button" data-product-camera><ha-icon icon="mdi:camera"></ha-icon>${haListManagerPanelText("product_scan.camera",{},this._hass)}</button><button class="ha-button ${this._scannerTarget?.action === "product" ? "scanner-active" : ""}" aria-pressed="${this._scannerTarget?.action === "product"}" data-product-scanner-target><ha-icon icon="mdi:barcode-scan"></ha-icon>${haListManagerPanelText("product_scan.scanner",{},this._hass)}</button><button class="ha-button primary" data-add-product><ha-icon icon="mdi:plus"></ha-icon>${haListManagerPanelText("products.create", {}, this._hass)}</button></div></section>
+      <p class="field-help">${haListManagerPanelText("product_scan.help",{},this._hass)}</p>
+      <button class="ha-button" data-product-scan-queue ${this._productScans().length ? "" : "hidden"}><ha-icon icon="mdi:tray-full"></ha-icon><span>${haListManagerPanelText("product_scan.pending",{count:this._productScans().length},this._hass)}</span></button>
       <div class="product-filters"><div class="search-field"><ha-icon icon="mdi:magnify"></ha-icon><input type="search" data-product-search value="${this._escape(this._productSearch)}" placeholder="${haListManagerPanelText("ui.product_search_fields", {}, this._hass)}"></div><ha-select data-product-label-filter></ha-select></div>
       ${this._inlineError()}${content}`;
   }
@@ -2318,14 +2458,14 @@ class HaListManagerPanel extends HTMLElement {
     if (this._scannersLoading && !this._scannersLoaded) return this._loadingCard(haListManagerPanelText("ui.scanners_loading", {}, this._hass));
     const targetList = this._scannerTarget ? this._findList(this._scannerTarget.list_id) : null;
     const target = this._scannerTarget
-      ? `<div class="active-target"><ha-icon icon="mdi:access-point-check"></ha-icon><div><strong>${this._escape(targetList?.name || haListManagerPanelText("ui.unknown_list", {}, this._hass))}</strong><small>${haListManagerPanelText("ui.active_since", {p0:(this._escape(SCANNER_ACTIONS(this._hass)[this._scannerTarget.action]?.label || this._scannerTarget.action)), p1:(this._escape(this._formatScanTime(this._scannerTarget.updated_at)))}, this._hass)}</small></div><button class="ha-button" type="button" data-clear-scanner-target>${haListManagerPanelText("ui.disable", {}, this._hass)}</button></div>`
+      ? `<div class="active-target"><ha-icon icon="mdi:access-point-check"></ha-icon><div><strong>${this._escape(targetList?.name || haListManagerPanelText(this._scannerTarget.action === "product" ? "product_scan.database" : "ui.unknown_list", {}, this._hass))}</strong><small>${haListManagerPanelText("ui.active_since", {p0:(this._escape(SCANNER_ACTIONS(this._hass)[this._scannerTarget.action]?.label || haListManagerPanelText("product_scan.review_action",{},this._hass))), p1:(this._escape(this._formatScanTime(this._scannerTarget.updated_at)))}, this._hass)}</small></div><button class="ha-button" type="button" data-clear-scanner-target>${haListManagerPanelText("ui.disable", {}, this._hass)}</button></div>`
       : `<div class="active-target inactive"><ha-icon icon="mdi:access-point-off"></ha-icon><div><strong>${haListManagerPanelText("ui.no_card_scan_target", {}, this._hass)}</strong><small>${haListManagerPanelText("help.scanner_dynamic_default", {}, this._hass)}</small></div></div>`;
-    const rows = this._scanners.map((scanner) => `<article class="scanner-row ${scanner.enabled ? "" : "disabled"}"><span class="scanner-icon"><ha-icon icon="mdi:barcode-scan"></ha-icon></span><button type="button" class="scanner-open" data-edit-scanner="${scanner.id}"><strong>${this._escape(scanner.name)}</strong><small>${this._escape(scanner.address)}</small><span>${this._escape(this._scannerRouteText(scanner))}</span></button><span class="scanner-state ${scanner.enabled ? "enabled" : ""}">${scanner.enabled ? haListManagerPanelText("ui.active", {}, this._hass) : haListManagerPanelText("ui.disabled", {}, this._hass)}</span><div class="row-actions"><button class="icon-button" type="button" data-edit-scanner="${scanner.id}" title="${haListManagerPanelText("scanner.edit", {}, this._hass)}"><ha-icon icon="mdi:pencil"></ha-icon></button><button class="icon-button danger" type="button" data-delete-scanner="${scanner.id}" title="${haListManagerPanelText("ui.delete_scanner", {}, this._hass)}"><ha-icon icon="mdi:delete-outline"></ha-icon></button></div></article>`).join("");
+    const rows = this._scanners.map((scanner) => `<article class="scanner-row ${scanner.enabled ? "" : "disabled"}"><span class="scanner-icon"><ha-icon icon="mdi:barcode-scan"></ha-icon></span><button type="button" class="scanner-open" data-edit-scanner="${scanner.id}"><strong>${this._escape(scanner.name)}</strong><small>${this._escape(scanner.source_type === "mqtt" ? `MQTT · ${scanner.mqtt.topic}${scanner.mqtt.scanner_value ? ` · ${scanner.mqtt.scanner_value}` : ""}` : scanner.address)}</small><span>${this._escape(this._scannerRouteText(scanner))}</span></button><span class="scanner-state ${scanner.enabled ? "enabled" : ""}">${scanner.enabled ? haListManagerPanelText("ui.active", {}, this._hass) : haListManagerPanelText("ui.disabled", {}, this._hass)}</span><div class="row-actions"><button class="icon-button" type="button" data-edit-scanner="${scanner.id}" title="${haListManagerPanelText("scanner.edit", {}, this._hass)}"><ha-icon icon="mdi:pencil"></ha-icon></button><button class="icon-button danger" type="button" data-delete-scanner="${scanner.id}" title="${haListManagerPanelText("ui.delete_scanner", {}, this._hass)}"><ha-icon icon="mdi:delete-outline"></ha-icon></button></div></article>`).join("");
     const scannerList = rows ? `<ha-card class="list-card">${rows}</ha-card>` : `<ha-card class="empty-state compact"><ha-icon icon="mdi:barcode-scan"></ha-icon><h3>${haListManagerPanelText("ui.no_scanner_configured", {}, this._hass)}</h3><p>${haListManagerPanelText("help.scanner_simulation_persistent", {}, this._hass)}</p></ha-card>`;
     return `
       <ha-card class="scanner-requirements"><ha-icon icon="mdi:bluetooth-connect"></ha-icon><div><h3>${haListManagerPanelText("scanner.supported_hardware", {}, this._hass)}</h3><p>${haListManagerPanelText("scanner.hardware_requirements", {model: `<strong>${this._escape(haListManagerPanelText("ui.eyoyo_ey_015p", {}, this._hass))}</strong>`}, this._hass)}</p><a class="ha-button" href="https://github.com/lyntoo/eyoyo-ey015p-ble-ha" target="_blank" rel="noopener noreferrer"><ha-icon icon="mdi:github"></ha-icon>${haListManagerPanelText("ui.integration_github", {}, this._hass)}<ha-icon icon="mdi:open-in-new"></ha-icon></a></div></ha-card>
       <ha-card class="scanner-target-card"><div class="section-heading"><div><h3>${haListManagerPanelText("scanner.active_scan_target", {}, this._hass)}</h3><p>${haListManagerPanelText("ui.one_active_inventory_card", {}, this._hass)}</p></div></div>${target}</ha-card>
-      <section class="content-header with-action scanner-heading"><div><h3>${haListManagerPanelText("scanner.configured_scanners", {}, this._hass)}</h3><p>${haListManagerPanelText("help.scanner_mac_address", {}, this._hass)} <code>eyoyo_barcode_scanned</code>.</p></div><button class="ha-button primary" type="button" data-add-scanner><ha-icon icon="mdi:plus"></ha-icon>${haListManagerPanelText("ui.create_scanner", {}, this._hass)}</button></section>${scannerList}`;
+      <section class="content-header with-action scanner-heading"><div><h3>${haListManagerPanelText("scanner.configured_scanners", {}, this._hass)}</h3><p>${haListManagerPanelText("mqtt.overview", {}, this._hass)}</p></div><button class="ha-button primary" type="button" data-add-scanner><ha-icon icon="mdi:plus"></ha-icon>${haListManagerPanelText("ui.create_scanner", {}, this._hass)}</button></section>${scannerList}`;
   }
 
   _renderScannerSimulation() {
@@ -2350,7 +2490,7 @@ class HaListManagerPanel extends HTMLElement {
     if (this._scanHistoryLoading && !this._scanHistoryLoaded) return this._loadingCard(haListManagerPanelText("scanner.loading_history", {}, this._hass));
     const rows = this._scanHistory.map((record) => {
       const list = this._findList(record.list_id);
-      const action = SCANNER_ACTIONS(this._hass)[record.action]?.label || record.action || haListManagerPanelText("ui.no_target", {}, this._hass);
+      const action = SCANNER_ACTIONS(this._hass)[record.action]?.label || (record.action === "product" ? haListManagerPanelText("product_scan.review_action",{},this._hass) : record.action) || haListManagerPanelText("ui.no_target", {}, this._hass);
       const stock = record.stock_before === null || record.stock_after === null ? "" : `<span>${haListManagerPanelText("ui.stock_change", {p0:(record.stock_before), p1:(record.stock_after)}, this._hass)}</span>`;
       const tone = ["success", "resolved"].includes(record.status) ? "success" : ["queued", "offered", "needs_input", "not_found", "processing"].includes(record.status) ? "warning" : ["ignored", "dismissed"].includes(record.status) ? "neutral" : "error";
       return `<article class="history-row"><span class="history-status ${tone}"><ha-icon icon="mdi:${tone === "success" ? "check-circle-outline" : tone === "warning" ? "pencil-clock-outline" : tone === "neutral" ? "minus-circle-outline" : "alert-circle-outline"}"></ha-icon></span><div class="history-main"><strong>${this._escape(record.product_name || `EAN ${record.ean}`)}</strong><small>${this._escape(this._formatScanTime(record.scanned_at))} · ${this._escape(record.scanner_name || (record.source === "simulation" ? haListManagerPanelText("scanner.simulation", {}, this._hass) : record.scanner_address || haListManagerPanelText("scanner.unknown", {}, this._hass)))}</small><span>${this._escape(`${action}${list ? ` · ${list.name}` : ""}`)}</span>${stock}${record.message ? `<em>${this._escape(record.message)}</em>` : ""}</div><code>${this._escape(record.ean)}</code></article>`;
@@ -2359,7 +2499,7 @@ class HaListManagerPanel extends HTMLElement {
     const visiblePendingScans = this._pendingScans.slice(queueStart, queueStart + this._scanQueuePageSize);
     const pendingRows = visiblePendingScans.map((scan) => {
       const list = this._findList(scan.list_id);
-      const action = SCANNER_ACTIONS(this._hass)[scan.action]?.label || scan.action || haListManagerPanelText("ui.no_action", {}, this._hass);
+      const action = SCANNER_ACTIONS(this._hass)[scan.action]?.label || (scan.action === "product" ? haListManagerPanelText("product_scan.review_action",{},this._hass) : scan.action) || haListManagerPanelText("ui.no_action", {}, this._hass);
       return `<article class="history-row pending-history-row"><span class="history-status warning"><ha-icon icon="mdi:tray-alert"></ha-icon></span><div class="history-main"><strong>${this._escape(scan.product_name || `EAN ${scan.ean}`)}</strong><small>${this._escape(this._formatScanTime(scan.scanned_at))} · ${this._escape(action)}${list ? ` · ${this._escape(list.name)}` : ""}</small><em>${this._escape(scan.message || haListManagerPanelText("scanner.waiting_process_here", {}, this._hass))}</em></div><div class="row-actions"><button class="ha-button compact" type="button" data-edit-pending-scan="${scan.id}"><ha-icon icon="mdi:pencil-outline"></ha-icon>${haListManagerPanelText("ui.edit", {}, this._hass)}</button><button class="icon-button danger" type="button" data-dismiss-pending-scan="${scan.id}" title="${haListManagerPanelText("ui.discard", {}, this._hass)}"><ha-icon icon="mdi:delete-outline"></ha-icon></button></div></article>`;
     }).join("");
     const queueContent = pendingRows ? `<ha-card class="list-card history-card">${pendingRows}</ha-card>${this._renderScanPagination("queue", this._pendingScans.length, this._scanQueuePage, this._scanQueuePageSize)}` : `<ha-card class="empty-state"><ha-icon icon="mdi:tray-check"></ha-icon><h3>${haListManagerPanelText("scanner.no_open_scans", {}, this._hass)}</h3><p>${haListManagerPanelText("help.scanner_pending_queue", {}, this._hass)}</p></ha-card>`;
@@ -3566,6 +3706,7 @@ class HaListManagerPanel extends HTMLElement {
     }
     if (this._dialog.kind === "list-editor") return this._renderListDialog();
     if (this._dialog.kind === "list-scope-toggle") return this._renderListScopeToggleDialog();
+    if (this._dialog.kind === "product-scan-queue") return this._renderProductScanQueue();
     if (this._dialog.kind === "product-editor") return this._renderProductDialog();
     if (this._dialog.kind === "category-rules-bulk") return this._renderCategoryRulesBulkDialog();
     if (this._dialog.kind === "category-products") return this._renderCategoryProductsDialog();
@@ -3936,7 +4077,24 @@ class HaListManagerPanel extends HTMLElement {
 
   _renderScannerDialog() {
     const draft = this._dialog.draft;
-    return `<div class="dialog-backdrop" data-close-dialog><section class="dialog scanner-dialog" role="dialog" aria-modal="true" data-dialog-panel>${this._dialogHeader(this._dialog.record ? haListManagerPanelText("scanner.edit", {}, this._hass) : haListManagerPanelText("ui.create_scanner", {}, this._hass))}<label class="field"><span>${haListManagerPanelText("ui.name", {}, this._hass)}</span><input type="text" maxlength="100" data-scanner-name value="${this._escape(draft.name)}" placeholder="${haListManagerPanelText("scanner.name_example", {}, this._hass)}"></label><label class="field"><span>${haListManagerPanelText("ui.address", {}, this._hass)}</span><input type="text" maxlength="100" data-scanner-address value="${this._escape(draft.address)}" placeholder="AA:FC:87:59:04:38"></label><label class="setting-row compact-setting"><ha-checkbox data-scanner-enabled></ha-checkbox><span><strong>${haListManagerPanelText("ui.scanner_enabled", {}, this._hass)}</strong><small>${haListManagerPanelText("help.disabled_scanner_events", {}, this._hass)}</small></span></label><ha-select class="selector-field" data-scanner-routing></ha-select>${draft.routing === "fixed" ? `<div class="field-grid scanner-route-fields"><ha-select data-scanner-list></ha-select><ha-select data-scanner-action></ha-select></div>` : `<p class="field-help">${haListManagerPanelText("help.active_inventory_target", {}, this._hass)}</p>`}${this._dialogError()}<div class="dialog-actions"><button class="ha-button primary" data-save-scanner ${this._busy ? "disabled" : ""}>${this._busy ? haListManagerPanelText("ui.save_pending", {}, this._hass) : haListManagerPanelText("ui.save", {}, this._hass)}</button><button class="ha-button" data-cancel-dialog>${haListManagerPanelText("ui.cancel", {}, this._hass)}</button></div></section></div>`;
+    return `<div class="dialog-backdrop" data-close-dialog><section class="dialog scanner-dialog" role="dialog" aria-modal="true" data-dialog-panel>${this._dialogHeader(this._dialog.record ? haListManagerPanelText("scanner.edit", {}, this._hass) : haListManagerPanelText("ui.create_scanner", {}, this._hass))}<label class="field"><span>${haListManagerPanelText("ui.name", {}, this._hass)}</span><input type="text" maxlength="100" data-scanner-name value="${this._escape(draft.name)}" placeholder="${haListManagerPanelText("scanner.name_example", {}, this._hass)}"></label><ha-select class="selector-field" data-scanner-source></ha-select>${draft.source_type === "mqtt" ? this._renderMqttScannerFields(draft.mqtt) : `<label class="field"><span>${haListManagerPanelText("ui.address", {}, this._hass)}</span><input type="text" maxlength="100" data-scanner-address value="${this._escape(draft.address)}" placeholder="AA:FC:87:59:04:38"></label>`}<label class="setting-row compact-setting"><ha-checkbox data-scanner-enabled></ha-checkbox><span><strong>${haListManagerPanelText("ui.scanner_enabled", {}, this._hass)}</strong><small>${haListManagerPanelText("help.disabled_scanner_events", {}, this._hass)}</small></span></label><ha-select class="selector-field" data-scanner-routing></ha-select>${draft.routing === "fixed" ? `<div class="scanner-route-fields"><ha-select data-scanner-list></ha-select><ha-select data-scanner-action></ha-select></div>` : `<p class="field-help">${haListManagerPanelText("help.active_inventory_target", {}, this._hass)}</p>`}${this._dialogError()}<div class="dialog-actions"><button class="ha-button primary" data-save-scanner ${this._busy ? "disabled" : ""}>${this._busy ? haListManagerPanelText("ui.save_pending", {}, this._hass) : haListManagerPanelText("ui.save", {}, this._hass)}</button><button class="ha-button" data-cancel-dialog>${haListManagerPanelText("ui.cancel", {}, this._hass)}</button></div></section></div>`;
+  }
+
+  _renderMqttScannerFields(config) {
+    const t = (key) => haListManagerPanelText(`mqtt.${key}`, {}, this._hass);
+    const input = (key, example = "") => `<label class="field"><span>${t(key)}</span><input type="text" maxlength="${key === "topic" ? 512 : 200}" data-mqtt-field="${key}" value="${this._escape(config[key])}" placeholder="${example}" autocomplete="off"></label>`;
+    const json = config.format === "json";
+    const example = json ? JSON.stringify({ean:"4062139025398", scanner:"kitchen", scan_id:"scan-123"}, null, 2) : "4062139025398";
+    return `<p class="field-help">${t("connection_help")}</p>
+      ${this._mqttScannerError || !this._hass?.config?.components?.includes("mqtt") ? `<div class="status-message warning">${t("unavailable")}</div>` : ""}
+      ${input("topic", "home/scanner/scan")}<ha-select class="selector-field" data-mqtt-format></ha-select>
+      <p class="field-help">${t(json ? "json_example" : "text_example")}</p><pre class="code-block" data-mqtt-example>${this._escape(example)}</pre>
+      ${json ? `${input("ean_path", "ean")}<p class="field-help">${t("ean_help")}</p>
+      ${input("scanner_path", "scanner")}<p class="field-help">${t("scanner_help")}</p>
+      ${input("scanner_value", "kitchen")}<p class="field-help">${t("value_help")}</p>
+      <p class="field-help">${t("identity_help")}</p>
+      ${input("scan_id_path", "scan_id")}<p class="field-help">${t("id_help")}</p>` : `<p class="field-help">${t("text_help")}</p>`}
+      <p class="field-help">${t("retain_help")}</p>`;
   }
 
   _renderCompletedCleanupSettings(draft) {
@@ -4100,6 +4258,8 @@ class HaListManagerPanel extends HTMLElement {
 
   _renderProductDialog() {
     const draft = this._dialog.draft;
+    const pending = this._dialog.pendingScan;
+    const editing = !pending || this._canEditPendingScan();
     const action = this._dialog.record ? haListManagerPanelText("ui.refresh", {}, this._hass) : haListManagerPanelText("ui.fetch", {}, this._hass);
     const fields = globalThis.HaListManagerProductEditor.renderFields({
       draft,
@@ -4119,16 +4279,29 @@ class HaListManagerPanel extends HTMLElement {
     });
     return `<div class="dialog-backdrop" data-close-dialog><section class="dialog product-dialog" role="dialog" aria-modal="true" data-dialog-panel>
       ${this._dialogHeader(this._dialog.record ? haListManagerPanelText("products.edit", {}, this._hass) : haListManagerPanelText("products.create", {}, this._hass))}
+      ${pending ? `<p class="field-help">${haListManagerPanelText("product_scan.review",{},this._hass)}</p><p class="pending-scan-collaboration" data-pending-scan-collaboration>${this._escape(this._pendingScanCollaborationText())}</p><fieldset class="pending-scan-fields" data-pending-scan-fields ${editing ? "" : "disabled inert"}>` : ""}
       ${fields}
       ${this._productCategoryAssignmentsMarkup()}
       ${this._renderLabelSelector(draft.label_ids)}
       <p class="field-help">${haListManagerPanelText("help.refresh_openfoodfacts_product", {p0:(action)}, this._hass)}</p>
+      ${pending ? "</fieldset>" : ""}
       ${this._dialogError()}
-      <div class="dialog-actions"><button class="ha-button primary" data-save-product ${this._busy ? "disabled" : ""}>${this._busy ? haListManagerPanelText("ui.save_pending", {}, this._hass) : haListManagerPanelText("ui.save", {}, this._hass)}</button><button class="ha-button" data-cancel-dialog>${haListManagerPanelText("ui.cancel", {}, this._hass)}</button></div>
+      <div class="dialog-actions">${pending ? `<button class="ha-button primary" data-take-pending-scan ${editing ? "hidden" : ""} ${pending.collaboration?.editor_session && !editing ? "disabled" : ""}>${haListManagerPanelText("ui.edit",{},this._hass)}</button><button class="ha-button destructive" data-dismiss-pending-scan="${this._escape(pending.id)}"><ha-icon icon="mdi:delete-outline"></ha-icon>${haListManagerPanelText("scanner.discard",{},this._hass)}</button>` : ""}<button class="ha-button primary" data-save-product ${this._busy || !editing ? "disabled" : ""}>${this._busy ? haListManagerPanelText("ui.save_pending", {}, this._hass) : haListManagerPanelText("ui.save", {}, this._hass)}</button><button class="ha-button" data-cancel-dialog>${haListManagerPanelText("ui.cancel", {}, this._hass)}</button></div>
     </section></div>`;
   }
 
   _bindEvents() {
+    this.shadowRoot.querySelector("[data-product-camera]")?.addEventListener("click",()=>this._startProductCamera());
+    this.shadowRoot.querySelector("[data-product-scanner-target]")?.addEventListener("click",()=>this._toggleProductScannerTarget());
+    this.shadowRoot.querySelector("[data-product-scan-queue]")?.addEventListener("click",()=>{this._dialog={kind:"product-scan-queue"};this._render();});
+    this.shadowRoot.querySelector("[data-product-scan-rows]")?.addEventListener("click", event => {
+      const button = event.target.closest("button");
+      if (button?.dataset.productScanDiscard) this._dismissPendingScan(button.dataset.productScanDiscard);
+      else if (button?.dataset.openProductScan) {
+        const scan = this._productScans().find(item => item.id === button.dataset.openProductScan);
+        if (scan) { this._dialog = null; this._openPendingScanEditor(scan); }
+      }
+    });
     this._bindAlexaEvents();
     this.shadowRoot.querySelectorAll("[data-list-script]").forEach(button => button.addEventListener("click", () => this._openListScript(button.dataset.listScript)));
     if (this._dialog?.kind === "list-script") {
@@ -4872,6 +5045,7 @@ class HaListManagerPanel extends HTMLElement {
     this.shadowRoot.querySelectorAll("ha-checkbox[data-admin-group-member]").forEach((checkbox) => { checkbox.checked = Boolean(this._dialog?.draft?.member_ids?.includes(checkbox.dataset.adminGroupMember)); });
     const notificationEnabled = this.shadowRoot.querySelector("[data-notification-enabled]");
     if (notificationEnabled) { notificationEnabled.checked = Boolean(this._dialog?.draft?.enabled); notificationEnabled.addEventListener("change", () => { this._dialog.draft.enabled = notificationEnabled.checked; }); }
+    const scannerLists = this._lists.filter((list) => list.enabled && list.provider === "local" && ["inventory", "shopping"].includes(list.list_type));
     const inventoryLists = this._lists.filter((list) => list.list_type === "inventory");
     if (!this._simulation.list_id && inventoryLists.length) this._simulation.list_id = inventoryLists[0].id;
     const configureSelect = (selector, label, options, value, handler, clearable = false) => {
@@ -5022,12 +5196,20 @@ class HaListManagerPanel extends HTMLElement {
     }
     if (this._dialog?.kind === "scanner-editor") {
       const draft = this._dialog.draft;
+      configureSelect("[data-scanner-source]", haListManagerPanelText("mqtt.source", {}, this._hass), [
+        {value:"eyoyo", label:haListManagerPanelText("mqtt.eyoyo", {}, this._hass)},
+        {value:"mqtt", label:"MQTT"},
+      ], draft.source_type, (value) => { draft.source_type = value; this._render(); });
+      configureSelect("[data-mqtt-format]", haListManagerPanelText("mqtt.format", {}, this._hass), [
+        {value:"json",label:"JSON"},{value:"text",label:haListManagerPanelText("mqtt.text", {}, this._hass)}
+      ], draft.mqtt.format, (value) => { draft.mqtt.format = value; if(value === "text") { draft.mqtt.scanner_path=""; draft.mqtt.scanner_value=""; draft.mqtt.scan_id_path=""; } this._render(); });
+      this.shadowRoot.querySelectorAll("[data-mqtt-field]").forEach((input) => input.addEventListener("input", () => { draft.mqtt[input.dataset.mqttField] = input.value; }));
       const enabled = this.shadowRoot.querySelector("[data-scanner-enabled]");
       if (enabled) { enabled.checked = draft.enabled; enabled.addEventListener("change", () => { draft.enabled = enabled.checked; }); }
       configureSelect("[data-scanner-routing]", haListManagerPanelText("ui.assignment", {}, this._hass), [{ value: "active_target", label: haListManagerPanelText("ui.active_card_default_target", {}, this._hass) }, { value: "fixed", label: haListManagerPanelText("ui.fixed_list_action", {}, this._hass) }], draft.routing, (value) => { draft.routing = value || "active_target"; if (draft.routing === "active_target") { draft.list_id = ""; draft.action = ""; } this._render(); });
       if (draft.routing === "fixed") {
-        configureSelect("[data-scanner-list]", haListManagerPanelText("ui.inventory_list", {}, this._hass), inventoryLists.map((list) => ({ value: list.id, label: list.name })), draft.list_id, (value) => { draft.list_id = value; });
-        configureSelect("[data-scanner-action]", haListManagerPanelText("ui.action", {}, this._hass), Object.entries(SCANNER_ACTIONS(this._hass)).map(([value, item]) => ({ value, label: item.label })), draft.action, (value) => { draft.action = value; });
+        configureSelect("[data-scanner-list]", haListManagerPanelText("scan.target_list", {}, this._hass), scannerLists.map((list) => ({ value: list.id, label: list.name })), draft.list_id, (value) => { draft.list_id = value; if (scannerLists.find(list => list.id === value)?.list_type === "shopping") draft.action = "add"; this._render(); });
+        configureSelect("[data-scanner-action]", haListManagerPanelText("ui.action", {}, this._hass), Object.entries(SCANNER_ACTIONS(this._hass)).filter(([value]) => scannerLists.find(list => list.id === draft.list_id)?.list_type !== "shopping" || value === "add").map(([value, item]) => ({ value, label: item.label })), draft.action, (value) => { draft.action = value; });
       }
       return;
     }
@@ -5119,8 +5301,8 @@ class HaListManagerPanel extends HTMLElement {
       const tandoorToken = this.shadowRoot.querySelector("[data-setting-tandoor-token]");
       if (tandoorUrl) tandoorUrl.addEventListener("input", () => { this._settings.tandoor_url = tandoorUrl.value; this._tandoorTestStatus = ""; });
       if (tandoorToken) tandoorToken.addEventListener("input", () => { this._settings.tandoor_token = tandoorToken.value; this._tandoorTestStatus = ""; });
-      configureSelect("[data-setting-scanner-list]", haListManagerPanelText("ui.default_inventory_list", {}, this._hass), inventoryLists.map((list) => ({ value: list.id, label: list.name })), this._settings.scanner_default_list_id || "", (value) => { this._settings.scanner_default_list_id = value || null; }, true);
-      configureSelect("[data-setting-scanner-action]", haListManagerPanelText("ui.default_action", {}, this._hass), Object.entries(SCANNER_ACTIONS(this._hass)).map(([value, item]) => ({ value, label: item.label })), this._settings.scanner_default_action || "add", (value) => { this._settings.scanner_default_action = value || "add"; });
+      configureSelect("[data-setting-scanner-list]", haListManagerPanelText("scan.default_list", {}, this._hass), scannerLists.map((list) => ({ value: list.id, label: list.name })), this._settings.scanner_default_list_id || "", (value) => { this._settings.scanner_default_list_id = value || null; if (scannerLists.find(list => list.id === value)?.list_type === "shopping") this._settings.scanner_default_action = "add"; this._render(); }, true);
+      configureSelect("[data-setting-scanner-action]", haListManagerPanelText("ui.default_action", {}, this._hass), Object.entries(SCANNER_ACTIONS(this._hass)).filter(([value]) => scannerLists.find(list => list.id === this._settings.scanner_default_list_id)?.list_type !== "shopping" || value === "add").map(([value, item]) => ({ value, label: item.label })), this._settings.scanner_default_action || "add", (value) => { this._settings.scanner_default_action = value || "add"; });
     }
     if (this._dialog?.kind === "label-editor") {
       const draft = this._dialog.draft;
@@ -6721,6 +6903,27 @@ class HaListManagerPanel extends HTMLElement {
 
   async _openPendingScanEditor(scan) {
     if (!scan || this._busy || this._dialog || this._finishedScanIds.has(scan.id)) return;
+    if (scan.action === "product") return this._openProductScanEditor(scan);
+    if (this._lists.find(list => list.id === scan.list_id)?.list_type === "shopping") {
+      const token = this._shoppingScanOpenToken = {};
+      this._shoppingScanView?.stop();
+      try {
+      const [categories, labels] = await Promise.all([
+        haListManagerPanelTextRequest(this._hass, {type: `${API}/categories/order/get`, list_id: scan.list_id}),
+        haListManagerPanelTextRequest(this._hass, {type: `${API}/labels/list`, list_id: scan.list_id}),
+      ]);
+      if (this._shoppingScanOpenToken !== token || !this.isConnected) return;
+      const panel = this;
+      const adapter = {get _hass(){return panel._hass;}, _list: this._lists.find(list => list.id === scan.list_id),
+        _listId: () => scan.list_id, _labels: labels.labels || [], _availableCategories: () => categories.categories || [],
+        get _error(){return panel._error;}, set _error(value){panel._error=value;},
+        _render: () => {if(adapter._error)panel._render();}, _load: () => {}, _requestedQuantity: () => 1};
+      const view = this._shoppingScanView = globalThis.HaListManagerShoppingScanner.for(adapter);
+      await view.start();
+      await view.openReview(scan);
+      } catch (error) { this._shoppingScanView?.stop(); this._error = this._formatError(error); this._render(); }
+      return;
+    }
     const openToken = this._pendingScanOpenToken = {};
     this._error = "";
     this._pendingScanNotice = "";
@@ -6817,7 +7020,9 @@ class HaListManagerPanel extends HTMLElement {
     this._error = "";
     this._dialog = { kind: "scanner-editor", record, draft: {
       name: record?.name || "",
-      address: record?.address || "",
+      address: record?.source_type === "mqtt" ? "" : record?.address || "",
+      source_type: record?.source_type || "eyoyo",
+      mqtt: { topic: "", format: "json", ean_path: "ean", scanner_path: "", scanner_value: "", scan_id_path: "", ...record?.mqtt },
       enabled: record?.enabled !== false,
       routing: record?.routing || "active_target",
       list_id: record?.list_id || firstInventory?.id || "",
@@ -6975,12 +7180,13 @@ class HaListManagerPanel extends HTMLElement {
     const { record, draft } = this._dialog;
     draft.name = draft.name.trim();
     draft.address = draft.address.trim();
-    if (!draft.name || !draft.address) return this._showDialogError(haListManagerPanelText("errors.enter_scanner_name_address", {}, this._hass));
+    if (!draft.name || (draft.source_type !== "mqtt" && !draft.address)) return this._showDialogError(haListManagerPanelText("errors.enter_scanner_name_address", {}, this._hass));
     if (draft.routing === "fixed" && (!draft.list_id || !draft.action)) return this._showDialogError(haListManagerPanelText("errors.select_fixed_list_action", {}, this._hass));
     await this._runDialogAction(async () => {
       const payload = {
         type: `${API}/scanners/${record ? "update" : "create"}`,
-        name: draft.name, address: draft.address,
+        name: draft.name, address: draft.address, source_type: draft.source_type,
+        mqtt: draft.source_type === "mqtt" ? draft.mqtt : null,
         enabled: Boolean(draft.enabled), routing: draft.routing,
         list_id: draft.routing === "fixed" ? draft.list_id : null,
         action: draft.routing === "fixed" ? draft.action : null,
@@ -7361,7 +7567,8 @@ class HaListManagerPanel extends HTMLElement {
 
   async _saveProduct() {
     if (this._busy) return;
-    const { record, draft, return_dialog: returnDialog } = this._dialog;
+    const { record, draft, pendingScan, return_dialog: returnDialog } = this._dialog;
+    if (pendingScan && !this._canEditPendingScan()) return;
     draft.name = draft.name.trim();
     draft.ean = draft.ean.trim();
     if (!draft.name) return this._showDialogError(haListManagerPanelText("errors.enter_product_name", {}, this._hass));
@@ -7386,7 +7593,17 @@ class HaListManagerPanel extends HTMLElement {
         label_ids: draft.label_ids || [],
       };
       if (record) payload.product_id = record.id;
-      const result = await haListManagerPanelTextRequest(this._hass, payload);
+      if (pendingScan) {payload.scan_id=pendingScan.id;payload.session_id=this._scanSessionId;this._savingPendingScanId=pendingScan.id;}
+      let result;
+      try {
+        result = record
+          ? await globalThis.HaListManagerProductEditor.saveProduct(this, options => haListManagerPanelTextRequest(this._hass, {...payload,...options}))
+          : await haListManagerPanelTextRequest(this._hass, payload);
+      } finally {
+        if (pendingScan) this._savingPendingScanId = null;
+      }
+      if (!result) return;
+      if (pendingScan) this._stopPendingScanPresence(pendingScan.id);
       this._productsLoaded = false;
       if (returnDialog && result.product) {
         returnDialog.draft.product_id = result.product.id;
@@ -8740,10 +8957,11 @@ class HaListManagerPanel extends HTMLElement {
     .list-script-dialog{width:min(720px,100%)}.list-script-dialog input[type=checkbox]{width:20px;min-height:20px;flex:0 0 auto}.list-script-dialog .setting-row{padding:9px 0}
     .inventory-restock-dialog{width:min(680px,100%)}.inventory-restock-toggle{align-items:center}.inventory-restock-toggle input{flex:0 0 auto;width:22px;height:22px}.restock-mode-help{margin-top:16px;padding:11px 13px;border-left:4px solid var(--primary-color);border-radius:7px;background:color-mix(in srgb,var(--primary-color) 8%,transparent)}.restock-mode-help p{margin:6px 0;color:var(--secondary-text-color);font-size:14px;line-height:1.45}.inventory-restock-notice{display:flex;align-items:flex-start;gap:9px;margin-top:10px;padding:11px 13px;border-left:4px solid var(--warning-color,#f0a000);border-radius:7px;background:color-mix(in srgb,var(--warning-color,#f0a000) 10%,transparent)}.inventory-restock-notice ha-icon{flex:0 0 auto;--mdc-icon-size:21px;color:var(--warning-color,#f0a000)}.inventory-restock-notice span{line-height:1.45}.inventory-product-help{margin-top:7px}.inventory-create-product{margin-top:10px}.inventory-minimum-help{margin-top:7px}.inventory-category-help{margin-top:7px}.inventory-category-notice{display:flex;align-items:flex-start;gap:9px;margin-top:10px;padding:11px 13px;border-left:4px solid var(--primary-color);border-radius:7px;color:var(--primary-text-color);background:color-mix(in srgb,var(--primary-color) 11%,var(--card-background-color))}.inventory-category-notice ha-icon{flex:0 0 auto;--mdc-icon-size:21px;color:var(--primary-color)}.inventory-category-notice span{line-height:1.45}.inventory-product-clear{position:absolute;z-index:5;right:43px;top:50%;display:grid;place-items:center;width:34px;height:34px;padding:0;transform:translateY(-50%);border:0;border-radius:50%;color:var(--secondary-text-color);background:transparent;cursor:pointer}.inventory-product-clear[hidden]{display:none}.inventory-product-clear:hover,.inventory-product-clear:focus-visible{color:var(--primary-text-color);background:color-mix(in srgb,var(--primary-text-color) 12%,transparent)}.inventory-product-clear ha-icon{--mdc-icon-size:21px}.inventory-dialog-product-actions{align-items:center;justify-content:space-between;flex-direction:row;gap:14px}.inventory-dialog-product-actions>span{display:flex;min-width:0;flex-direction:column;gap:4px}.category-picker-options.inventory-product-picker-options button{grid-template-columns:44px minmax(0,1fr);gap:12px;min-height:60px}.inventory-product-picker-options button:disabled{opacity:.58;cursor:default}.inventory-product-option-image{position:relative!important;display:grid!important;place-items:center;width:42px;height:42px;overflow:hidden;border-radius:7px;color:var(--secondary-text-color);background:var(--secondary-background-color)}.inventory-product-option-image img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain}
     .empty-state.compact{min-height:170px}.category-list-empty{padding:18px;color:var(--secondary-text-color);text-align:center}.category-page-actions{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:10px;margin:14px 0 18px}.category-specific-picker{display:grid;grid-template-columns:minmax(220px,440px);align-items:center;margin:18px 0 12px}.category-specific-heading{margin:18px 0 10px}.category-specific-heading>div{min-width:0}.category-specific-heading h3{margin:0 0 4px}.category-specific-heading p{margin:0;color:var(--secondary-text-color);line-height:1.45}.category-row{display:grid;grid-template-columns:minmax(0,1fr) auto auto;align-items:center;min-height:64px;border-bottom:1px solid var(--divider-color)}.category-row.definition-row{grid-template-columns:auto minmax(0,1fr) auto auto}.category-row.definition-row>.category-symbol{margin-left:14px}.category-row.definition-row>.category-open{display:flex;min-width:0;flex-direction:column;align-items:flex-start;gap:4px;padding:10px 14px}.category-row.definition-row>.category-open strong,.category-row.definition-row>.category-open small{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.category-row.definition-row>.row-actions{grid-column:4}.category-row:last-child,.dynamic-category-row:last-child{border-bottom:0}.category-symbol{display:grid;place-items:center;width:42px;height:42px;border-radius:50%;color:var(--category-color,var(--primary-color));background:color-mix(in srgb,var(--category-color,var(--primary-color)) 14%,transparent)}.category-open{display:grid;grid-template-columns:42px minmax(0,1fr);align-items:center;gap:12px;width:100%;min-height:63px;padding:10px 14px;border:0;color:var(--primary-text-color);background:transparent;text-align:left;cursor:pointer}.category-open-copy{display:flex;min-width:0;flex-direction:column;align-items:flex-start;gap:4px}.category-open-copy strong,.category-open-copy small{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.category-open:hover{background:var(--secondary-background-color)}.category-open small,.dynamic-category-row small{color:var(--secondary-text-color);font-size:14px}.color-swatch{width:26px;height:26px;border:2px solid var(--divider-color);border-radius:50%;background:var(--category-color)}.color-swatch.default{display:grid;place-items:center;width:34px;height:34px;color:var(--secondary-text-color);background:transparent}.color-swatch.default ha-icon{--mdc-icon-size:22px}.dynamic-category-row{display:flex;align-items:center;justify-content:space-between;gap:16px;min-height:72px;padding:10px 14px 10px 18px;border-bottom:1px solid var(--divider-color)}.dynamic-category-row>div{display:flex;flex-direction:column;gap:4px;min-width:0}.color-field{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:end;gap:12px}.color-field .ha-button{margin-bottom:3px}.category-product-page-header{display:grid;grid-template-columns:auto minmax(0,1fr);align-items:center;gap:14px;margin-bottom:22px}.category-product-page-header .heading-wrap{display:flex;align-items:center;gap:12px}.category-product-page-header h2{margin:0}.category-product-page-header p{margin:4px 0 0;color:var(--secondary-text-color)}.category-product-page-header .category-symbol{margin-left:0}.category-product-back{width:44px;height:44px}.category-rule-section{margin-bottom:24px}.category-rule-quick{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:9px}.category-rule-quick input{min-height:44px;padding:8px 11px;border:1px solid var(--divider-color);border-radius:8px;color:var(--primary-text-color);background:var(--secondary-background-color)}.category-rule-list{margin-top:12px;border:1px solid var(--divider-color);border-radius:9px;overflow:hidden}.category-rule-row{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;min-height:54px;padding:5px 8px 5px 14px;border-bottom:1px solid var(--divider-color)}.category-rule-row:last-child{border-bottom:0}.category-rule-row code{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--primary-text-color);font-size:15px}.category-rule-state{display:flex;align-items:center;justify-content:center;gap:8px;min-height:72px;color:var(--secondary-text-color)}.category-rule-state ha-circular-progress{width:24px;height:24px}.category-rule-empty{margin:0;padding:18px;color:var(--secondary-text-color);text-align:center}.category-products-section{margin-top:24px}.category-rules-dialog textarea,.category-dialog textarea{box-sizing:border-box;width:100%;padding:10px 12px;border:1px solid var(--divider-color);border-radius:8px;color:var(--primary-text-color);background:var(--secondary-background-color);font:inherit;resize:vertical}.category-product-page-list{padding:0;overflow:hidden}.category-product-page-row{display:grid;grid-template-columns:48px minmax(0,1fr) auto;align-items:center;gap:12px;min-height:76px;padding:8px 14px;border-bottom:1px solid var(--divider-color)}.category-product-page-row:last-child{border-bottom:0}.category-dialog{width:min(620px,100%)}.category-products-dialog{width:min(760px,100%)}.category-products-dialog>p{color:var(--secondary-text-color)}.category-product-search{display:grid;grid-template-columns:28px minmax(0,1fr);align-items:center;margin-top:16px;padding:0 12px;border:1px solid var(--divider-color);border-radius:9px;background:var(--secondary-background-color)}.category-product-search ha-icon{color:var(--secondary-text-color)}.category-product-search input{width:100%;min-height:48px;border:0;outline:0;color:var(--primary-text-color);background:transparent}.category-product-filter{display:flex;align-items:center;gap:8px;margin:10px 2px 0;color:var(--secondary-text-color);font-size:14px;cursor:pointer}.category-product-filter input{width:18px;height:18px;margin:0;accent-color:var(--primary-color)}.category-product-results{max-height:min(31vh,300px);overflow:auto;border:1px solid var(--divider-color);border-radius:9px;overscroll-behavior:contain}.category-product-results{margin-top:8px}.category-product-result{display:grid;grid-template-columns:48px minmax(0,1fr) auto;align-items:center;gap:10px;width:100%;min-height:64px;padding:7px 10px;border:0;border-bottom:1px solid var(--divider-color);color:var(--primary-text-color);background:transparent;text-align:left}.category-product-result{cursor:pointer}.category-product-result:hover{background:var(--secondary-background-color)}.category-product-result.conflict{background:color-mix(in srgb,var(--warning-color,#f0a000) 7%,transparent)}.category-product-result:disabled{opacity:.72;cursor:default}.category-product-result:last-child{border-bottom:0}.category-product-image{position:relative;display:grid;place-items:center;width:44px;height:44px;overflow:hidden;border-radius:7px;color:var(--secondary-text-color);background:var(--secondary-background-color)}.category-product-image img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain}.category-product-copy{display:flex;min-width:0;flex-direction:column;gap:3px}.category-product-copy strong,.category-product-copy small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.category-product-copy small{color:var(--secondary-text-color);font-size:13px}.category-product-status{display:flex;align-items:center;gap:5px;color:var(--primary-color);font-size:13px;white-space:nowrap}.category-product-status.current{color:var(--success-color,#43a047)}.category-product-status.conflict{color:var(--warning-color,#f0a000)}.category-product-status ha-icon{--mdc-icon-size:18px}.category-product-state{display:flex;align-items:center;justify-content:center;gap:9px;min-height:72px;padding:14px;color:var(--secondary-text-color);text-align:center}.category-product-state ha-circular-progress{width:24px;height:24px}.category-product-result-note{margin:0;padding:8px 10px;color:var(--secondary-text-color);font-size:12px}.inventory-toolbar{display:grid;grid-template-columns:minmax(220px,360px);margin-bottom:16px}.inventory-detail-stats{display:grid;grid-template-columns:repeat(4,minmax(120px,1fr));gap:12px;margin-bottom:18px}.inventory-detail-stats ha-card{display:flex;flex-direction:column;gap:3px;padding:16px}.inventory-detail-stats strong{font-size:25px}.inventory-detail-stats span{color:var(--secondary-text-color)}.inventory-detail-stats .warning strong{color:var(--warning-color,#f0a000)}.inventory-detail-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px}.detail-section{padding:18px}.section-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:14px}.section-heading h3{margin:0 0 4px}.section-heading p{margin:0;color:var(--secondary-text-color)}.muted-copy{margin:8px 0 0;color:var(--secondary-text-color);line-height:1.5}.list-category-chips{display:flex;flex-wrap:wrap;gap:8px}.list-category-chips span{display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border-radius:16px;color:var(--primary-text-color);background:color-mix(in srgb,var(--category-color,var(--primary-color)) 18%,transparent)}.list-category-chips ha-icon{--mdc-icon-size:18px;color:var(--category-color,var(--primary-color))}.dashboard-usage-list{display:grid;gap:8px}.dashboard-usage-list a{display:grid;grid-template-columns:28px minmax(0,1fr) 24px;align-items:center;gap:8px;padding:10px;border:1px solid var(--divider-color);border-radius:8px;color:var(--primary-text-color);text-decoration:none}.dashboard-usage-list a:hover{border-color:var(--primary-color);background:var(--secondary-background-color)}.dashboard-usage-list a>span{display:flex;flex-direction:column;gap:3px}.dashboard-usage-list small{color:var(--secondary-text-color)}.usage-state{display:flex;align-items:center;gap:9px;min-height:50px;color:var(--secondary-text-color)}.usage-state ha-circular-progress{width:28px;height:28px}.error-text{color:var(--error-color)}.inventory-row{display:grid;grid-template-columns:auto minmax(0,1fr) auto auto;align-items:center;min-height:82px;border-bottom:1px solid var(--divider-color);border-left:4px solid transparent}.inventory-row.low{border-left-color:var(--warning-color,#f0a000)}.inventory-row.empty{border-left-color:var(--error-color)}.inventory-image{position:relative;display:grid;place-items:center;width:54px;height:54px;margin-left:12px;overflow:hidden;border-radius:8px;color:var(--secondary-text-color);background:var(--secondary-background-color)}button.inventory-image{padding:0;border:0;cursor:pointer}button.inventory-image:hover{outline:2px solid var(--primary-color)}.inventory-image img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain}.inventory-open{display:flex;flex-direction:column;align-items:flex-start;gap:4px;min-height:80px;padding:12px 14px;border:0;color:var(--primary-text-color);background:transparent;text-align:left;cursor:pointer}.inventory-open:hover{background:var(--secondary-background-color)}.inventory-open small,.inventory-dialog-product small{color:var(--secondary-text-color);font-size:14px}.inventory-stock{display:grid;grid-template-columns:42px minmax(38px,auto) 42px;align-items:center;text-align:center}.inventory-stock>strong{font-size:20px}.inventory-dialog-product{display:flex;flex-direction:column;gap:4px;padding:12px 0}.inventory-groups{margin-bottom:22px}.inventory-groups>h3,.inventory-products>h3{margin:0 0 6px}.inventory-groups>p{margin:0 0 10px;color:var(--secondary-text-color)}.inventory-group-row{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;min-height:82px;border-bottom:1px solid var(--divider-color)}.inventory-group-row .detail-icon{margin-left:12px}.group-member-list{margin-top:18px;padding:10px 14px;border:1px solid var(--divider-color);border-radius:10px}.group-member-list legend{padding:0 6px}.group-member-choice{display:grid;grid-template-columns:auto minmax(0,1fr);align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--divider-color)}.group-member-choice:last-child{border-bottom:0}.selected-group-member{grid-template-columns:minmax(0,1fr) auto}.selected-group-members{max-height:min(35vh,320px);overflow:auto;overscroll-behavior:contain}.group-add-title{margin:20px 0 8px;font-size:16px}.group-member-choice>span{display:flex;flex-direction:column}.group-member-choice small{color:var(--secondary-text-color)}.inventory-group-dialog{width:min(720px,100%)}.inventory-group-fields{display:grid;grid-template-columns:minmax(180px,1fr) minmax(0,1fr);gap:14px;align-items:end}.inventory-group-fields .selector-field{width:100%}.group-move-warning{display:flex;flex-wrap:wrap;align-items:flex-start;gap:9px;margin:7px 0 12px;padding:10px 12px;border-left:4px solid var(--warning-color,#f0a000);border-radius:6px;background:color-mix(in srgb,var(--warning-color,#f0a000) 14%,var(--card-background-color));font-size:13px;line-height:1.45}.group-move-warning ha-icon{flex:0 0 auto;color:var(--warning-color,#f0a000)}.group-move-warning>span{flex:1;min-width:0}.show-grouped-toggle{display:flex;flex:0 0 100%;align-items:center;gap:8px;margin:4px 0 0 33px;color:var(--primary-text-color)}.show-grouped-toggle input{width:18px;height:18px}.group-member-search{display:grid;grid-template-columns:28px minmax(0,1fr);align-items:center;margin:0 0 9px;padding:0 10px;border:1px solid var(--divider-color);border-radius:8px;background:var(--secondary-background-color)}.group-member-search input{width:100%;min-height:44px;border:0;outline:0;color:var(--primary-text-color);background:transparent}.group-member-scroll{max-height:min(45vh,430px);overflow:auto;overscroll-behavior:contain}.group-member-choice.belongs-to-group{background:color-mix(in srgb,var(--warning-color,#f0a000) 7%,transparent)}.group-member-choice .move-note{display:flex;align-items:center;gap:4px;color:var(--warning-color,#f0a000)}.group-member-choice .move-note ha-icon{--mdc-icon-size:16px}.group-result-note,.group-picker-empty{padding:10px 4px;color:var(--secondary-text-color);font-size:12px}.nested-confirmation{z-index:1100}.confirmation-dialog{width:min(480px,100%);text-align:center}.confirmation-dialog>p{margin-top:10px;color:var(--secondary-text-color);line-height:1.5}.confirmation-dialog .dialog-actions{justify-content:center}.confirmation-icon{display:grid;place-items:center;width:54px;height:54px;margin:0 auto 12px;border-radius:50%;color:var(--warning-color,#f0a000);background:color-mix(in srgb,var(--warning-color,#f0a000) 14%,transparent)}.confirmation-icon ha-icon{--mdc-icon-size:31px}
-    .scanner-requirements,.scanner-target-card,.simulation-card,.scanner-defaults{margin-top:16px}.scanner-requirements{display:grid;grid-template-columns:44px minmax(0,1fr);align-items:start;gap:14px}.scanner-requirements>ha-icon{--mdc-icon-size:34px;color:var(--primary-color)}.scanner-requirements>div{display:flex;flex-direction:column;align-items:flex-start;gap:10px}.scanner-requirements p{color:var(--secondary-text-color);line-height:1.55}.scanner-requirements .ha-button{text-decoration:none}.scanner-default-grid,.scanner-route-fields{grid-template-columns:repeat(2,minmax(0,1fr));align-items:end}.active-target{display:flex;align-items:center;gap:14px;padding:14px;border-left:4px solid var(--success-color,#43a047);border-radius:8px;background:color-mix(in srgb,var(--success-color,#43a047) 10%,transparent)}.active-target.inactive{border-left-color:var(--secondary-text-color);background:var(--secondary-background-color)}.active-target>ha-icon{--mdc-icon-size:30px;color:var(--success-color,#43a047)}.active-target.inactive>ha-icon{color:var(--secondary-text-color)}.active-target>div{display:flex;flex:1;flex-direction:column;gap:4px}.active-target small{color:var(--secondary-text-color)}.scanner-heading{margin-top:26px}.scanner-heading>div>p{margin-top:4px}.scanner-heading code{font-size:13px}.scanner-row{display:grid;grid-template-columns:auto minmax(0,1fr) auto auto;align-items:center;min-height:82px;border-bottom:1px solid var(--divider-color)}.scanner-row:last-child,.history-row:last-child{border-bottom:0}.scanner-row.disabled{opacity:.62}.scanner-icon{display:grid;place-items:center;width:48px;height:48px;margin-left:14px;border-radius:50%;color:var(--primary-color);background:color-mix(in srgb,var(--primary-color) 13%,transparent)}.scanner-open{display:flex;flex-direction:column;align-items:flex-start;gap:3px;min-height:80px;padding:10px 14px;border:0;color:var(--primary-text-color);background:transparent;text-align:left;cursor:pointer}.scanner-open:hover{background:var(--secondary-background-color)}.scanner-open small,.scanner-open span{color:var(--secondary-text-color)}.scanner-state{margin-right:8px;padding:4px 8px;border-radius:12px;color:var(--secondary-text-color);background:var(--secondary-background-color);font-size:12px}.scanner-state.enabled{color:var(--success-color,#43a047);background:color-mix(in srgb,var(--success-color,#43a047) 12%,transparent)}.simulation-grid{display:grid;grid-template-columns:repeat(3,minmax(150px,1fr));column-gap:16px;row-gap:20px;align-items:end}.simulation-grid>.field{margin-top:0}.scanner-route-fields{margin-top:14px}.simulation-result{display:flex;align-items:center;gap:9px;margin-top:14px;padding:11px 13px;border-left:4px solid var(--error-color);background:color-mix(in srgb,var(--error-color) 10%,transparent)}.simulation-result.success{border-left-color:var(--success-color,#43a047);background:color-mix(in srgb,var(--success-color,#43a047) 10%,transparent)}.simulation-result.warning{border-left-color:var(--warning-color,#f0a000);background:color-mix(in srgb,var(--warning-color,#f0a000) 10%,transparent)}.scan-history-tabs{display:flex;flex-wrap:wrap;gap:6px;margin:14px 0;border-bottom:1px solid var(--divider-color)}.scan-history-tabs button{display:flex;align-items:center;gap:8px;padding:11px 16px;border:0;border-bottom:3px solid transparent;color:var(--secondary-text-color);background:transparent;cursor:pointer}.scan-history-tabs button.active{border-bottom-color:var(--primary-color);color:var(--primary-color)}.scan-history-tabs ha-icon{--mdc-icon-size:21px}.label-tabs button>span{min-width:24px;padding:2px 7px;border-radius:999px;background:var(--secondary-background-color);font-size:12px}.todo-due-fields{grid-template-columns:minmax(150px,1fr) minmax(110px,.65fr)}.todo-recurrence-fields{grid-template-columns:minmax(100px,1fr) minmax(120px,1fr)}.scan-pagination{display:flex;align-items:center;justify-content:flex-end;flex-wrap:wrap;gap:14px;margin:12px 0 24px;color:var(--secondary-text-color);font-size:13px}.scan-pagination label,.scan-pagination>div{display:flex;align-items:center;gap:8px}.scan-pagination select{min-height:34px;padding:4px 28px 4px 9px;border:1px solid var(--divider-color);border-radius:6px;color:var(--primary-text-color);background:var(--card-background-color)}.scan-pagination .icon-button:disabled{opacity:.35;cursor:default}.history-row{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:start;gap:12px;padding:14px;border-bottom:1px solid var(--divider-color)}.history-status{display:grid;place-items:center;width:38px;height:38px;border-radius:50%;color:var(--error-color);background:color-mix(in srgb,var(--error-color) 12%,transparent)}.history-status.success{color:var(--success-color,#43a047);background:color-mix(in srgb,var(--success-color,#43a047) 12%,transparent)}.history-status.warning{color:var(--warning-color,#f0a000);background:color-mix(in srgb,var(--warning-color,#f0a000) 12%,transparent)}.history-status.neutral{color:var(--secondary-text-color);background:var(--secondary-background-color)}.history-main{display:flex;flex-direction:column;gap:3px}.history-main small,.history-main span,.history-main em{color:var(--secondary-text-color);font-size:13px}.history-main em{margin-top:3px}.history-row>code{color:var(--secondary-text-color);font-size:12px}.pending-history-row>.row-actions{display:flex;align-items:center;gap:5px}.pending-scan-notice{display:flex;align-items:flex-start;gap:11px;margin:4px 0 12px;padding:11px 13px;border-left:4px solid var(--warning-color,#f0a000);border-radius:6px;background:color-mix(in srgb,var(--warning-color,#f0a000) 12%,transparent)}.pending-scan-notice>ha-icon{color:var(--warning-color,#f0a000)}.pending-scan-notice>div{display:flex;flex-direction:column;gap:3px}.pending-scan-notice span{color:var(--secondary-text-color);font-size:13px;line-height:1.45}.compact-setting{margin-top:8px}.scanner-dialog{width:min(620px,100%)}
+    .scanner-requirements,.scanner-target-card,.simulation-card,.scanner-defaults{margin-top:16px}.scanner-requirements{display:grid;grid-template-columns:44px minmax(0,1fr);align-items:start;gap:14px}.scanner-requirements>ha-icon{--mdc-icon-size:34px;color:var(--primary-color)}.scanner-requirements>div{display:flex;flex-direction:column;align-items:flex-start;gap:10px}.scanner-requirements p{color:var(--secondary-text-color);line-height:1.55}.scanner-requirements .ha-button{text-decoration:none}.scanner-default-grid{grid-template-columns:repeat(2,minmax(0,1fr));align-items:end}.scanner-route-fields{display:grid;grid-template-columns:minmax(0,1fr);gap:16px}.active-target{display:flex;align-items:center;gap:14px;padding:14px;border-left:4px solid var(--success-color,#43a047);border-radius:8px;background:color-mix(in srgb,var(--success-color,#43a047) 10%,transparent)}.active-target.inactive{border-left-color:var(--secondary-text-color);background:var(--secondary-background-color)}.active-target>ha-icon{--mdc-icon-size:30px;color:var(--success-color,#43a047)}.active-target.inactive>ha-icon{color:var(--secondary-text-color)}.active-target>div{display:flex;flex:1;flex-direction:column;gap:4px}.active-target small{color:var(--secondary-text-color)}.scanner-heading{margin-top:26px}.scanner-heading>div>p{margin-top:4px}.scanner-heading code{font-size:13px}.scanner-row{display:grid;grid-template-columns:auto minmax(0,1fr) auto auto;align-items:center;min-height:82px;border-bottom:1px solid var(--divider-color)}.scanner-row:last-child,.history-row:last-child{border-bottom:0}.scanner-row.disabled{opacity:.62}.scanner-icon{display:grid;place-items:center;width:48px;height:48px;margin-left:14px;border-radius:50%;color:var(--primary-color);background:color-mix(in srgb,var(--primary-color) 13%,transparent)}.scanner-open{display:flex;flex-direction:column;align-items:flex-start;gap:3px;min-height:80px;padding:10px 14px;border:0;color:var(--primary-text-color);background:transparent;text-align:left;cursor:pointer}.scanner-open:hover{background:var(--secondary-background-color)}.scanner-open small,.scanner-open span{color:var(--secondary-text-color)}.scanner-state{margin-right:8px;padding:4px 8px;border-radius:12px;color:var(--secondary-text-color);background:var(--secondary-background-color);font-size:12px}.scanner-state.enabled{color:var(--success-color,#43a047);background:color-mix(in srgb,var(--success-color,#43a047) 12%,transparent)}.simulation-grid{display:grid;grid-template-columns:repeat(3,minmax(150px,1fr));column-gap:16px;row-gap:20px;align-items:end}.simulation-grid>.field{margin-top:0}.scanner-route-fields{margin-top:14px}.simulation-result{display:flex;align-items:center;gap:9px;margin-top:14px;padding:11px 13px;border-left:4px solid var(--error-color);background:color-mix(in srgb,var(--error-color) 10%,transparent)}.simulation-result.success{border-left-color:var(--success-color,#43a047);background:color-mix(in srgb,var(--success-color,#43a047) 10%,transparent)}.simulation-result.warning{border-left-color:var(--warning-color,#f0a000);background:color-mix(in srgb,var(--warning-color,#f0a000) 10%,transparent)}.scan-history-tabs{display:flex;flex-wrap:wrap;gap:6px;margin:14px 0;border-bottom:1px solid var(--divider-color)}.scan-history-tabs button{display:flex;align-items:center;gap:8px;padding:11px 16px;border:0;border-bottom:3px solid transparent;color:var(--secondary-text-color);background:transparent;cursor:pointer}.scan-history-tabs button.active{border-bottom-color:var(--primary-color);color:var(--primary-color)}.scan-history-tabs ha-icon{--mdc-icon-size:21px}.label-tabs button>span{min-width:24px;padding:2px 7px;border-radius:999px;background:var(--secondary-background-color);font-size:12px}.todo-due-fields{grid-template-columns:minmax(150px,1fr) minmax(110px,.65fr)}.todo-recurrence-fields{grid-template-columns:minmax(100px,1fr) minmax(120px,1fr)}.scan-pagination{display:flex;align-items:center;justify-content:flex-end;flex-wrap:wrap;gap:14px;margin:12px 0 24px;color:var(--secondary-text-color);font-size:13px}.scan-pagination label,.scan-pagination>div{display:flex;align-items:center;gap:8px}.scan-pagination select{min-height:34px;padding:4px 28px 4px 9px;border:1px solid var(--divider-color);border-radius:6px;color:var(--primary-text-color);background:var(--card-background-color)}.scan-pagination .icon-button:disabled{opacity:.35;cursor:default}.history-row{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:start;gap:12px;padding:14px;border-bottom:1px solid var(--divider-color)}.history-status{display:grid;place-items:center;width:38px;height:38px;border-radius:50%;color:var(--error-color);background:color-mix(in srgb,var(--error-color) 12%,transparent)}.history-status.success{color:var(--success-color,#43a047);background:color-mix(in srgb,var(--success-color,#43a047) 12%,transparent)}.history-status.warning{color:var(--warning-color,#f0a000);background:color-mix(in srgb,var(--warning-color,#f0a000) 12%,transparent)}.history-status.neutral{color:var(--secondary-text-color);background:var(--secondary-background-color)}.history-main{display:flex;flex-direction:column;gap:3px}.history-main small,.history-main span,.history-main em{color:var(--secondary-text-color);font-size:13px}.history-main em{margin-top:3px}.history-row>code{color:var(--secondary-text-color);font-size:12px}.pending-history-row>.row-actions{display:flex;align-items:center;gap:5px}.pending-scan-notice{display:flex;align-items:flex-start;gap:11px;margin:4px 0 12px;padding:11px 13px;border-left:4px solid var(--warning-color,#f0a000);border-radius:6px;background:color-mix(in srgb,var(--warning-color,#f0a000) 12%,transparent)}.pending-scan-notice>ha-icon{color:var(--warning-color,#f0a000)}.pending-scan-notice>div{display:flex;flex-direction:column;gap:3px}.pending-scan-notice span{color:var(--secondary-text-color);font-size:13px;line-height:1.45}.compact-setting{margin-top:8px}.scanner-dialog{width:min(620px,100%)}
     .category-order-controls{display:grid;grid-template-columns:minmax(240px,360px) minmax(0,1fr);align-items:center;gap:18px;margin-bottom:14px;padding:16px}.category-order-selectors{display:grid;gap:10px}.category-order-controls label{display:flex;flex-direction:column;gap:6px;color:var(--secondary-text-color)}.category-order-controls select{min-height:46px;padding:0 12px;border:1px solid var(--divider-color);border-radius:7px;color:var(--primary-text-color);background:var(--secondary-background-color)}.category-order-controls p{display:flex;align-items:flex-start;gap:9px;margin:0;color:var(--secondary-text-color);line-height:1.45}.category-order-controls p ha-icon{flex:0 0 auto;color:var(--primary-color)}.category-order-state{grid-column:1/-1;display:inline-flex;align-items:center;gap:7px;width:max-content;max-width:100%;padding:6px 10px;border-radius:16px;color:var(--secondary-text-color);background:var(--secondary-background-color);font-size:13px}.category-order-state.custom{color:var(--warning-color,#f0a000);background:color-mix(in srgb,var(--warning-color,#f0a000) 13%,transparent)}.category-order-state ha-icon{--mdc-icon-size:18px}.category-order-row{display:grid;grid-template-columns:42px 58px minmax(0,1fr) 110px 92px;align-items:center;min-height:76px;border-bottom:1px solid var(--divider-color)}.category-order-row:last-child{border-bottom:0}.category-order-row.dragging{opacity:.45}.drag-handle{display:grid;place-items:center;height:100%;color:var(--secondary-text-color);cursor:grab}.drag-handle:active{cursor:grabbing}.category-order-name{display:flex;flex-direction:column;gap:4px;min-width:0}.category-order-name strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.category-order-name small{color:var(--secondary-text-color)}.category-position-field{display:flex;flex-direction:column;gap:3px;color:var(--secondary-text-color);font-size:12px}.category-position-field input{width:86px;min-height:40px;padding:0 8px;border:1px solid var(--divider-color);border-radius:6px;color:var(--primary-text-color);background:var(--secondary-background-color)}.category-order-arrows{display:flex}.category-order-actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:16px}
     .favorite-overview{margin:0 0 22px}.favorite-overview-heading{display:flex;align-items:center;gap:11px;margin-bottom:10px}.favorite-overview-heading>ha-icon{color:#ffc107;--mdc-icon-size:27px}.favorite-overview-heading p{margin-top:3px;color:var(--secondary-text-color)}.favorite-shortcut-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:10px}.favorite-shortcut{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;min-height:70px;border:1px solid var(--divider-color);border-radius:11px;background:var(--card-background-color);overflow:hidden}.favorite-shortcut>button:first-child{display:grid;grid-template-columns:38px minmax(0,1fr);align-items:center;gap:10px;min-height:68px;padding:9px 8px 9px 14px;border:0;color:var(--primary-text-color);background:transparent;text-align:left;cursor:pointer}.favorite-shortcut>button:first-child:hover{background:var(--secondary-background-color)}.favorite-shortcut>button:first-child>ha-icon{color:var(--primary-color)}.favorite-shortcut>button:first-child>span{display:flex;flex-direction:column;gap:3px;min-width:0}.favorite-shortcut strong,.favorite-shortcut small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.favorite-shortcut small{color:var(--secondary-text-color)}.favorite-shortcut.missing{opacity:.7}.overview-section-title{margin:26px 0 12px;font-size:18px;font-weight:600}.overview-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.overview-card{display:flex;flex-direction:column;gap:16px;min-height:142px}.overview-card-head{display:flex;align-items:center;gap:14px}.overview-card-head>ha-icon{--mdc-icon-size:30px;color:var(--primary-color)}.overview-card.warning .overview-card-head>ha-icon{color:var(--warning-color,#f0a000)}.overview-card-head>div{display:flex;flex:1;align-items:baseline;justify-content:space-between;gap:12px}.overview-card-head span{color:var(--secondary-text-color)}.overview-card-head strong{font-size:28px;font-weight:500}.overview-card-details{display:flex;flex-wrap:wrap;gap:8px 20px;padding-top:13px;border-top:1px solid var(--divider-color)}.overview-card-details>span{display:flex;align-items:baseline;gap:7px}.overview-card-details small{color:var(--secondary-text-color);font-size:13px}.overview-card-details strong{font-size:14px}.overview-note{display:flex;align-items:flex-start;gap:10px;margin-top:18px;padding:4px 2px;color:var(--secondary-text-color);font-size:13px;line-height:1.5}.overview-note ha-icon{flex:0 0 auto;--mdc-icon-size:19px;color:var(--primary-color)}
     .favorite-empty{min-height:150px}.list-detail-tabs{margin-bottom:18px}.list-detail-tabs button{display:inline-flex;align-items:center;gap:7px}.list-detail-tabs ha-icon{--mdc-icon-size:19px}.list-scope-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px;margin-bottom:16px}.list-scope-card{min-width:0}.list-scope-card .section-heading{align-items:center}.list-scope-card .section-heading .icon-button{flex:0 0 auto}.list-scope-pills{display:flex;flex-wrap:wrap;gap:6px}.list-scope-pills button{display:inline-flex;align-items:center;gap:5px;max-width:100%;min-height:28px;padding:3px 8px;border:1px solid color-mix(in srgb,var(--scope-color,var(--primary-color)) 45%,var(--divider-color));border-radius:15px;color:var(--primary-text-color);background:color-mix(in srgb,var(--scope-color,var(--primary-color)) 17%,transparent);font-size:12px;cursor:pointer}.list-scope-pills button:hover{border-color:var(--scope-color,var(--primary-color));background:color-mix(in srgb,var(--scope-color,var(--primary-color)) 25%,transparent)}.list-scope-pills ha-icon{flex:0 0 auto;--mdc-icon-size:15px;color:var(--scope-color,var(--primary-color))}.list-scope-pills span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.list-assignment-links{display:flex;flex-wrap:wrap;gap:6px;margin-top:12px;padding-top:10px;border-top:1px solid var(--divider-color)}.list-assignment-links button{display:grid;grid-template-columns:18px minmax(0,1fr);align-items:center;gap:7px;width:100%;min-height:46px;padding:6px 10px;border:1px solid var(--divider-color);border-radius:23px;color:var(--secondary-text-color);background:transparent;font-size:12px;text-align:left;cursor:pointer}.list-assignment-links button:hover{border-color:var(--primary-color);color:var(--primary-color);background:var(--secondary-background-color)}.list-assignment-links ha-icon{--mdc-icon-size:16px}.list-assignment-link-copy{display:flex;min-width:0;flex-direction:column;gap:2px}.list-assignment-link-copy>span,.list-assignment-link-copy>strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.list-assignment-links strong{color:var(--primary-text-color);font-size:12px;font-weight:600}.list-overview-bottom{margin-top:0}.list-availability-matrix{display:grid;grid-template-columns:minmax(94px,1.25fr) repeat(3,minmax(64px,1fr));align-items:center;margin-top:12px;border-top:1px solid var(--divider-color);border-left:1px solid var(--divider-color);border-radius:10px;overflow:hidden}.list-availability-matrix>*{display:flex;align-items:center;justify-content:center;min-height:43px;padding:6px;border-right:1px solid var(--divider-color);border-bottom:1px solid var(--divider-color);text-align:center}.list-availability-matrix>strong[role="rowheader"]{justify-content:flex-start;padding-left:10px}.list-availability-matrix>strong[role="columnheader"]{font-size:12px;color:var(--secondary-text-color)}.list-availability-toggle{border-top:0;border-left:0;background:transparent;color:var(--secondary-text-color);cursor:pointer}.list-availability-toggle:hover{background:var(--secondary-background-color)}.list-availability-toggle ha-icon,.list-availability-own ha-icon{--mdc-icon-size:21px}.list-availability-toggle.enabled ha-icon,.list-availability-own ha-icon{color:var(--success-color,#43a047)}.list-availability-toggle.disabled ha-icon{color:var(--disabled-text-color,var(--secondary-text-color))}.list-availability-own{gap:5px}.list-availability-own strong{font-size:13px}.list-availability-help{margin:10px 0 0}.list-detail-stats{margin-top:0}
+    .product-scan-actions{display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end}.product-scan-row{display:flex;gap:8px;align-items:center;margin:8px 0}.product-scan-row>.ha-button{flex:1;text-align:left;white-space:normal;overflow-wrap:anywhere}.ha-button.scanner-active{color:var(--success-color,#43a047);border-color:var(--success-color,#43a047);background:color-mix(in srgb,var(--success-color,#43a047) 12%,transparent)}[data-product-scan-queue][hidden]{display:none}
     [data-take-pending-scan][hidden]{display:none}.pending-scan-fields{border:0;margin:0;padding:0;min-width:0}.pending-scan-fields:disabled{opacity:.7}.pending-scan-collaboration{padding:10px 12px;border-left:3px solid var(--primary-color);background:color-mix(in srgb,var(--primary-color) 8%,transparent)}
     .entity-history-row[hidden],.entity-history-list[hidden],[data-entity-history-empty][hidden]{display:none}.entity-sample-visibility{display:flex;align-items:center;gap:8px;margin:14px 0}.entity-sample-visibility input{width:18px;height:18px}.entity-sample-hidden{display:inline-flex;align-items:center;gap:5px;color:var(--warning-color,#ffb300);font-size:12px}.entity-sample-hidden ha-icon{--mdc-icon-size:17px}.sample-hidden{border-left:3px solid var(--warning-color,#ffb300);padding-left:9px}.entity-history-intro{margin-bottom:14px;border-left:4px solid var(--primary-color)}.entity-history-intro p{margin-top:5px;color:var(--secondary-text-color);line-height:1.5}.entity-history-recording-option{display:flex;align-items:flex-start;gap:10px;margin-top:14px;line-height:1.45}.entity-history-recording-option input{width:18px;height:18px;flex:0 0 18px;margin-top:2px}.entity-history-recording-option span{min-width:0}.entity-history-recording-option small{display:block;margin-top:4px;color:var(--secondary-text-color)}.entity-history-add>.entity-history-recording-option{grid-column:1/-1;margin-top:0}.entity-history-add{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:end;gap:12px;margin-bottom:14px}.entity-import-id{overflow-wrap:anywhere}.entity-import-status{margin:14px 0;padding:10px 12px;border-left:4px solid var(--primary-color);background:color-mix(in srgb,var(--primary-color) 10%,transparent);line-height:1.5}.entity-history-import-sources{display:flex;flex-wrap:wrap;gap:10px 22px;margin:14px 0}.entity-history-import-sources label{display:flex;align-items:center;gap:8px}.entity-history-import-sources input{width:18px;height:18px}.entity-history-list{padding:0;overflow:hidden}.dialog.entity-samples-dialog{display:flex;flex-direction:column;width:min(850px,calc(100vw - 40px))}.entity-samples-dialog>*{flex-shrink:0}.entity-samples-dialog .field-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.entity-sample-filters{margin:12px 0}.entity-sample-filters summary{cursor:pointer;color:var(--primary-color)}.entity-sample-filters[open] summary{margin-bottom:12px}@media(max-width:600px){.entity-samples-dialog .field-grid{grid-template-columns:1fr}.entity-samples-dialog .dialog-actions .ha-button{flex:1 1 auto;min-height:44px;height:auto;padding:10px 14px}}.entity-samples-list{flex:1 1 auto;min-height:0;max-height:45vh;overflow:auto;overscroll-behavior:contain;margin:16px 0}.entity-sample-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 4px;border-bottom:1px solid var(--divider-color)}.entity-sample-row>div{display:flex;min-width:0;flex-direction:column;gap:4px}.entity-sample-row strong{overflow-wrap:anywhere}.entity-sample-row small{color:var(--secondary-text-color)}.entity-sample-status{padding:12px;color:var(--success-color,#43a047)}.entity-sample-attributes{margin:14px 0}.entity-sample-attributes summary{cursor:pointer;color:var(--primary-color)}.entity-sample-attributes pre{white-space:pre-wrap;overflow-wrap:anywhere}.entity-sample-attributes textarea{width:100%;box-sizing:border-box;font:inherit}.entity-history-row{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:13px;min-height:86px;padding:10px 16px;border-bottom:1px solid var(--divider-color)}.entity-history-row:last-child{border-bottom:0}.entity-history-icon{display:grid;place-items:center;width:44px;height:44px;border-radius:50%;color:var(--primary-color);background:color-mix(in srgb,var(--primary-color) 13%,transparent)}.entity-history-details{display:flex;min-width:0;flex-direction:column;gap:3px}.entity-history-details code,.entity-history-details small{overflow:hidden;color:var(--secondary-text-color);text-overflow:ellipsis;white-space:nowrap}.entity-history-actions{display:flex;align-items:center;gap:4px}
     .bring-sync-card{margin-bottom:16px;padding:16px 18px}.bring-sync-card.error{border-left:4px solid var(--error-color)}.bring-sync-card.syncing{border-left:4px solid var(--primary-color)}.bring-sync-header,.bring-sync-header>div{display:flex;align-items:center;gap:12px}.bring-sync-header{justify-content:space-between}.bring-sync-header>div>ha-icon{--mdc-icon-size:28px;color:var(--success-color,#43a047)}.bring-sync-card.error .bring-sync-header>div>ha-icon{color:var(--error-color)}.bring-sync-card.syncing .bring-sync-header>div>ha-icon,.bring-sync-card.never .bring-sync-header>div>ha-icon{color:var(--primary-color)}.bring-sync-header span{display:flex;flex-direction:column;gap:3px}.bring-sync-header small,.bring-sync-details small{color:var(--secondary-text-color);font-size:13px}.bring-sync-details{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:13px 24px;margin-top:16px;padding-top:15px;border-top:1px solid var(--divider-color)}.bring-sync-details>span{display:flex;flex-direction:column;gap:4px;min-width:0}.bring-sync-details strong{overflow-wrap:anywhere;font-size:14px}.bring-sync-error{display:flex;align-items:flex-start;gap:8px;margin-top:14px;padding:11px 12px;border-radius:8px;color:var(--error-color);background:color-mix(in srgb,var(--error-color) 10%,transparent);line-height:1.4}.bring-sync-error ha-icon{flex:0 0 auto;--mdc-icon-size:20px}

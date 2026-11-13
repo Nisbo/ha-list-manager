@@ -1,0 +1,7 @@
+html5-qrcode 2.3.8, https://github.com/mebjas/html5-qrcode
+Apache License 2.0; see HTML5-QRCODE-LICENSE.txt.
+
+Local resource-lifecycle fix in scanFileV2: reuse the tracked object URL
+for the image source and revoke it after decoding succeeds or fails.
+The upstream implementation allocated an additional untracked object URL.
+This avoids retaining frame blobs during repeated high-resolution scans.

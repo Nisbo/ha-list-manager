@@ -301,6 +301,8 @@ class ScannerRecord:
     action: str | None
     created_at: str
     updated_at: str
+    source_type: str = "eyoyo"
+    mqtt: dict[str, Any] | None = None
 
     def as_dict(self) -> dict[str, Any]:
         """Return a JSON-serializable representation."""
@@ -311,7 +313,7 @@ class ScannerRecord:
 class ScannerTargetRecord:
     """The list and mode currently receiving scanner events."""
 
-    list_id: str
+    list_id: str | None
     action: str
     updated_at: str
 
