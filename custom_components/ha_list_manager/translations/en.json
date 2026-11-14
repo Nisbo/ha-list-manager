@@ -529,7 +529,9 @@
     "scan_request_conflict": "This scan request has already been used for different data.",
     "scan_added": "{quantity}× {name} added.",
     "scan_details_required": "Product unknown or lookup unavailable. Complete the product details in the scan queue.",
-    "scan_missing_name": "Enter a product name."
+    "scan_missing_name": "Enter a product name.",
+    "backend_todo_monitoring_only": "This feature is only available for To-do tasks.",
+    "todo_monitoring_paused": "Monitoring paused"
   },
   "config_panel": {
     "backup": {
@@ -915,7 +917,9 @@
       "shopping_edit_shortcuts": "Shows icon buttons for category, labels and item actions below the edit-dialog title.",
       "todo_edit_shortcuts": "Shows quick buttons for category, labels and saving the task as a template below the edit-dialog title.",
       "date_only_end_of_day": "Tasks without a time turn red at the next local midnight. Tasks with a time keep their exact deadline. Default: off.",
-      "capitalize_first_letter": "Applies when creating or editing free shopping items and tasks, including Alexa imports and when no card is open. Enabling this option does not retroactively rename existing entries. Linked product names remain unchanged."
+      "capitalize_first_letter": "Applies when creating or editing free shopping items and tasks, including Alexa imports and when no card is open. Enabling this option does not retroactively rename existing entries. Linked product names remain unchanged.",
+      "last_checked": "Shows when the task was last checked. Completing it or using either next-due action sets this automatically; it can also be set manually from the action menu.",
+      "dates_inline": "Shows the due date and last-check time side by side instead of on separate lines. They wrap when space is limited."
     },
     "history": {
       "add_sample": "Add reading",
@@ -1675,7 +1679,6 @@
       "custom_order_active": "Custom order active",
       "product_search_fields": "Custom or original name, EAN, brand, category or label",
       "chip_name_exists_in_scope": "A chip with this name already exists in this scope.",
-      "another_inventory_list": "another inventory list",
       "group_needs_two_items": "A group requires at least two items.",
       "list_name_exists": "A list with this name already exists.",
       "clear_input": "Clear input",
@@ -1917,7 +1920,6 @@
       "delete_scanner": "Delete scanner",
       "simulate_scanner": "Simulate scanner",
       "scanner_target_active": "Scanner target active – scans are processed as “{p0}” in this inventory.",
-      "change_scanner_target": "Change scanner target",
       "scan_history_count": "Scans in history",
       "show_product_details_toggle": "Show product details toggle",
       "quick_entries": "Quick entries",
@@ -2032,7 +2034,6 @@
       "configured_scanners": "Configured scanners",
       "show_camera": "Show camera scanner",
       "no_open_scans": "No pending scans",
-      "confirm_switch_target_mode": "“{p0}” is currently active for scanner events. Activate “{p1}” in “{p2}” mode instead?",
       "open_scan_count": "Pending scans ({p0})",
       "inventory_ready_message": "{p0} You can now switch to the inventory card.",
       "qr_code_named": "QR code {p0}",
@@ -2040,7 +2041,6 @@
       "scan_countdown": "Scan in {p0} s",
       "edit": "Edit scanner",
       "deactivate_target": "Deactivate scanner target",
-      "confirm_switch_target": "Switch scanner target?",
       "loading_history": "Loading scan history …",
       "simulation": "Simulation",
       "unknown": "Unknown scanner",
@@ -2289,7 +2289,16 @@
       "templates_for_list_one": "{count} template for this list",
       "templates_for_list_many": "{count} templates for this list",
       "less_than_minute": "< 1 minute",
-      "date_only_end_of_day": "Mark date-only tasks red after the day ends"
+      "date_only_end_of_day": "Mark date-only tasks red after the day ends",
+      "last_checked": "Last checked",
+      "set_last_checked": "Set last checked manually",
+      "no_check": "No check recorded yet",
+      "pause_monitoring": "Pause monitoring",
+      "resume_monitoring": "Resume monitoring",
+      "monitoring_paused": "Monitoring paused",
+      "pause_help": "The due date and repeat interval are retained. While paused, the task is excluded from due warnings and the next due task. Resuming restores monitoring of the saved date.",
+      "show_last_checked": "Show last checked",
+      "dates_inline": "Show dates on one line"
     },
     "shopping": {
       "show_quantity_one": "Show quantity of 1",
@@ -2539,7 +2548,13 @@
       "reassigned_one": "{count} label assignment will be reassigned to an available definition with the same name",
       "reassigned_many": "{count} label assignments will be reassigned to an available definition with the same name",
       "removed_one": "{count} label assignment will be removed from list entries",
-      "removed_many": "{count} label assignments will be removed from list entries"
+      "removed_many": "{count} label assignments will be removed from list entries",
+      "hide_in_items": "Hide on list entries",
+      "hide_in_items_help": "This label is intended for filtering and grouping. For example, assign shops to items without showing every shop on each list entry. The label remains visible when editing.",
+      "show_hidden": "Show hidden labels on entries",
+      "filter_only": "Filter labels",
+      "other": "Other labels",
+      "filter_label": "Filter label"
     },
     "settings": {
       "scope_change_impact": "This change affects existing list data: {p0} categories will be reassigned to a definition with the same name, {p1} category assignments will become “General”, {p2} labels will be reassigned and {p3} label assignments will be removed. Product defaults remain unchanged.",
@@ -2993,7 +3008,7 @@
       "save_selection": "Save selection as quick filter",
       "clear_all": "Clear all filters",
       "offers_heading": "Offer items",
-      "label_menu": "Labels",
+      "label_menu": "Labels …",
       "stock_heading": "Stock filter",
       "stock_below": "< Minimum stock",
       "task_settings": "Set task filter …",
@@ -3100,6 +3115,28 @@
       "pending": "Pending product scans ({count})",
       "review": "The product is only created or changed when you save. Cancel keeps the scan pending for later.",
       "help": "The camera opens the product window after scanning. With the product scanner enabled (green), new scans open it automatically when “Products” is in the foreground and no other dialog is open. Otherwise, scans wait under “Pending product scans”; select a scan there to review it. Returning to “Products” does not automatically open pending scans. Products are only created or changed when you select “Save”. Applies to registered scanners using “Active target”; fixed list assignments stay unchanged."
+    },
+    "scanner_target": {
+      "title": "Switch scanner target?",
+      "current": "Current target",
+      "next": "New target",
+      "mode": "Stock action",
+      "switch": "Switch",
+      "products": "Product database (backend)",
+      "shopping": "Shopping list “{name}”",
+      "inventory": "Inventory “{name}”",
+      "list": "List “{name}”",
+      "unknown": "Unknown list",
+      "failed": "The scanner target could not be changed."
+    },
+    "frontend_update": {
+      "title": "Interface",
+      "reload_ui": "Reload interface",
+      "reload": "Reload",
+      "available": "A new HA List Manager interface is available. Please reload.",
+      "help": "Renews the file URLs and reloads this page. Saved filters, collapsed sections and other browser preferences are retained.",
+      "discard": "Reloading closes open dialogs. Unsaved changes will be lost. Reload anyway?",
+      "failed": "The interface could not be reloaded. Please check the connection and try again."
     }
   },
   "exceptions": {
@@ -3948,6 +3985,9 @@
     },
     "alexa_outbox_name_too_long": {
       "message": "The Alexa item text is too long. Please shorten its name or quantity description."
+    },
+    "backend_todo_monitoring_only": {
+      "message": "This feature is only available for To-do tasks."
     }
   }
 }

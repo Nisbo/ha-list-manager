@@ -529,7 +529,9 @@
     "scan_request_conflict": "Diese Scananfrage wurde bereits für andere Daten verwendet.",
     "scan_added": "{quantity}× {name} hinzugefügt.",
     "scan_details_required": "Produkt unbekannt oder Abfrage nicht verfügbar. Ergänze die Produktdaten in der Scan-Warteschlange.",
-    "scan_missing_name": "Gib einen Produktnamen ein."
+    "scan_missing_name": "Gib einen Produktnamen ein.",
+    "backend_todo_monitoring_only": "Diese Funktion ist nur für To-do-Aufgaben verfügbar.",
+    "todo_monitoring_paused": "Überwachung pausiert"
   },
   "config_panel": {
     "backup": {
@@ -915,7 +917,9 @@
       "shopping_edit_shortcuts": "Zeigt unter dem Titel des Bearbeitungsdialogs Symbolbuttons für Kategorie, Labels und Artikelaktionen.",
       "todo_edit_shortcuts": "Zeigt Schnellbuttons für Kategorie, Labels und das Speichern als Vorlage unter dem Titel im Bearbeitungsdialog.",
       "date_only_end_of_day": "Aufgaben ohne Uhrzeit werden ab dem nächsten lokalen Tagesbeginn rot markiert. Termine mit Uhrzeit gelten weiterhin zum angegebenen Zeitpunkt. Standard: aus.",
-      "capitalize_first_letter": "Gilt beim Anlegen oder Bearbeiten freier Einkaufsartikel und Aufgaben, auch über Alexa und ohne geöffnete Karte. Das Aktivieren benennt vorhandene Einträge nicht rückwirkend um. Verknüpfte Produktnamen bleiben unverändert."
+      "capitalize_first_letter": "Gilt beim Anlegen oder Bearbeiten freier Einkaufsartikel und Aufgaben, auch über Alexa und ohne geöffnete Karte. Das Aktivieren benennt vorhandene Einträge nicht rückwirkend um. Verknüpfte Produktnamen bleiben unverändert.",
+      "last_checked": "Zeigt den letzten Prüfzeitpunkt am Eintrag. Er wird beim Erledigen und bei beiden Aktionen für eine neue Fälligkeit automatisch gesetzt; im Aktionsmenü lässt er sich zusätzlich manuell setzen.",
+      "dates_inline": "Zeigt Fälligkeit und letzten Prüfzeitpunkt nebeneinander statt untereinander. Bei wenig Platz werden sie umgebrochen."
     },
     "history": {
       "add_sample": "Messwert ergänzen",
@@ -1675,7 +1679,6 @@
       "custom_order_active": "Eigene Sonderreihenfolge aktiv",
       "product_search_fields": "Eigener oder originaler Name, EAN, Marke, Kategorie oder Label",
       "chip_name_exists_in_scope": "Ein Chip mit diesem Namen existiert in diesem Bereich bereits.",
-      "another_inventory_list": "eine andere Inventarliste",
       "group_needs_two_items": "Eine Gruppe benötigt mindestens zwei Artikel.",
       "list_name_exists": "Eine Liste mit diesem Namen existiert bereits.",
       "clear_input": "Eingabe löschen",
@@ -1917,7 +1920,6 @@
       "delete_scanner": "Scanner löschen",
       "simulate_scanner": "Scanner simulieren",
       "scanner_target_active": "Scannerziel aktiv – Scans werden als „{p0}“ in diesem Inventar verarbeitet.",
-      "change_scanner_target": "Scannerziel wechseln",
       "scan_history_count": "Scans im Verlauf",
       "show_product_details_toggle": "Schalter für Produktdetails anzeigen",
       "quick_entries": "Schnelleingaben",
@@ -2032,7 +2034,6 @@
       "configured_scanners": "Eingerichtete Scanner",
       "show_camera": "Kamera-Scanner anzeigen",
       "no_open_scans": "Keine offenen Scans",
-      "confirm_switch_target_mode": "Momentan ist „{p0}“ für Scannerereignisse aktiv. Soll stattdessen „{p1}“ im Modus „{p2}“ aktiviert werden?",
       "open_scan_count": "Offene Scans ({p0})",
       "inventory_ready_message": "{p0} Du kannst jetzt zur Inventarkarte wechseln.",
       "qr_code_named": "QR-Code {p0}",
@@ -2040,7 +2041,6 @@
       "scan_countdown": "Scan in {p0} s",
       "edit": "Scanner bearbeiten",
       "deactivate_target": "Scannerziel deaktivieren",
-      "confirm_switch_target": "Scannerziel wechseln?",
       "loading_history": "Scanverlauf wird geladen …",
       "simulation": "Simulation",
       "unknown": "Unbekannter Scanner",
@@ -2289,7 +2289,16 @@
       "templates_for_list_one": "{count} Vorlage für diese Liste",
       "templates_for_list_many": "{count} Vorlagen für diese Liste",
       "less_than_minute": "< 1 Minute",
-      "date_only_end_of_day": "Aufgaben ohne Uhrzeit erst nach Tagesende rot markieren"
+      "date_only_end_of_day": "Aufgaben ohne Uhrzeit erst nach Tagesende rot markieren",
+      "last_checked": "Zuletzt geprüft",
+      "set_last_checked": "Zuletzt geprüft manuell setzen",
+      "no_check": "Noch keine Prüfung erfasst",
+      "pause_monitoring": "Überwachung pausieren",
+      "resume_monitoring": "Überwachung fortsetzen",
+      "monitoring_paused": "Überwachung pausiert",
+      "pause_help": "Fälligkeit und Wiederholung bleiben erhalten. Während der Pause wird die Aufgabe bei Fälligkeitswarnungen und der nächsten Fälligkeit nicht berücksichtigt. Beim Fortsetzen gilt wieder das gespeicherte Datum.",
+      "show_last_checked": "Zuletzt geprüft anzeigen",
+      "dates_inline": "Datumsangaben in einer Zeile anzeigen"
     },
     "shopping": {
       "show_quantity_one": "Anzahl 1 anzeigen",
@@ -2539,7 +2548,13 @@
       "reassigned_one": "{count} Labelzuordnung wird einer gleichnamigen verfügbaren Definition zugeordnet",
       "reassigned_many": "{count} Labelzuordnungen werden einer gleichnamigen verfügbaren Definition zugeordnet",
       "removed_one": "{count} Labelzuordnung wird von Listeneinträgen entfernt",
-      "removed_many": "{count} Labelzuordnungen werden von Listeneinträgen entfernt"
+      "removed_many": "{count} Labelzuordnungen werden von Listeneinträgen entfernt",
+      "hide_in_items": "In Listeneinträgen ausblenden",
+      "hide_in_items_help": "Dieses Label ist für Filter und Gruppierung gedacht. Damit kannst du Artikeln beispielsweise Shops zuweisen, ohne bei jedem Artikel alle Shops in der Übersicht anzuzeigen. Beim Bearbeiten bleibt das Label sichtbar.",
+      "show_hidden": "Ausgeblendete Labels trotzdem anzeigen",
+      "filter_only": "Filterlabels",
+      "other": "Weitere Labels",
+      "filter_label": "Filterlabel"
     },
     "settings": {
       "scope_change_impact": "Die Änderung betrifft vorhandene Listendaten: {p0} Kategorien werden einer gleichnamigen Definition neu zugeordnet, {p1} Kategoriezuordnungen werden zu „Allgemein“, {p2} Labels werden neu zugeordnet und {p3} Labelzuordnungen entfernt. Produktvorgaben bleiben unverändert.",
@@ -2993,7 +3008,7 @@
       "save_selection": "Auswahl als Schnellfilter speichern",
       "clear_all": "Alle Filter aufheben",
       "offers_heading": "Angebotsartikel",
-      "label_menu": "Label",
+      "label_menu": "Label …",
       "stock_heading": "Bestandsfilter",
       "stock_below": "< Mindestbestand",
       "task_settings": "Aufgabenfilter einstellen …",
@@ -3100,6 +3115,28 @@
       "pending": "Offene Produktscans ({count})",
       "review": "Das Produkt wird erst mit „Speichern“ angelegt oder geändert. Mit „Abbrechen“ bleibt der Scan für später offen.",
       "help": "Die Kamera öffnet nach dem Scan das Produktfenster. Bei aktiviertem Produktscanner (grün) öffnet es sich bei neuen Scans automatisch, wenn „Produkte“ im Vordergrund ist und kein anderes Fenster geöffnet ist. Andernfalls warten die Scans unter „Offene Produktscans“; wähle dort einen Scan zum Bearbeiten aus. Beim Zurückkehren zu „Produkte“ öffnen wartende Scans kein Fenster automatisch. Produkte werden erst mit „Speichern“ angelegt oder geändert. Gilt für registrierte Scanner mit „Aktives Ziel“; feste Listenzuordnungen bleiben erhalten."
+    },
+    "scanner_target": {
+      "title": "Scannerziel wechseln?",
+      "current": "Aktuelles Ziel",
+      "next": "Neues Ziel",
+      "mode": "Buchungsmodus",
+      "switch": "Wechseln",
+      "products": "Produktdatenbank (Backend)",
+      "shopping": "Einkaufsliste „{name}“",
+      "inventory": "Inventar „{name}“",
+      "list": "Liste „{name}“",
+      "unknown": "Unbekannte Liste",
+      "failed": "Das Scannerziel konnte nicht geändert werden."
+    },
+    "frontend_update": {
+      "title": "Oberfläche",
+      "reload_ui": "Oberfläche neu laden",
+      "reload": "Neu laden",
+      "available": "Eine neue Oberfläche für HA List Manager ist verfügbar. Bitte neu laden.",
+      "help": "Erneuert die Dateiadressen und lädt diese Seite neu. Gespeicherte Filter, Klappzustände und andere Browser-Einstellungen bleiben erhalten.",
+      "discard": "Beim Neuladen werden offene Dialoge geschlossen. Nicht gespeicherte Änderungen gehen verloren. Trotzdem neu laden?",
+      "failed": "Die Oberfläche konnte nicht neu geladen werden. Bitte die Verbindung prüfen und erneut versuchen."
     }
   },
   "exceptions": {
@@ -3948,6 +3985,9 @@
     },
     "alexa_outbox_name_too_long": {
       "message": "Der Text für den Alexa-Eintrag ist zu lang. Bitte den Artikelnamen oder die Mengenbeschreibung kürzen."
+    },
+    "backend_todo_monitoring_only": {
+      "message": "Diese Funktion ist nur für To-do-Aufgaben verfügbar."
     }
   }
 }

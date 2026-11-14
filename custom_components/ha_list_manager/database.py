@@ -674,6 +674,7 @@ class HaListManagerDatabase:
         offer_only: bool | object = False,
         remember_product_category: bool = False,
         remember_product_labels: bool = False,
+        monitoring_paused: bool = False,
     ) -> ListItemRecord:
         """Create and return a list item."""
         record = await self._async_run(
@@ -693,6 +694,7 @@ class HaListManagerDatabase:
             offer_only,
             remember_product_category,
             remember_product_labels,
+            monitoring_paused,
         )
         self._fire_item_mutated(None, record)
         return record
@@ -912,6 +914,8 @@ class HaListManagerDatabase:
         offer_only: bool | object = _UNSET,
         remember_product_category: bool = False,
         remember_product_labels: bool = False,
+        monitoring_paused: bool | object = _UNSET,
+        mark_checked: bool = False,
     ) -> ListItemRecord:
         """Update and return a list item."""
         before = await self._async_run(self._get_item, item_id)
@@ -933,6 +937,8 @@ class HaListManagerDatabase:
             offer_only,
             remember_product_category,
             remember_product_labels,
+            monitoring_paused,
+            mark_checked,
         )
         self._fire_item_mutated(before, record)
         return record
@@ -943,6 +949,13 @@ class HaListManagerDatabase:
         """Set the completed state of a list item."""
         before = await self._async_run(self._get_item, item_id)
         record = await self._async_run(self._set_item_completed, item_id, completed)
+        self._fire_item_mutated(before, record)
+        return record
+
+    async def async_check_item(self, item_id: str) -> ListItemRecord:
+        """Record an explicit check without changing any task fields."""
+        before = await self._async_run(self._get_item, item_id)
+        record = await self._async_run(self._check_item, item_id)
         self._fire_item_mutated(before, record)
         return record
 
@@ -1256,10 +1269,14 @@ class HaListManagerDatabase:
         icon: str | None,
         color: str | None,
         position: int | None = None,
+        source_category: str | None = None,
+        source_list_id: str | None = None,
+        rules: list[str] | None = None,
     ) -> CategoryRecord:
         """Create and return a permanent category."""
         return await self._async_run(
-            self._create_category, name, scope, list_type, list_id, icon, color, position
+            self._create_category, name, scope, list_type, list_id, icon, color, position,
+            source_category, source_list_id, rules
         )
 
     async def async_update_category(
@@ -1335,21 +1352,21 @@ class HaListManagerDatabase:
     async def async_create_label(
         self, *, name: str, icon: str | None, color: str | None,
         scope: str = "global", list_type: str | None = None,
-        list_id: str | None = None,
+        list_id: str | None = None, hide_in_items: bool = False,
     ) -> LabelRecord:
         """Create and return a reusable label."""
         return await self._async_run(
-            self._create_label, name, icon, color, scope, list_type, list_id
+            self._create_label, name, icon, color, scope, list_type, list_id, hide_in_items
         )
 
     async def async_update_label(
         self, label_id: str, *, name: str, icon: str | None, color: str | None,
         scope: str = "global", list_type: str | None = None,
-        list_id: str | None = None,
+        list_id: str | None = None, hide_in_items: bool = False,
     ) -> LabelRecord:
         """Update and return a reusable label."""
         return await self._async_run(
-            self._update_label, label_id, name, icon, color, scope, list_type, list_id
+            self._update_label, label_id, name, icon, color, scope, list_type, list_id, hide_in_items
         )
 
     async def async_delete_label(self, label_id: str) -> None:
@@ -2079,7 +2096,7 @@ class HaListManagerDatabase:
                         "The existing database has no supported schema metadata"
                     )
                 version = self._read_schema_version(connection)
-                if version not in (1, 2, 3, 4, 5, 6, DATABASE_SCHEMA_VERSION):
+                if version not in (1, 2, 3, 4, 5, 6, 7, 8, DATABASE_SCHEMA_VERSION):
                     raise UnsupportedSchemaVersionError(
                         f"Database schema {version} is not supported; "
                         f"expected {DATABASE_SCHEMA_VERSION}"
@@ -2118,7 +2135,15 @@ class HaListManagerDatabase:
                     self._create_label_filters_schema(connection)
                 if version < 6:
                     self._create_completed_cleanup_schema(connection)
-                self._create_mqtt_scanner_schema(connection)
+                if version < 7:
+                    self._create_mqtt_scanner_schema(connection)
+                if version < 8:
+                    connection.execute("ALTER TABLE labels ADD COLUMN hide_in_items "
+                                       "INTEGER NOT NULL DEFAULT 0 CHECK(hide_in_items IN (0,1))")
+                if version < 9:
+                    connection.execute("ALTER TABLE list_items ADD COLUMN last_checked_at TEXT")
+                    connection.execute("ALTER TABLE list_items ADD COLUMN monitoring_paused "
+                                       "INTEGER NOT NULL DEFAULT 0 CHECK(monitoring_paused IN (0,1))")
                 connection.execute(
                     "UPDATE schema_metadata SET value = ? WHERE key = 'schema_version'",
                     (str(DATABASE_SCHEMA_VERSION),),
@@ -2267,6 +2292,8 @@ CREATE TABLE list_items (
                 category_id TEXT REFERENCES categories(id) ON DELETE SET NULL,
                 category TEXT,
                 due_at TEXT,
+                last_checked_at TEXT,
+                monitoring_paused INTEGER NOT NULL DEFAULT 0 CHECK(monitoring_paused IN (0,1)),
                 recurrence_interval INTEGER CHECK (
                     recurrence_interval IS NULL OR recurrence_interval >= 1
                 ),
@@ -2345,6 +2372,7 @@ CREATE TABLE labels (
                 name TEXT NOT NULL COLLATE NOCASE,
                 icon TEXT,
                 color TEXT,
+                hide_in_items INTEGER NOT NULL DEFAULT 0 CHECK(hide_in_items IN (0,1)),
                 scope TEXT NOT NULL DEFAULT 'global'
                     CHECK (scope IN ('global', 'list_type', 'list')),
                 list_type TEXT CHECK (
@@ -4426,7 +4454,8 @@ WHERE registry_entry_id IS NOT NULL;
                 """
                 SELECT id, list_id, product_id, external_uid, name, description, quantity, category_id, category,
                        due_at, recurrence_interval, recurrence_unit, completed, position,
-                       inventory_source_type, inventory_source_id, created_at, updated_at, offer_only, completed_delete_at
+                       inventory_source_type, inventory_source_id, created_at, updated_at, offer_only, completed_delete_at,
+                       last_checked_at, monitoring_paused
                 FROM list_items
                 WHERE list_id = ?
                 ORDER BY completed, position, created_at
@@ -4998,6 +5027,7 @@ WHERE registry_entry_id IS NOT NULL;
         offer_only: bool | object = False,
         remember_product_category: bool = False,
         remember_product_labels: bool = False,
+        monitoring_paused: bool = False,
     ) -> ListItemRecord:
         now = self._now()
         recurrence_interval, recurrence_unit = self._validate_recurrence(
@@ -5009,6 +5039,8 @@ WHERE registry_entry_id IS NOT NULL;
             self._require_list(connection, list_id)
             name = self._format_list_item_name(connection, list_id, name, product_id, external_uid)
             kind = connection.execute("SELECT list_type FROM lists WHERE id = ?", (list_id,)).fetchone()[0]
+            if monitoring_paused and kind != "todo":
+                raise ValueError(localized_text("backend.todo_monitoring_only"))
             if offer_only and kind != "shopping":
                 raise ValueError(localized_text("backend.offers_shopping_only"))
             if remember_product_category:
@@ -5051,6 +5083,7 @@ WHERE registry_entry_id IS NOT NULL;
                 recurrence_interval=recurrence_interval,
                 recurrence_unit=recurrence_unit,
                 completed=False,
+                monitoring_paused=monitoring_paused,
                 position=int(row["next_position"]),
                 created_at=now,
                 updated_at=now,
@@ -5082,7 +5115,7 @@ WHERE registry_entry_id IS NOT NULL;
                     record.updated_at,
                 ),
             )
-            connection.execute("UPDATE list_items SET offer_only = ? WHERE id = ?", (int(bool(offer_only)), record.id))
+            connection.execute("UPDATE list_items SET offer_only = ?, monitoring_paused = ? WHERE id = ?", (int(bool(offer_only)), int(monitoring_paused), record.id))
             self._replace_labels(
                 connection, "list_item_labels", "item_id", record.id, label_ids
             )
@@ -5092,6 +5125,7 @@ WHERE registry_entry_id IS NOT NULL;
         return self._item_record_from_row(
             {
                 "offer_only": bool(offer_only),
+                "monitoring_paused": monitoring_paused,
                 "id": record.id,
                 "list_id": record.list_id,
                 "product_id": record.product_id,
@@ -5132,6 +5166,8 @@ WHERE registry_entry_id IS NOT NULL;
         offer_only: bool | object = _UNSET,
         remember_product_category: bool = False,
         remember_product_labels: bool = False,
+        monitoring_paused: bool | object = _UNSET,
+        mark_checked: bool = False,
     ) -> ListItemRecord:
         recurrence_interval, recurrence_unit = self._validate_recurrence(
             recurrence_interval, recurrence_unit
@@ -5140,12 +5176,16 @@ WHERE registry_entry_id IS NOT NULL;
             if remember_product_category or remember_product_labels:
                 connection.execute("BEGIN IMMEDIATE")
             existing = connection.execute(
-                "SELECT list_id, product_id, external_uid FROM list_items WHERE id = ?", (item_id,)
+                "SELECT * FROM list_items WHERE id = ?", (item_id,)
             ).fetchone()
             if existing is None:
                 raise ListItemNotFoundError(item_id)
+            kind = connection.execute("SELECT list_type FROM lists WHERE id = ?", (existing["list_id"],)).fetchone()[0]
+            if (monitoring_paused is not _UNSET or mark_checked) and kind != "todo":
+                raise ValueError(localized_text("backend.todo_monitoring_only"))
+            paused = bool(existing["monitoring_paused"]) if monitoring_paused is _UNSET else monitoring_paused
+            checked_at = self._now() if kind == "todo" and (mark_checked or completed and not existing["completed"]) else existing["last_checked_at"]
             if offer_only is not _UNSET:
-                kind = connection.execute("SELECT list_type FROM lists WHERE id = ?", (existing["list_id"],)).fetchone()[0]
                 if offer_only and kind != "shopping":
                     raise ValueError(localized_text("backend.offers_shopping_only"))
                 connection.execute("UPDATE list_items SET offer_only = ? WHERE id = ?", (int(bool(offer_only)), item_id))
@@ -5170,7 +5210,7 @@ WHERE registry_entry_id IS NOT NULL;
                 """
                 UPDATE list_items
                 SET product_id = ?, external_uid = ?, name = ?, description = ?, quantity = ?, category_id = ?, category = ?,
-                    due_at = ?, recurrence_interval = ?, recurrence_unit = ?, completed = ?, updated_at = ?
+                    due_at = ?, recurrence_interval = ?, recurrence_unit = ?, completed = ?, updated_at = ?, last_checked_at = ?, monitoring_paused = ?
                 WHERE id = ?
                 """,
                 (
@@ -5186,6 +5226,8 @@ WHERE registry_entry_id IS NOT NULL;
                     recurrence_unit,
                     int(completed),
                     self._now(),
+                    checked_at,
+                    int(paused),
                     item_id,
                 ),
             )
@@ -5207,14 +5249,30 @@ WHERE registry_entry_id IS NOT NULL;
     ) -> ListItemRecord:
         with self._connect() as connection:
             cursor = connection.execute(
-                "UPDATE list_items SET completed = ?, updated_at = ? WHERE id = ?",
-                (int(completed), self._now(), item_id),
+                """UPDATE list_items SET
+                last_checked_at = CASE WHEN ? = 1 AND completed = 0 AND
+                    list_id IN (SELECT id FROM lists WHERE list_type = 'todo') THEN ? ELSE last_checked_at END,
+                completed = ?, updated_at = ? WHERE id = ?""",
+                (int(completed), self._now(), int(completed), self._now(), item_id),
             )
             if cursor.rowcount != 1:
                 raise ListItemNotFoundError(item_id)
             row = connection.execute(
                 "SELECT * FROM list_items WHERE id = ?", (item_id,)
             ).fetchone()
+            labels = self._labels_for(connection, "list_item_labels", "item_id", item_id, row["list_id"])
+        return self._item_record_from_row(row, labels)
+
+    def _check_item(self, item_id: str) -> ListItemRecord:
+        with self._connect() as connection:
+            item = connection.execute("SELECT list_id FROM list_items WHERE id = ?", (item_id,)).fetchone()
+            if item is None:
+                raise ListItemNotFoundError(item_id)
+            if connection.execute("SELECT list_type FROM lists WHERE id = ?", (item["list_id"],)).fetchone()[0] != "todo":
+                raise ValueError(localized_text("backend.todo_monitoring_only"))
+            now = self._now()
+            connection.execute("UPDATE list_items SET last_checked_at = ?, updated_at = ? WHERE id = ?", (now, now, item_id))
+            row = connection.execute("SELECT * FROM list_items WHERE id = ?", (item_id,)).fetchone()
             labels = self._labels_for(connection, "list_item_labels", "item_id", item_id, row["list_id"])
         return self._item_record_from_row(row, labels)
 
@@ -6347,52 +6405,58 @@ WHERE registry_entry_id IS NOT NULL;
     def _replace_category_rules(
         self, category_id: str, patterns: list[str]
     ) -> list[dict[str, Any]]:
+        with self._connect() as connection:
+            return self._replace_category_rules_in_connection(connection, category_id, patterns)
+
+    def _replace_category_rules_in_connection(
+        self, connection: sqlite3.Connection, category_id: str, patterns: list[str]
+    ) -> list[dict[str, Any]]:
+        # Category creation and dynamic adoption must roll back with invalid rules.
         normalized = self._normalize_category_rules(patterns)
         now = self._now()
-        with self._connect() as connection:
-            category = connection.execute(
-                "SELECT * FROM categories WHERE id = ?", (category_id,)
-            ).fetchone()
-            if category is None:
-                raise CategoryNotFoundError(category_id)
-            self._ensure_category_rules_unique_in_scope(
-                connection,
-                category_id,
-                normalized,
-                category["scope"],
-                category["list_type"],
-                category["list_id"],
-            )
-            existing = {
-                row["pattern"].casefold(): row
-                for row in connection.execute(
-                    "SELECT * FROM category_rules WHERE category_id = ?",
-                    (category_id,),
-                ).fetchall()
-            }
-            connection.execute(
-                "DELETE FROM category_rules WHERE category_id = ?", (category_id,)
-            )
-            for position, pattern in enumerate(normalized):
-                previous = existing.get(pattern.casefold())
-                connection.execute(
-                    """INSERT INTO category_rules(
-                        id, category_id, pattern, position, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?)""",
-                    (
-                        previous["id"] if previous else str(uuid4()),
-                        category_id,
-                        pattern,
-                        position,
-                        previous["created_at"] if previous else now,
-                        now,
-                    ),
-                )
-            rows = connection.execute(
-                "SELECT id, category_id, pattern, position, created_at, updated_at "
-                "FROM category_rules WHERE category_id = ? ORDER BY position",
+        category = connection.execute(
+            "SELECT * FROM categories WHERE id = ?", (category_id,)
+        ).fetchone()
+        if category is None:
+            raise CategoryNotFoundError(category_id)
+        self._ensure_category_rules_unique_in_scope(
+            connection,
+            category_id,
+            normalized,
+            category["scope"],
+            category["list_type"],
+            category["list_id"],
+        )
+        existing = {
+            row["pattern"].casefold(): row
+            for row in connection.execute(
+                "SELECT * FROM category_rules WHERE category_id = ?",
                 (category_id,),
             ).fetchall()
+        }
+        connection.execute(
+            "DELETE FROM category_rules WHERE category_id = ?", (category_id,)
+        )
+        for position, pattern in enumerate(normalized):
+            previous = existing.get(pattern.casefold())
+            connection.execute(
+                """INSERT INTO category_rules(
+                    id, category_id, pattern, position, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?)""",
+                (
+                    previous["id"] if previous else str(uuid4()),
+                    category_id,
+                    pattern,
+                    position,
+                    previous["created_at"] if previous else now,
+                    now,
+                ),
+            )
+        rows = connection.execute(
+            "SELECT id, category_id, pattern, position, created_at, updated_at "
+            "FROM category_rules WHERE category_id = ? ORDER BY position",
+            (category_id,),
+        ).fetchall()
         return [dict(row) for row in rows]
 
     def _create_category(
@@ -6404,10 +6468,15 @@ WHERE registry_entry_id IS NOT NULL;
         icon: str | None,
         color: str | None,
         position: int | None,
+        source_category: str | None = None,
+        source_list_id: str | None = None,
+        rules: list[str] | None = None,
     ) -> CategoryRecord:
         scope, list_type, list_id = self._validate_category_scope(
             scope, list_type, list_id
         )
+        if (source_category is None) != (source_list_id is None):
+            raise ValueError("invalid_dynamic_category_source")
         now = self._now()
         with self._connect() as connection:
             if list_id is not None:
@@ -6465,6 +6534,20 @@ WHERE registry_entry_id IS NOT NULL;
                     list_id,
                     resolved_position,
                 )
+                if rules is not None:
+                    self._replace_category_rules_in_connection(connection, record.id, rules)
+                if source_category is not None:
+                    self._require_list(connection, source_list_id)
+                    self._resolve_item_category(connection, source_list_id, record.id, None)
+                    # Only explicit dynamic assignments in the originating list
+                    # are adopted. Product defaults and other lists stay intact.
+                    for table in ("list_items", "inventory_entries", "inventory_groups", "external_item_metadata"):
+                        connection.execute(
+                            f"UPDATE {table} SET category_id = ?, category = ?, updated_at = ? "
+                            "WHERE list_id = ? AND category_id IS NULL "
+                            "AND lower(trim(category)) = lower(?)",
+                            (record.id, record.name, now, source_list_id, source_category.strip()),
+                        )
             except sqlite3.IntegrityError as error:
                 if "categories" in str(error):
                     raise DuplicateCategoryError(name) from error
@@ -7205,7 +7288,7 @@ WHERE registry_entry_id IS NOT NULL;
 
     def _create_label(
         self, name: str, icon: str | None, color: str | None,
-        scope: str, list_type: str | None, list_id: str | None,
+        scope: str, list_type: str | None, list_id: str | None, hide_in_items: bool = False,
     ) -> LabelRecord:
         scope, list_type, list_id = self._validate_label_scope(
             scope, list_type, list_id
@@ -7216,6 +7299,7 @@ WHERE registry_entry_id IS NOT NULL;
             name=name,
             icon=icon,
             color=color,
+            hide_in_items=hide_in_items,
             scope=scope,
             list_type=list_type,
             list_id=list_id,
@@ -7230,8 +7314,8 @@ WHERE registry_entry_id IS NOT NULL;
                     """
                     INSERT INTO labels(
                         id, name, icon, color, scope, list_type, list_id,
-                        created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        created_at, updated_at, hide_in_items
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         record.id,
@@ -7243,6 +7327,7 @@ WHERE registry_entry_id IS NOT NULL;
                         record.list_id,
                         record.created_at,
                         record.updated_at,
+                        int(record.hide_in_items),
                     ),
                 )
         except sqlite3.IntegrityError as error:
@@ -7253,7 +7338,7 @@ WHERE registry_entry_id IS NOT NULL;
 
     def _update_label(
         self, label_id: str, name: str, icon: str | None, color: str | None,
-        scope: str, list_type: str | None, list_id: str | None,
+        scope: str, list_type: str | None, list_id: str | None, hide_in_items: bool = False,
     ) -> LabelRecord:
         scope, list_type, list_id = self._validate_label_scope(
             scope, list_type, list_id
@@ -7266,10 +7351,10 @@ WHERE registry_entry_id IS NOT NULL;
                     """
                     UPDATE labels
                     SET name = ?, icon = ?, color = ?, scope = ?, list_type = ?,
-                        list_id = ?, updated_at = ?
+                        list_id = ?, updated_at = ?, hide_in_items = ?
                     WHERE id = ?
                     """,
-                    (name, icon, color, scope, list_type, list_id, self._now(), label_id),
+                    (name, icon, color, scope, list_type, list_id, self._now(), int(hide_in_items), label_id),
                 )
                 if cursor.rowcount != 1:
                     raise LabelNotFoundError(label_id)
@@ -10006,6 +10091,8 @@ WHERE registry_entry_id IS NOT NULL;
             ),
             offer_only=bool(row["offer_only"]) if "offer_only" in keys else False,
             completed_delete_at=row["completed_delete_at"] if "completed_delete_at" in keys else None,
+            last_checked_at=row["last_checked_at"] if "last_checked_at" in keys else None,
+            monitoring_paused=bool(row["monitoring_paused"]) if "monitoring_paused" in keys else False,
             labels=labels,
         )
 
@@ -10038,6 +10125,7 @@ WHERE registry_entry_id IS NOT NULL;
             name=row["name"],
             icon=row["icon"],
             color=row["color"],
+            hide_in_items=bool(row["hide_in_items"]),
             scope=row["scope"],
             list_type=row["list_type"],
             list_id=row["list_id"],

@@ -34,7 +34,6 @@ function haListManagerPdfExportTextLoadTranslations(hass) {
 (function registerHaListManagerPdfExporter() {
   if (window.HaListManagerPdfExporter) return;
 
-  const PDF_LIB_URL = "/ha_list_manager_static/pdf-lib.min.js?v=1.17.1";
   const ACCENT = [0.02, 0.58, 0.75];
 
   const loadPdfLib = (hass) => {
@@ -42,7 +41,7 @@ function haListManagerPdfExportTextLoadTranslations(hass) {
     if (window.__shoppingListImprovedPdfLibPromise) return window.__shoppingListImprovedPdfLibPromise;
     window.__shoppingListImprovedPdfLibPromise = new Promise((resolve, reject) => {
       const script = document.createElement("script");
-      script.src = PDF_LIB_URL;
+      script.src = globalThis.HaListManagerFrontendRefresh.assetUrl("pdf-lib.min.js");
       script.async = true;
       script.onload = () => window.PDFLib ? resolve(window.PDFLib) : reject(new Error(haListManagerPdfExportText("ui.pdf_library_not_loaded", {}, hass)));
       script.onerror = () => reject(new Error(haListManagerPdfExportText("errors.pdf_library_load_failed", {}, hass)));

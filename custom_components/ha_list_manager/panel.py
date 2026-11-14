@@ -11,6 +11,11 @@ from homeassistant.components.http import StaticPathConfig
 from homeassistant.components.lovelace.resources import ResourceStorageCollection
 from homeassistant.core import HomeAssistant
 
+from .frontend_assets import (
+    ASSETS_KEY, ASSETS_URL, EVENT_FRONTEND_CHANGED, FrontendAssets, FrontendAssetView,
+    assets_for, read_snapshot,
+)
+
 from .const import (
     DATA_STATIC_PATH_REGISTERED,
     PANEL_ELEMENT_NAME,
@@ -18,36 +23,23 @@ from .const import (
     PANEL_STATIC_URL,
     PANEL_TITLE,
     PANEL_URL_PATH,
-    VERSION,
 )
 
 _LOGGER = logging.getLogger(__name__)
 FRONTEND_DIRECTORY = Path(__file__).parent / "frontend"
-PANEL_MODULE_URL = f"{PANEL_STATIC_URL}/ha-list-manager-panel.js?v={VERSION}"
-INVENTORY_CARD_MODULE_URL = (
-    f"{PANEL_STATIC_URL}/ha-list-manager-inventory-card.js?v={VERSION}"
+CARD_FILES = (
+    "ha-list-manager-inventory-card.js", "ha-list-manager-shopping-card.js",
+    "ha-list-manager-todo-card.js", "ha-list-manager-history-card.js",
 )
-INVENTORY_CARD_RESOURCE_PATH = (
-    f"{PANEL_STATIC_URL}/ha-list-manager-inventory-card.js"
-)
-SHOPPING_CARD_MODULE_URL = (
-    f"{PANEL_STATIC_URL}/ha-list-manager-shopping-card.js?v={VERSION}"
-)
-SHOPPING_CARD_RESOURCE_PATH = (
-    f"{PANEL_STATIC_URL}/ha-list-manager-shopping-card.js"
-)
-TODO_CARD_MODULE_URL = (
-    f"{PANEL_STATIC_URL}/ha-list-manager-todo-card.js?v={VERSION}"
-)
-TODO_CARD_RESOURCE_PATH = (
-    f"{PANEL_STATIC_URL}/ha-list-manager-todo-card.js"
-)
-HISTORY_CARD_MODULE_URL = (
-    f"{PANEL_STATIC_URL}/ha-list-manager-history-card.js?v={VERSION}"
-)
-HISTORY_CARD_RESOURCE_PATH = (
-    f"{PANEL_STATIC_URL}/ha-list-manager-history-card.js"
-)
+
+
+def _resource_filename(url: str) -> str | None:
+    path = url.split("?", 1)[0]
+    if path.startswith((PANEL_STATIC_URL + "/", ASSETS_URL + "/")):
+        filename = path.rsplit("/", 1)[-1]
+        if filename in CARD_FILES:
+            return filename
+    return None
 
 
 async def _async_register_frontend_cards(hass: HomeAssistant) -> None:
@@ -58,13 +50,9 @@ async def _async_register_frontend_cards(hass: HomeAssistant) -> None:
     )
     await resources.async_get_info()
 
-    registered = {item.get("url", "").split("?", 1)[0]: item for item in resources.async_items()}
-    card_resources = (
-        (INVENTORY_CARD_RESOURCE_PATH, INVENTORY_CARD_MODULE_URL),
-        (SHOPPING_CARD_RESOURCE_PATH, SHOPPING_CARD_MODULE_URL),
-        (TODO_CARD_RESOURCE_PATH, TODO_CARD_MODULE_URL),
-        (HISTORY_CARD_RESOURCE_PATH, HISTORY_CARD_MODULE_URL),
-    )
+    registered = {name: item for item in resources.async_items()
+                  if (name := _resource_filename(item.get("url", ""))) is not None}
+    card_resources = [(name, assets_for(hass).url(name)) for name in CARD_FILES]
     if isinstance(resources, ResourceStorageCollection):
         for path, module_url in card_resources:
             item = registered.get(path)
@@ -82,42 +70,45 @@ async def _async_register_frontend_cards(hass: HomeAssistant) -> None:
         "Lovelace resources use YAML mode; loading backend cards through "
         "the frontend fallback"
     )
-    frontend.add_extra_js_url(hass, INVENTORY_CARD_MODULE_URL)
-    frontend.add_extra_js_url(hass, SHOPPING_CARD_MODULE_URL)
-    frontend.add_extra_js_url(hass, TODO_CARD_MODULE_URL)
-    frontend.add_extra_js_url(hass, HISTORY_CARD_MODULE_URL)
+    previous = hass.data.get(f"{ASSETS_KEY}_yaml_urls", ())
+    for url in previous:
+        frontend.remove_extra_js_url(hass, url)
+    for _, url in card_resources:
+        frontend.add_extra_js_url(hass, url)
+    hass.data[f"{ASSETS_KEY}_yaml_urls"] = [url for _, url in card_resources]
 
 
-async def async_register_panel(hass: HomeAssistant) -> None:
-    """Register the administrator-only sidebar panel."""
-    if not hass.data.get(DATA_STATIC_PATH_REGISTERED):
-        await hass.http.async_register_static_paths(
-            [
-                StaticPathConfig(
-                    PANEL_STATIC_URL,
-                    str(FRONTEND_DIRECTORY),
-                    cache_headers=False,
-                )
-            ]
-        )
-        hass.data[DATA_STATIC_PATH_REGISTERED] = True
-
-    await _async_register_frontend_cards(hass)
-
-    if async_panel_exists(hass, PANEL_URL_PATH):
-        return
-
-    await panel_custom.async_register_panel(
-        hass=hass,
-        frontend_url_path=PANEL_URL_PATH,
-        webcomponent_name=PANEL_ELEMENT_NAME,
-        module_url=PANEL_MODULE_URL,
-        sidebar_title=PANEL_TITLE,
-        sidebar_icon=PANEL_ICON,
-        embed_iframe=False,
-        require_admin=True,
-        handle_safe_area=True,
-    )
+async def async_register_panel(hass: HomeAssistant, *, renew: bool = False) -> None:
+    """Publish one asset revision for every frontend entry point."""
+    if ASSETS_KEY not in hass.data:
+        hass.data[ASSETS_KEY] = FrontendAssets()
+        hass.http.register_view(FrontendAssetView())
+    assets = assets_for(hass)
+    async with assets.lock:
+        revision, files = await hass.async_add_executor_job(read_snapshot)
+        assets.install(revision, files, renew=renew)
+        if not hass.data.get(DATA_STATIC_PATH_REGISTERED):
+            await hass.http.async_register_static_paths([
+                StaticPathConfig(PANEL_STATIC_URL, str(FRONTEND_DIRECTORY), cache_headers=False)
+            ])
+            hass.data[DATA_STATIC_PATH_REGISTERED] = True
+        await _async_register_frontend_cards(hass)
+        module_url = assets.url("ha-list-manager-panel.js")
+        if async_panel_exists(hass, PANEL_URL_PATH):
+            frontend.async_register_built_in_panel(
+                hass, component_name="custom", frontend_url_path=PANEL_URL_PATH,
+                sidebar_title=PANEL_TITLE, sidebar_icon=PANEL_ICON, require_admin=True,
+                config={"_panel_custom": {"name": PANEL_ELEMENT_NAME, "embed_iframe": False,
+                        "trust_external": False, "handle_safe_area": True, "module_url": module_url}},
+                update=True,
+            )
+        else:
+            await panel_custom.async_register_panel(
+                hass=hass, frontend_url_path=PANEL_URL_PATH, webcomponent_name=PANEL_ELEMENT_NAME,
+                module_url=module_url, sidebar_title=PANEL_TITLE, sidebar_icon=PANEL_ICON,
+                embed_iframe=False, require_admin=True, handle_safe_area=True,
+            )
+        hass.bus.async_fire(EVENT_FRONTEND_CHANGED, assets.info())
 
 
 def async_unregister_panel(hass: HomeAssistant) -> None:

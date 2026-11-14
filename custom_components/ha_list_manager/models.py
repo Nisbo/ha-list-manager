@@ -73,6 +73,8 @@ class ListItemRecord:
     inventory_source_type: str | None = None
     inventory_source_id: str | None = None
     completed_delete_at: str | None = None
+    last_checked_at: str | None = None
+    monitoring_paused: bool = False
     labels: tuple["LabelRecord", ...] = ()
 
     def as_dict(self) -> dict[str, Any]:
@@ -154,6 +156,7 @@ class LabelRecord:
     updated_at: str
     product_count: int = 0
     item_count: int = 0
+    hide_in_items: bool = False
 
     def as_dict(self) -> dict[str, Any]:
         """Return a JSON-serializable representation."""

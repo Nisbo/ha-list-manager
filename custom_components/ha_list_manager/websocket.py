@@ -68,6 +68,8 @@ from .open_facts import OpenFactsLookupError, async_lookup_open_facts
 from .external_lists import ExternalListError
 from .entity_history_import import async_import_entity_history
 from .runtime import HaListManagerRuntime
+from .frontend_assets import assets_for
+from .panel import async_register_panel
 from .scanner import normalize_scanner_address
 from .tandoor import TandoorClient, TandoorError, normalize_tandoor_url
 
@@ -275,6 +277,8 @@ def async_register_websocket_commands(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, websocket_get_list_script_settings)
     websocket_api.async_register_command(hass, websocket_set_list_script_settings)
     websocket_api.async_register_command(hass, websocket_info)
+    websocket_api.async_register_command(hass, websocket_frontend_info)
+    websocket_api.async_register_command(hass, websocket_frontend_renew)
     websocket_api.async_register_command(hass, websocket_list_favorites)
     websocket_api.async_register_command(hass, websocket_set_favorite)
     websocket_api.async_register_command(hass, websocket_list_lists)
@@ -290,6 +294,7 @@ def async_register_websocket_commands(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, websocket_item_action_send)
     websocket_api.async_register_command(hass, websocket_update_item)
     websocket_api.async_register_command(hass, websocket_set_item_completed)
+    websocket_api.async_register_command(hass, websocket_check_item)
     websocket_api.async_register_command(hass, websocket_reorder_items)
     websocket_api.async_register_command(hass, websocket_delete_item)
     websocket_api.async_register_command(hass, websocket_list_products)
@@ -796,6 +801,20 @@ async def websocket_import_entity_history(
     connection.send_result(
         msg["id"], {**result, "entity": record.as_dict() if record else None}
     )
+
+
+@localized_command({probatio.Required("type"): f"{DOMAIN}/frontend/info"})
+async def websocket_frontend_info(hass, connection, msg):
+    """Allow every card user to detect an updated frontend without admin data."""
+    connection.send_result(msg["id"], assets_for(hass).info())
+
+
+@websocket_api.require_admin
+@localized_command({probatio.Required("type"): f"{DOMAIN}/frontend/renew"})
+async def websocket_frontend_renew(hass, connection, msg):
+    """Renew only frontend URLs; never clear user data or browser storage."""
+    await async_register_panel(hass, renew=True)
+    connection.send_result(msg["id"], assets_for(hass).info())
 
 
 @websocket_api.require_admin
@@ -1486,6 +1505,7 @@ async def websocket_list_items(
         probatio.Optional("category_id"): probatio.Any(str, None),
         probatio.Optional("category"): probatio.Any(str, None),
         probatio.Optional("due_at"): probatio.Any(str, None),
+        probatio.Optional("monitoring_paused"): bool,
         probatio.Optional("recurrence_interval"): probatio.Any(int, None),
         probatio.Optional("recurrence_unit"): probatio.Any(
             probatio.In({"H", "D", "M"}), None
@@ -1515,6 +1535,8 @@ async def websocket_create_item(
             "label_ids": _clean_label_ids(msg.get("label_ids")),
             "product_id": _clean_text(msg.get("product_id"), maximum=64, required=False),
         }
+        if "monitoring_paused" in msg and list_record.list_type != "todo":
+            raise ValueError(localized_text("backend.todo_monitoring_only"))
         recurrence_interval, recurrence_unit = _clean_recurrence(
             msg.get("recurrence_interval"), msg.get("recurrence_unit")
         )
@@ -1536,6 +1558,7 @@ async def websocket_create_item(
                 recurrence_interval, recurrence_unit, values["offer_only"],
                 msg.get("remember_product_category", False),
                 msg.get("remember_product_labels", False),
+                msg.get("monitoring_paused", False),
             )
     except ValueError as error:
         _send_input_error(connection, msg, error)
@@ -1651,6 +1674,8 @@ async def websocket_item_action_send(hass, connection, msg) -> None:
         probatio.Optional("category_id"): probatio.Any(str, None),
         probatio.Optional("category"): probatio.Any(str, None),
         probatio.Optional("due_at"): probatio.Any(str, None),
+        probatio.Optional("monitoring_paused"): bool,
+        probatio.Optional("mark_checked"): bool,
         probatio.Optional("recurrence_interval"): probatio.Any(int, None),
         probatio.Optional("recurrence_unit"): probatio.Any(
             probatio.In({"H", "D", "M"}), None
@@ -1692,6 +1717,11 @@ async def websocket_update_item(
             )
         existing = await _runtime(hass).database.async_get_item(msg["item_id"])
         list_record = await _runtime(hass).database.async_get_list(existing.list_id)
+        if any(key in msg for key in ("monitoring_paused", "mark_checked")) and list_record.list_type != "todo":
+            raise ValueError(localized_text("backend.todo_monitoring_only"))
+        for key in ("monitoring_paused", "mark_checked"):
+            if key in msg:
+                updates[key] = msg[key]
         if "recurrence_interval" in msg or "recurrence_unit" in msg:
             recurrence_interval, recurrence_unit = _clean_recurrence(
                 msg.get("recurrence_interval"), msg.get("recurrence_unit")
@@ -1774,6 +1804,26 @@ async def websocket_set_item_completed(
         return
     if list_record.provider != "bring":
         _fire_items_changed(hass, record.list_id)
+    connection.send_result(msg["id"], {"item": record.as_dict()})
+
+
+@localized_command(
+    {
+        probatio.Required("type"): f"{DOMAIN}/items/check",
+        probatio.Required("item_id"): str,
+    }
+)
+async def websocket_check_item(hass, connection, msg):
+    """Set only the task's last-check timestamp using the backend clock."""
+    try:
+        record = await _runtime(hass).database.async_check_item(msg["item_id"])
+    except ListItemNotFoundError:
+        _send_error(connection, msg["id"], websocket_api.ERR_NOT_FOUND, localized_text("errors.item_not_found"))
+        return
+    except ValueError as error:
+        _send_input_error(connection, msg, error)
+        return
+    _fire_items_changed(hass, record.list_id)
     connection.send_result(msg["id"], {"item": record.as_dict()})
 
 
@@ -2705,6 +2755,8 @@ async def websocket_list_categories(
         probatio.Optional("color"): probatio.Any(str, None),
         probatio.Optional("position"): probatio.Any(int, None),
         probatio.Optional("rules"): [str],
+        probatio.Optional("source_category"): str,
+        probatio.Optional("source_list_id"): str,
     }
 )
 async def websocket_create_category(
@@ -2726,8 +2778,11 @@ async def websocket_create_category(
             icon=_clean_text(msg.get("icon"), maximum=100, required=False),
             color=_clean_color(msg.get("color")),
             position=_clean_category_position(msg.get("position")),
+            source_category=_clean_text(msg["source_category"], maximum=100, required=True) if "source_category" in msg else None,
+            source_list_id=_clean_text(msg["source_list_id"], maximum=100, required=True) if "source_list_id" in msg else None,
+            rules=patterns,
         )
-        rules = await database.async_replace_category_rules(category.id, patterns)
+        rules = await database.async_list_category_rules(category.id)
     except ValueError as error:
         if category is not None:
             await database.async_delete_category(category.id)
@@ -2738,7 +2793,7 @@ async def websocket_create_category(
             msg["id"], "category_already_exists", localized_text("errors.category_exists")
         )
         return
-    except ListNotFoundError:
+    except (ListNotFoundError, CategoryNotFoundError):
         _send_error(connection, msg["id"], websocket_api.ERR_NOT_FOUND, localized_text("errors.list_not_found"))
         return
     _fire_lists_changed(hass)
@@ -2982,6 +3037,7 @@ async def websocket_list_labels(
     {
         probatio.Required("type"): f"{DOMAIN}/labels/create",
         probatio.Required("name"): str,
+        probatio.Optional("hide_in_items", default=False): bool,
         probatio.Optional("icon"): probatio.Any(str, None),
         probatio.Optional("color"): probatio.Any(str, None),
         probatio.Optional("scope", default="global"): probatio.In(
@@ -3001,6 +3057,7 @@ async def websocket_create_label(
     """Create a reusable label."""
     try:
         label = await _runtime(hass).database.async_create_label(
+            hide_in_items=msg["hide_in_items"],
             name=_clean_text(msg["name"], maximum=100, required=True),
             icon=_clean_text(msg.get("icon"), maximum=100, required=False),
             color=_clean_color(msg.get("color")),
@@ -3024,6 +3081,7 @@ async def websocket_create_label(
         probatio.Required("type"): f"{DOMAIN}/labels/update",
         probatio.Required("label_id"): str,
         probatio.Required("name"): str,
+        probatio.Optional("hide_in_items", default=False): bool,
         probatio.Optional("icon"): probatio.Any(str, None),
         probatio.Optional("color"): probatio.Any(str, None),
         probatio.Optional("scope", default="global"): probatio.In(
@@ -3044,6 +3102,7 @@ async def websocket_update_label(
     try:
         label = await _runtime(hass).database.async_update_label(
             msg["label_id"],
+            hide_in_items=msg["hide_in_items"],
             name=_clean_text(msg["name"], maximum=100, required=True),
             icon=_clean_text(msg.get("icon"), maximum=100, required=False),
             color=_clean_color(msg.get("color")),

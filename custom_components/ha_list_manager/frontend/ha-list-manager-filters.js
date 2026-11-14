@@ -212,7 +212,8 @@
   _renderLabelFilterControls(manage = false) {
     if (this._config.show_label_filter_button === false) return "";
     const active = this._activeLabelFilter();
-    const filters = this._personalFilters();
+    const query = manage ? "" : (this._inputValue ?? this._input ?? "").trim().toLocaleLowerCase();
+    const filters = this._personalFilters().filter((filter) => !query || filter.name.toLocaleLowerCase().includes(query));
     return `<section class="quick-filter-section">${manage ? '<div class="filter-section-title">' : ""}<h3>${esc(this._filterText("quick_title"))} <span>${filters.length}</span></h3>${manage ? `<button type="button" class="filter-header-button" data-manage-filters><ha-icon icon="mdi:pencil-outline"></ha-icon><span>${esc(this._filterText("manage_button"))}</span></button></div>` : ""}<div class="label-filter-controls">
       ${filters.map((filter) => `<button type="button" class="filter-preset ${active?.id === filter.id ? "active" : ""}" data-label-filter-preset="${esc(filter.id)}" aria-pressed="${active?.id === filter.id}" title="${esc(this._filterText("hold_actions", {name:filter.name}))}"><span>${esc(filter.name)}</span></button>`).join("")}</div></section>`;
   }
@@ -221,10 +222,13 @@
     if (!dialog) return "";
     const query = dialog.query.trim().toLocaleLowerCase();
     const labels = this._labels.filter((label) => !query || label.name.toLocaleLowerCase().includes(query));
-    return [{id: "__unlabeled__", name: this._filterText("unlabeled"), icon: "mdi:label-off-outline"}, ...labels].map((label) => {
+    const render = (label) => {
       const selected = label.id === "__unlabeled__" ? dialog.include_unlabeled : dialog.label_ids.includes(label.id);
-      return `<button type="button" class="filter-label ${selected ? "selected" : ""}" data-filter-label="${esc(label.id)}" aria-pressed="${selected}" ${dialog.busy ? "disabled" : ""} style="${label.color ? `--filter-color:${esc(label.color)}` : ""}"><ha-icon icon="${esc(label.icon || "mdi:label-outline")}"></ha-icon><span>${esc(label.name)}</span><ha-icon icon="mdi:${selected ? "checkbox-marked" : "checkbox-blank-outline"}"></ha-icon></button>`;
-    }).join("");
+      return `<button type="button" class="filter-label ${selected ? "selected" : ""}" data-filter-label="${esc(label.id)}" aria-pressed="${selected}" ${dialog.busy ? "disabled" : ""} style="${label.color ? `--filter-color:${esc(label.color)}` : ""}"><ha-icon icon="${esc(label.icon || "mdi:label-outline")}"></ha-icon><span>${esc(label.name)}${globalThis.HaListManagerDialogSections.labelMarker(label, uiText("labels.filter_only", {}, this._hass))}</span><ha-icon icon="mdi:${selected ? "checkbox-marked" : "checkbox-blank-outline"}"></ha-icon></button>`;
+    };
+    const hidden = labels.filter(label => label.hide_in_items);
+    const regular = labels.filter(label => !label.hide_in_items);
+    return `${hidden.length ? `<h3 class="filter-label-heading">${esc(uiText("labels.filter_only", {}, this._hass))}</h3>${hidden.map(render).join("")}<h3 class="filter-label-heading">${esc(uiText("ui.labels", {}, this._hass))}</h3>` : ""}${[{id: "__unlabeled__", name: this._filterText("unlabeled"), icon: "mdi:label-off-outline"}, ...regular].map(render).join("")}`;
   }
   _renderLabelFilterDialog() {
     const dialog = this._labelFilterDialog;
@@ -356,7 +360,7 @@
   _labelFilterStyles() {
     const size = this._config.chip_font_size;
     const growth = Math.max(0, (size || 16) - 16);
-    return `.label-filter-controls{display:flex;flex-wrap:wrap;gap:6px;min-width:0;max-width:100%}.label-filter-dialog{width:min(680px,100%)}.filter-label-grid{display:flex;flex-wrap:wrap;gap:8px;max-height:none;overflow:visible;padding:3px}.filter-label{display:inline-flex;align-items:center;gap:7px;max-width:100%;min-height:44px;padding:7px 11px;border:1px solid var(--divider-color);border-radius:22px;background:var(--secondary-background-color);color:var(--primary-text-color);text-align:left}.filter-label span{overflow-wrap:anywhere}.filter-label ha-icon{--mdc-icon-size:20px;flex-shrink:0;color:var(--filter-color,var(--primary-color))}.filter-label.selected{border-color:var(--filter-color,var(--primary-color));background:color-mix(in srgb,var(--filter-color,var(--primary-color)) 18%,var(--card-background-color))}.saved-filters{display:grid;gap:5px}.saved-filter{display:grid;grid-template-columns:minmax(0,1fr) repeat(4,36px);align-items:center;gap:5px;border-bottom:1px solid var(--divider-color)}.filter-warning{padding:9px;border-left:3px solid var(--warning-color);color:var(--warning-color)}.filter-status{overflow-wrap:anywhere;color:var(--primary-color)}.filter-label:focus-visible,.filter-preset:focus-visible{outline:2px solid var(--primary-color);outline-offset:1px}ha-card .quick-filter-section{margin:0 0 18px;padding:0 0 18px;border-bottom:1px solid var(--divider-color)}:is(.quick-chips,.quick-chips-panel).label-filter-only .quick-filter-section{margin:0;padding:0;border:0}
+    return `.filter-label-heading{flex:0 0 100%;grid-column:1/-1;margin:12px 0 4px;font-size:14px;color:var(--secondary-text-color)}.label-filter-controls{display:flex;flex-wrap:wrap;gap:6px;min-width:0;max-width:100%}.label-filter-dialog{width:min(680px,100%)}.filter-label-grid{display:flex;flex-wrap:wrap;gap:8px;max-height:none;overflow:visible;padding:3px}.filter-label{display:inline-flex;align-items:center;gap:7px;max-width:100%;min-height:44px;padding:7px 11px;border:1px solid var(--divider-color);border-radius:22px;background:var(--secondary-background-color);color:var(--primary-text-color);text-align:left}.filter-label span{overflow-wrap:anywhere}.filter-label ha-icon{--mdc-icon-size:20px;flex-shrink:0;color:var(--filter-color,var(--primary-color))}.filter-label.selected{border-color:var(--filter-color,var(--primary-color));background:color-mix(in srgb,var(--filter-color,var(--primary-color)) 18%,var(--card-background-color))}.saved-filters{display:grid;gap:5px}.saved-filter{display:grid;grid-template-columns:minmax(0,1fr) repeat(4,36px);align-items:center;gap:5px;border-bottom:1px solid var(--divider-color)}.filter-warning{padding:9px;border-left:3px solid var(--warning-color);color:var(--warning-color)}.filter-status{overflow-wrap:anywhere;color:var(--primary-color)}.filter-label:focus-visible,.filter-preset:focus-visible{outline:2px solid var(--primary-color);outline-offset:1px}ha-card .quick-filter-section{margin:0 0 18px;padding:0 0 18px;border-bottom:1px solid var(--divider-color)}:is(.quick-chips,.quick-chips-panel).label-filter-only .quick-filter-section{margin:0;padding:0;border:0}
       ha-card .quick-filter-section h3{display:flex;align-items:center;gap:6px;margin:0 0 8px;color:var(--secondary-text-color);font-size:13px;font-weight:500}
       ha-card .quick-filter-section h3 span{display:inline-grid;place-items:center;min-width:22px;height:22px;padding:0 6px;border-radius:11px;background:var(--secondary-background-color);font-size:12px}
       ha-card .label-filter-controls{display:flex;flex-wrap:wrap;gap:${7 + growth / 2}px;min-width:0;max-width:100%}

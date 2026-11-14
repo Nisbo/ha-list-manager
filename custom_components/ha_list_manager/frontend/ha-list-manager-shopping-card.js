@@ -1,7 +1,8 @@
-import "./ha-list-manager-shopping-scanner.js";
+import "./ha-list-manager-frontend-refresh.js";
+import "./ha-list-manager-shopping-scanner.js?v=1.1.0b3-toolbar2";
 import "./ha-list-manager-filters.js";
 import "./ha-list-manager-product-editor.js";
-import "./ha-list-manager-dialog-sections.js";
+import "./ha-list-manager-dialog-sections.js?v=1.1.0b3-labels";
 
 // Text is loaded and formatted by Home Assistant from translations/*.json.
 function haListManagerShoppingCardTextLocale(hass = null) {
@@ -90,7 +91,7 @@ function haListManagerShoppingCardTextRequest(hass, message) {
 const HA_LM_API = "ha_list_manager";
 const HA_LM_ITEMS_EVENT = "ha_list_manager_items_changed";
 const HA_LM_LISTS_EVENT = "ha_list_manager_lists_changed";
-const CARD_VERSION = "1.1.0b2";
+const CARD_VERSION = "1.1.0b3";
 
 const esc = (value) => String(value ?? "").replace(/[&<>'"]/g, (char) => ({
   "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;",
@@ -312,6 +313,7 @@ class HaListManagerShoppingCard extends HTMLElement {
           { name: "show_clear_completed_button", selector: { boolean: {} }, default: true },
           { name: "show_category_count", selector: { boolean: {} }, default: true },
           { name: "show_labels", selector: { boolean: {} }, default: true },
+          { name: "show_hidden_labels", selector: { boolean: {} }, default: false },
           { name: "category_sort", selector: { select: { mode: "dropdown", options: [
             { value: "alphabetical", label: haListManagerShoppingCardText("categories.combined_alphabetical", {}, hass) },
             { value: "global_list_dynamic", label: haListManagerShoppingCardText("categories.order_global_local_dynamic", {}, hass) },
@@ -374,6 +376,7 @@ class HaListManagerShoppingCard extends HTMLElement {
       ],
       computeLabel: (schema, localize) => {
         if (typeof localize === "function") return HaListManagerShoppingCard.getConfigForm({ ...(hass || {}), localize }).computeLabel(schema);
+        if (schema.name === "show_hidden_labels") return haListManagerShoppingCardText("labels.show_hidden", {}, hass);
         return labels[schema.name] || schema.label || schema.name;
       },
       computeHelper: (schema, localize) => {
@@ -498,6 +501,7 @@ class HaListManagerShoppingCard extends HTMLElement {
     const previousId = this._listId();
     const previousUser = this._hass?.user?.id;
     this._hass = value;
+    globalThis.HaListManagerFrontendRefresh.attach(this);
     if (previousUser && previousUser !== value?.user?.id) {
       this._resetLabelFilterScope(); this._load(true);
     }
@@ -512,6 +516,7 @@ class HaListManagerShoppingCard extends HTMLElement {
   }
 
   connectedCallback() {
+    globalThis.HaListManagerFrontendRefresh.attach(this);
     this._watchConnection();
     this._render();
     this._subscribe();
@@ -525,6 +530,9 @@ class HaListManagerShoppingCard extends HTMLElement {
     }
   }
   disconnectedCallback() {
+    globalThis.HaListManagerFrontendRefresh.detach(this);
+    globalThis.HaListManagerScannerUi.cancel(this);
+    globalThis.HaListManagerScannerUi.stopToolbar(this);
     globalThis.HaListManagerShoppingScanner?.stop(this);
     globalThis.HaListManagerProductEditor.cancelRename(this);
     this._clearRenderListeners();
@@ -2341,7 +2349,7 @@ class HaListManagerShoppingCard extends HTMLElement {
     if (window.__shoppingListImprovedPdfExporterPromise) return window.__shoppingListImprovedPdfExporterPromise;
     window.__shoppingListImprovedPdfExporterPromise = new Promise((resolve, reject) => {
       const script = document.createElement("script");
-      script.src = `/ha_list_manager_static/ha-list-manager-pdf-export.js?v=${CARD_VERSION}`;
+      script.src = globalThis.HaListManagerFrontendRefresh.assetUrl("ha-list-manager-pdf-export.js");
       script.async = true;
       script.onload = () => window.HaListManagerPdfExporter
         ? resolve(window.HaListManagerPdfExporter)
@@ -2486,13 +2494,14 @@ class HaListManagerShoppingCard extends HTMLElement {
     const popup = this._selectionPopup;
     if (!popup) return "";
     const options = this._selectionOptions(popup);
-    return options.length ? options.map((entry) => {
+    const renderOption = (entry) => {
       const selected = popup.kind === "labels" ? popup.selected.some((id) => this._selectionLabelPermitted(id, popup) && popup.labelNames[id] === entry.name.toLocaleLowerCase())
         : entry.general ? !popup.parent.category_id && !popup.parent.category_name : entry.id === popup.parent.category_id || entry.name === popup.parent.category_name;
       const scope = entry.general ? haListManagerShoppingCardText("ui.no_category", {}, this._hass)
         : popup.kind === "labels" ? this._labelScope(entry) : this._categoryScope(entry);
-      return `<button type="button" class="selection-chip ${selected ? "selected" : ""}" data-selection-option="${esc(entry.id)}" aria-pressed="${selected}" style="${entry.color ? `--selection-color:${esc(entry.color)};--selection-ink:${categoryTextColor(entry.color)}` : ""}"><ha-icon icon="${esc(entry.icon || "mdi:tag-outline")}"></ha-icon><span><strong>${esc(entry.name)}</strong><small>${esc(scope)}</small></span>${selected ? '<ha-icon class="selection-check" icon="mdi:check"></ha-icon>' : ""}</button>`;
-    }).join("") : `<p class="field-help">${haListManagerShoppingCardText("selection.empty", {}, this._hass)}</p>`;
+      return `<button type="button" class="selection-chip ${selected ? "selected" : ""}" data-selection-option="${esc(entry.id)}" aria-pressed="${selected}" style="${entry.color ? `--selection-color:${esc(entry.color)};--selection-ink:${categoryTextColor(entry.color)}` : ""}"><ha-icon icon="${esc(entry.icon || "mdi:tag-outline")}"></ha-icon><span><strong>${esc(entry.name)}${popup.kind === "labels" ? globalThis.HaListManagerDialogSections.labelMarker(entry, haListManagerShoppingCardText("labels.filter_only", {}, this._hass)) : ""}</strong><small>${esc(scope)}</small></span>${selected ? '<ha-icon class="selection-check" icon="mdi:check"></ha-icon>' : ""}</button>`;
+    };
+    return options.length ? (popup.kind === "labels" ? globalThis.HaListManagerDialogSections.renderLabelGroups(options, renderOption, haListManagerShoppingCardText("labels.filter_only", {}, this._hass), haListManagerShoppingCardText("labels.other", {}, this._hass)) : options.map(renderOption).join("")) : `<p class="field-help">${haListManagerShoppingCardText("selection.empty", {}, this._hass)}</p>`;
   }
 
   _renderSelectionPopup() {
@@ -2626,17 +2635,17 @@ class HaListManagerShoppingCard extends HTMLElement {
   }
 
   _renderLabels(labels) {
-    return (labels || []).map((label) => `<span class="label" style="${label.color ? `--label-color:${esc(label.color)}` : ""}"><ha-icon icon="${esc(label.icon || "mdi:label-outline")}"></ha-icon>${esc(label.name)}</span>`).join("");
+    return (labels || []).filter(label => !label.hide_in_items || this._config.show_hidden_labels).map((label) => `<span class="label" style="${label.color ? `--label-color:${esc(label.color)}` : ""}"><ha-icon icon="${esc(label.icon || "mdi:label-outline")}"></ha-icon>${esc(label.name)}${globalThis.HaListManagerDialogSections.labelMarker(label, haListManagerShoppingCardText("labels.filter_only", {}, this._hass))}</span>`).join("");
   }
 
   _renderSelectedLabels(selectedIds = []) {
     const selected = this._labels.filter((label) => selectedIds.includes(label.id));
-    return selected.map((label) => `<button type="button" class="selected-label" data-remove-label="${esc(label.id)}" style="${label.color ? `--label-color:${esc(label.color)}` : ""}" title="${haListManagerShoppingCardText("ui.remove_named", {p0:(esc(label.name))}, this._hass)}"><ha-icon icon="${esc(label.icon || "mdi:label-outline")}"></ha-icon><span>${esc(label.name)}</span><ha-icon class="remove-label" icon="mdi:close"></ha-icon></button>`).join("");
+    return selected.map((label) => `<button type="button" class="selected-label" data-remove-label="${esc(label.id)}" style="${label.color ? `--label-color:${esc(label.color)}` : ""}" title="${haListManagerShoppingCardText("ui.remove_named", {p0:(esc(label.name))}, this._hass)}"><ha-icon icon="${esc(label.icon || "mdi:label-outline")}"></ha-icon><span>${esc(label.name)}${globalThis.HaListManagerDialogSections.labelMarker(label, haListManagerShoppingCardText("labels.filter_only", {}, this._hass))}</span><ha-icon class="remove-label" icon="mdi:close"></ha-icon></button>`).join("");
   }
 
   _renderLabelSelector(selectedIds = []) {
     const chips = this._renderSelectedLabels(selectedIds);
-    const content = `<div class="label-selector">${this._selectionHeading(haListManagerShoppingCardText("ui.labels_optional", {}, this._hass))}<div class="selected-labels" data-selected-labels ${chips ? "" : "hidden"}>${chips}</div><div class="label-combo"><div class="label-search picker-popup-host"><ha-icon icon="mdi:magnify"></ha-icon><input type="text" placeholder="${haListManagerShoppingCardText("ui.browse_labels", {}, this._hass)}" autocomplete="off" data-label-input ${this._labels.length ? "" : "disabled"}>${this._selectionButton("labels", !this._labels.length)}</div><div class="label-picker-options" data-label-options hidden></div></div><p class="field-help">${haListManagerShoppingCardText(this._labels.length ? "help.label_scope_priority" : "labels.none_created", {}, this._hass)}</p></div>${this._renderProductLabelPreference(false)}`;
+    const content = `<div class="label-selector">${this._selectionHeading(haListManagerShoppingCardText("ui.labels_optional", {}, this._hass))}<div class="selected-labels" data-selected-labels ${chips ? "" : "hidden"}>${chips}</div><div class="label-combo"><div class="label-search picker-popup-host"><ha-icon icon="mdi:magnify"></ha-icon><input type="text" placeholder="${haListManagerShoppingCardText("ui.browse_labels", {}, this._hass)}" autocomplete="off" data-label-input ${this._labels.length ? "" : "disabled"}>${this._selectionButton("labels", !this._labels.length)}</div><div class="label-picker-options" data-label-options hidden></div></div><p class="field-help">${haListManagerShoppingCardText(this._labels.length ? "help.label_scope_priority" : "labels.none_created", {}, this._hass)}</p></div>${this._renderProductLabelPreference(false)}${this._productLabelPreferenceState().enabled ? `<p class="field-help product-label-scope-warning">${haListManagerShoppingCardText("shopping.product_labels_help", {}, this._hass)}</p>` : ""}`;
     return globalThis.HaListManagerDialogSections.render(this, { kind: "labels", context: this._editorSectionContext(),
       title: haListManagerShoppingCardText("ui.labels", {}, this._hass), summary: this._editorSectionSummary("labels"), content,
       notice: `<div data-editor-notice="labels">${this._renderProductLabelNotice()}</div>` });
@@ -2710,7 +2719,7 @@ class HaListManagerShoppingCard extends HTMLElement {
   _renderProductLabelNotice() {
     const state = this._productLabelPreferenceState();
     if (!state.enabled) return "";
-    return `<p class="field-help product-label-scope-warning">${haListManagerShoppingCardText("shopping.product_labels_help", {}, this._hass)}</p>${this._dialog.remember_product_labels ? this._renderProductLabelChanges() : ""}`;
+    return this._dialog.remember_product_labels && (state.added.length || state.removed.length) ? this._renderProductLabelChanges() : "";
   }
 
   _cameraCreatesProduct(draft = this._dialog) {
@@ -3881,7 +3890,7 @@ class HaListManagerShoppingCard extends HTMLElement {
       this._clearRenderListeners(chips);
       chips.outerHTML = this._renderChips();
       const nextChips = this.shadowRoot.querySelector(".quick-chips");
-      if (nextChips) { this._bindChipActions(nextChips); this._bindLabelFilterControls(nextChips); }
+      if (nextChips) { globalThis.HaListManagerDialogSections.bindQuick(this, this.shadowRoot); this._bindChipActions(nextChips); this._bindLabelFilterControls(nextChips); }
     }
   }
 
@@ -4133,7 +4142,7 @@ class HaListManagerShoppingCard extends HTMLElement {
     const renderOptions = () => {
       const available = matches();
       this._clearRenderListeners(menu);
-      menu.innerHTML = available.length ? available.map((label) => `<button type="button" data-label-option="${esc(label.id)}" style="${label.color ? `--label-color:${esc(label.color)}` : ""}"><span class="label-option-icon"><ha-icon icon="${esc(label.icon || "mdi:label-outline")}"></ha-icon></span><span><strong>${esc(label.name)}</strong><small>${esc(this._labelScope(label))}</small></span></button>`).join("") : `<p class="picker-empty">${haListManagerShoppingCardText("labels.no_matches", {}, this._hass)}</p>`;
+      menu.innerHTML = available.length ? available.map((label) => `<button type="button" data-label-option="${esc(label.id)}" style="${label.color ? `--label-color:${esc(label.color)}` : ""}"><span class="label-option-icon"><ha-icon icon="${esc(label.icon || "mdi:label-outline")}"></ha-icon></span><span><strong>${esc(label.name)}${globalThis.HaListManagerDialogSections.labelMarker(label, haListManagerShoppingCardText("labels.filter_label", {}, this._hass))}</strong><small>${esc(this._labelScope(label))}${label.hide_in_items ? ` – ${haListManagerShoppingCardText("labels.filter_label", {}, this._hass)}` : ""}</small></span></button>`).join("") : `<p class="picker-empty">${haListManagerShoppingCardText("labels.no_matches", {}, this._hass)}</p>`;
       menu.hidden = false;
       menu.querySelectorAll("[data-label-option]").forEach((button) => this._listen(button, "mousedown", (event) => { event.preventDefault(); choose(this._labels.find((label) => label.id === button.dataset.labelOption)); }));
     };
@@ -4440,6 +4449,8 @@ class HaListManagerShoppingCard extends HTMLElement {
 
   _bind() {
     const root = this.shadowRoot;
+    globalThis.HaListManagerDialogSections.bindQuick(this);
+    globalThis.HaListManagerScannerUi.fitToolbar(this);
     globalThis.HaListManagerShoppingScanner?.for(this).bind(root);
     this._bindLabelFilter(root);
     this._listen(root, "pointerdown", (event) => {

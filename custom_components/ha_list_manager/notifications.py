@@ -753,6 +753,8 @@ class NotificationManager:
                         status = localized_text("backend.overdue") if due < now else localized_text("backend.due")
                 except ValueError:
                     pass
+                if item.monitoring_paused:
+                    status = localized_text("todo.monitoring_paused")
                 details.append(f"{status}: {due_label}")
             recurrence = cls._format_recurrence(
                 {

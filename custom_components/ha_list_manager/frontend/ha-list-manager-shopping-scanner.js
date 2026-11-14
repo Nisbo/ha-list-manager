@@ -1,3 +1,4 @@
+import "./ha-list-manager-scanner-ui.js?v=1.1.0b3-toolbar2";
 import "./ha-list-manager-camera.js";
 // Camera ownership and shopping scan dialogs stay outside card rerenders.
 const instances = new WeakMap();
@@ -73,7 +74,7 @@ class ShoppingScanner {
     this.card._listen(root.querySelector("[data-shopping-scan-queue]"),"click",()=>this.openQueue());
     this.card._listen(root.querySelector("[data-shopping-camera]"),"click",()=>this.openCamera());
   }
-  async toggleTarget(){try{await this.request(this.target?.list_id===this.listId?"scanner/target/clear":"scanner/target/set",this.target?.list_id===this.listId?{}:{list_id:this.listId,action:"add"});await this.refresh();}catch(e){this.card._error=e.message||e.error?.message||this.t("capture_failed");this.card._render();}}
+  async toggleTarget(){try{const listId=this.listId;const result=await globalThis.HaListManagerScannerUi.toggle(this.card,{list_id:listId,action:"add"});if(result&&!this.stopped&&this.listId===listId)await this.refresh();}catch(e){this.card._error=e.message||e.error?.message||this.t("capture_failed");this.card._render();}}
   mount(){
     if(this.portal)return this.portal;
     const portal=document.createElement("div");portal.className="hmlm-scan-overlay";portal.innerHTML=`<style>${styles}</style><section class="scan-dialog" role="dialog" aria-modal="true"></section>`;

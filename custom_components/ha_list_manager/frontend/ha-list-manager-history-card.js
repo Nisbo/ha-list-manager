@@ -1,3 +1,4 @@
+import "./ha-list-manager-frontend-refresh.js";
 // Text is loaded and formatted by Home Assistant from translations/*.json.
 function haListManagerHistoryCardTextLocale(hass = null) {
   return String(hass?.locale?.language || hass?.language || "en").replace("_", "-");
@@ -80,7 +81,7 @@ function haListManagerHistoryCardTextRequest(hass, message) {
 }
 
 const HA_LM_HISTORY_API = "ha_list_manager";
-const CARD_VERSION = "1.1.0b2";
+const CARD_VERSION = "1.1.0b3";
 
 const esc = (value) => String(value ?? "").replace(/[&<>'"]/g, (char) => ({
   "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;",
@@ -275,6 +276,7 @@ class HaListManagerHistoryCard extends HTMLElement {
 
   set hass(hass) {
     this._hass = hass;
+    globalThis.HaListManagerFrontendRefresh.attach(this);
     const translationsChanged = haListManagerHistoryCardTextUpdateTranslations(this, this._hass);
     const changed = this._seriesConfigs().map((series) => `${hass?.states?.[series.entity]?.last_updated || ""}:${series.registry_display_precision ?? ""}`).join("|");
     if (changed && changed !== this._lastSourceUpdate) {
@@ -286,12 +288,14 @@ class HaListManagerHistoryCard extends HTMLElement {
   }
 
   connectedCallback() {
+    globalThis.HaListManagerFrontendRefresh.attach(this);
     this._disconnected = false;
     this._scheduleLoad(0);
     this._refreshTimer = window.setInterval(() => this._load(), 60000);
   }
 
   disconnectedCallback() {
+    globalThis.HaListManagerFrontendRefresh.detach(this);
     this._disconnected = true;
     this._loadGeneration += 1;
     this._reloadPending = false;

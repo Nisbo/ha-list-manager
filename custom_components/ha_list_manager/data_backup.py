@@ -94,8 +94,13 @@ def validate(path: Path) -> dict:
                     if connection.execute('PRAGMA integrity_check').fetchone()[0] != 'ok':
                         raise BackupError(text('backup.invalid'))
                     version = int(connection.execute("SELECT value FROM schema_metadata WHERE key='schema_version'").fetchone()[0])
-                    if version not in {1, 2, 3, 4, 5, 6, DATABASE_SCHEMA_VERSION}:
+                    if version not in {1, 2, 3, 4, 5, 6, 7, 8, DATABASE_SCHEMA_VERSION}:
                         raise BackupError(text('backup.version'))
+                    if version < 9:
+                        expected.execute('ALTER TABLE list_items DROP COLUMN last_checked_at')
+                        expected.execute('ALTER TABLE list_items DROP COLUMN monitoring_paused')
+                    if version < 8:
+                        expected.execute('ALTER TABLE labels DROP COLUMN hide_in_items')
                     if version < 7:
                         expected.execute('DROP TABLE mqtt_scan_receipts')
                         expected.execute('ALTER TABLE scanners DROP COLUMN source_type')
