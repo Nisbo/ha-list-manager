@@ -75,7 +75,7 @@ function haListManagerPanelTextRequest(hass, message) {
   return hass.callWS(message.type?.startsWith("ha_list_manager/") ? { ...message, language: haListManagerPanelTextLanguage(hass) } : message);
 }
 
-const PANEL_VERSION = "1.1.0b3";
+const PANEL_VERSION = "1.1.0b4";
 const GROUP_PICKER_RESULT_LIMIT = 100;
 const API = "ha_list_manager";
 const ITEMS_EVENT = "ha_list_manager_items_changed";
@@ -748,6 +748,7 @@ class HaListManagerPanel extends HTMLElement {
       this._settingsLoaded = true;
       this._scanners = scannerRecords.scanners || [];
       this._mqttScannerError = scannerRecords.mqtt_error;
+      this._usbScanners = scannerRecords.usb_scanners || [];
       this._scannersLoaded = true;
       this._scannerTarget = scannerTarget.target || null;
       this._pendingScans = pendingScans.scans || [];
@@ -1107,6 +1108,7 @@ class HaListManagerPanel extends HTMLElement {
       ]);
       this._scanners = records.scanners || [];
       this._mqttScannerError = records.mqtt_error;
+      this._usbScanners = records.usb_scanners || [];
       this._scannerTarget = target.target || null;
       this._pendingScans = pending.scans || [];
       this._scannersLoaded = true;
@@ -2466,7 +2468,7 @@ class HaListManagerPanel extends HTMLElement {
     const target = this._scannerTarget
       ? `<div class="active-target"><ha-icon icon="mdi:access-point-check"></ha-icon><div><strong>${this._escape(targetList?.name || haListManagerPanelText(this._scannerTarget.action === "product" ? "product_scan.database" : "ui.unknown_list", {}, this._hass))}</strong><small>${haListManagerPanelText("ui.active_since", {p0:(this._escape(SCANNER_ACTIONS(this._hass)[this._scannerTarget.action]?.label || haListManagerPanelText("product_scan.review_action",{},this._hass))), p1:(this._escape(this._formatScanTime(this._scannerTarget.updated_at)))}, this._hass)}</small></div><button class="ha-button" type="button" data-clear-scanner-target>${haListManagerPanelText("ui.disable", {}, this._hass)}</button></div>`
       : `<div class="active-target inactive"><ha-icon icon="mdi:access-point-off"></ha-icon><div><strong>${haListManagerPanelText("ui.no_card_scan_target", {}, this._hass)}</strong><small>${haListManagerPanelText("help.scanner_dynamic_default", {}, this._hass)}</small></div></div>`;
-    const rows = this._scanners.map((scanner) => `<article class="scanner-row ${scanner.enabled ? "" : "disabled"}"><span class="scanner-icon"><ha-icon icon="mdi:barcode-scan"></ha-icon></span><button type="button" class="scanner-open" data-edit-scanner="${scanner.id}"><strong>${this._escape(scanner.name)}</strong><small>${this._escape(scanner.source_type === "mqtt" ? `MQTT · ${scanner.mqtt.topic}${scanner.mqtt.scanner_value ? ` · ${scanner.mqtt.scanner_value}` : ""}` : scanner.address)}</small><span>${this._escape(this._scannerRouteText(scanner))}</span></button><span class="scanner-state ${scanner.enabled ? "enabled" : ""}">${scanner.enabled ? haListManagerPanelText("ui.active", {}, this._hass) : haListManagerPanelText("ui.disabled", {}, this._hass)}</span><div class="row-actions"><button class="icon-button" type="button" data-edit-scanner="${scanner.id}" title="${haListManagerPanelText("scanner.edit", {}, this._hass)}"><ha-icon icon="mdi:pencil"></ha-icon></button><button class="icon-button danger" type="button" data-delete-scanner="${scanner.id}" title="${haListManagerPanelText("ui.delete_scanner", {}, this._hass)}"><ha-icon icon="mdi:delete-outline"></ha-icon></button></div></article>`).join("");
+    const rows = this._scanners.map((scanner) => `<article class="scanner-row ${scanner.enabled ? "" : "disabled"}"><span class="scanner-icon"><ha-icon icon="mdi:barcode-scan"></ha-icon></span><button type="button" class="scanner-open" data-edit-scanner="${scanner.id}"><strong>${this._escape(scanner.name)}</strong><small>${this._escape(scanner.source_type === "mqtt" ? `${haListManagerPanelText("mqtt.generic", {}, this._hass)} · ${scanner.mqtt.topic}${scanner.mqtt.scanner_value ? ` · ${scanner.mqtt.scanner_value}` : ""}` : scanner.entity ? `${scanner.source_type === "usb_mqtt" ? "USB 2 MQTT Scanner" : haListManagerPanelText("entityscan.source", {}, this._hass)} · ${scanner.entity.entity_id}` : scanner.address)}</small><span>${this._escape(this._scannerRouteText(scanner))}</span></button><span class="scanner-state ${scanner.enabled ? "enabled" : ""}">${scanner.enabled ? haListManagerPanelText("ui.active", {}, this._hass) : haListManagerPanelText("ui.disabled", {}, this._hass)}</span><div class="row-actions"><button class="icon-button" type="button" data-edit-scanner="${scanner.id}" title="${haListManagerPanelText("scanner.edit", {}, this._hass)}"><ha-icon icon="mdi:pencil"></ha-icon></button><button class="icon-button danger" type="button" data-delete-scanner="${scanner.id}" title="${haListManagerPanelText("ui.delete_scanner", {}, this._hass)}"><ha-icon icon="mdi:delete-outline"></ha-icon></button></div></article>`).join("");
     const scannerList = rows ? `<ha-card class="list-card">${rows}</ha-card>` : `<ha-card class="empty-state compact"><ha-icon icon="mdi:barcode-scan"></ha-icon><h3>${haListManagerPanelText("ui.no_scanner_configured", {}, this._hass)}</h3><p>${haListManagerPanelText("help.scanner_simulation_persistent", {}, this._hass)}</p></ha-card>`;
     return `
       <ha-card class="scanner-requirements"><ha-icon icon="mdi:bluetooth-connect"></ha-icon><div><h3>${haListManagerPanelText("scanner.supported_hardware", {}, this._hass)}</h3><p>${haListManagerPanelText("scanner.hardware_requirements", {model: `<strong>${this._escape(haListManagerPanelText("ui.eyoyo_ey_015p", {}, this._hass))}</strong>`}, this._hass)}</p><a class="ha-button" href="https://github.com/lyntoo/eyoyo-ey015p-ble-ha" target="_blank" rel="noopener noreferrer"><ha-icon icon="mdi:github"></ha-icon>${haListManagerPanelText("ui.integration_github", {}, this._hass)}<ha-icon icon="mdi:open-in-new"></ha-icon></a></div></ha-card>
@@ -4085,7 +4087,19 @@ class HaListManagerPanel extends HTMLElement {
 
   _renderScannerDialog() {
     const draft = this._dialog.draft;
-    return `<div class="dialog-backdrop" data-close-dialog><section class="dialog scanner-dialog" role="dialog" aria-modal="true" data-dialog-panel>${this._dialogHeader(this._dialog.record ? haListManagerPanelText("scanner.edit", {}, this._hass) : haListManagerPanelText("ui.create_scanner", {}, this._hass))}<label class="field"><span>${haListManagerPanelText("ui.name", {}, this._hass)}</span><input type="text" maxlength="100" data-scanner-name value="${this._escape(draft.name)}" placeholder="${haListManagerPanelText("scanner.name_example", {}, this._hass)}"></label><ha-select class="selector-field" data-scanner-source></ha-select>${draft.source_type === "mqtt" ? this._renderMqttScannerFields(draft.mqtt) : `<label class="field"><span>${haListManagerPanelText("ui.address", {}, this._hass)}</span><input type="text" maxlength="100" data-scanner-address value="${this._escape(draft.address)}" placeholder="AA:FC:87:59:04:38"></label>`}<label class="setting-row compact-setting"><ha-checkbox data-scanner-enabled></ha-checkbox><span><strong>${haListManagerPanelText("ui.scanner_enabled", {}, this._hass)}</strong><small>${haListManagerPanelText("help.disabled_scanner_events", {}, this._hass)}</small></span></label><ha-select class="selector-field" data-scanner-routing></ha-select>${draft.routing === "fixed" ? `<div class="scanner-route-fields"><ha-select data-scanner-list></ha-select><ha-select data-scanner-action></ha-select></div>` : `<p class="field-help">${haListManagerPanelText("help.active_inventory_target", {}, this._hass)}</p>`}${this._dialogError()}<div class="dialog-actions"><button class="ha-button primary" data-save-scanner ${this._busy ? "disabled" : ""}>${this._busy ? haListManagerPanelText("ui.save_pending", {}, this._hass) : haListManagerPanelText("ui.save", {}, this._hass)}</button><button class="ha-button" data-cancel-dialog>${haListManagerPanelText("ui.cancel", {}, this._hass)}</button></div></section></div>`;
+    return `<div class="dialog-backdrop" data-close-dialog><section class="dialog scanner-dialog" role="dialog" aria-modal="true" data-dialog-panel>${this._dialogHeader(this._dialog.record ? haListManagerPanelText("scanner.edit", {}, this._hass) : haListManagerPanelText("ui.create_scanner", {}, this._hass))}<label class="field"><span>${haListManagerPanelText("ui.name", {}, this._hass)}</span><input type="text" maxlength="100" data-scanner-name value="${this._escape(draft.name)}" placeholder="${haListManagerPanelText("scanner.name_example", {}, this._hass)}"></label><ha-select class="selector-field" data-scanner-source></ha-select>${draft.source_type === "mqtt" ? this._renderMqttScannerFields(draft.mqtt) : ["entity", "usb_mqtt"].includes(draft.source_type) ? this._renderEntityScannerFields(draft) : `<label class="field"><span>${haListManagerPanelText("ui.address", {}, this._hass)}</span><input type="text" maxlength="100" data-scanner-address value="${this._escape(draft.address)}" placeholder="AA:FC:87:59:04:38"></label>`}<label class="setting-row compact-setting"><ha-checkbox data-scanner-enabled></ha-checkbox><span><strong>${haListManagerPanelText("ui.scanner_enabled", {}, this._hass)}</strong><small>${haListManagerPanelText("help.disabled_scanner_events", {}, this._hass)}</small></span></label><ha-select class="selector-field" data-scanner-routing></ha-select>${draft.routing === "fixed" ? `<div class="scanner-route-fields"><ha-select data-scanner-list></ha-select><ha-select data-scanner-action></ha-select></div>` : `<p class="field-help">${haListManagerPanelText("help.active_inventory_target", {}, this._hass)}</p>`}${this._dialogError()}<div class="dialog-actions"><button class="ha-button primary" data-save-scanner ${this._busy ? "disabled" : ""}>${this._busy ? haListManagerPanelText("ui.save_pending", {}, this._hass) : haListManagerPanelText("ui.save", {}, this._hass)}</button><button class="ha-button" data-cancel-dialog>${haListManagerPanelText("ui.cancel", {}, this._hass)}</button></div></section></div>`;
+  }
+
+  _renderEntityScannerFields(draft) {
+    const t = (key) => haListManagerPanelText(`entityscan.${key}`, {}, this._hass);
+    const usb = draft.source_type === "usb_mqtt";
+    const field = (key) => `<label class="field"><span>${t(key)}</span><input type="text" maxlength="200" data-entity-scanner-field="${key}" value="${this._escape(draft.entity[key])}" placeholder="${key === "barcode_attribute" ? "barcode" : "scan_id"}" autocomplete="off"></label>`;
+    return `<p class="field-help">${t(usb ? "usb_help" : "help")}</p>
+      ${usb ? `<p class="field-help"><a href="https://github.com/Nisbo/usb-scanner-mqtt" target="_blank" rel="noopener noreferrer">USB 2 MQTT Scanner · GitHub</a></p>` : ""}
+      ${usb && !this._usbScanners?.length ? `<div class="status-message warning">${t("empty")}</div>` : ""}
+      <ha-selector class="selector-field" data-entity-scanner-picker></ha-selector>
+      ${usb ? "" : `${field("barcode_attribute")}${field("scan_id_attribute")}<p class="field-help">${t("id_help")}</p>`}
+      <p class="field-help">${t("start_help")}</p>`;
   }
 
   _renderMqttScannerFields(config) {
@@ -5215,12 +5229,27 @@ class HaListManagerPanel extends HTMLElement {
       const draft = this._dialog.draft;
       configureSelect("[data-scanner-source]", haListManagerPanelText("mqtt.source", {}, this._hass), [
         {value:"eyoyo", label:haListManagerPanelText("mqtt.eyoyo", {}, this._hass)},
-        {value:"mqtt", label:"MQTT"},
+        {value:"mqtt", label:haListManagerPanelText("mqtt.generic", {}, this._hass)},
+        {value:"entity", label:haListManagerPanelText("entityscan.source", {}, this._hass)},
+        {value:"usb_mqtt", label:"USB 2 MQTT Scanner"},
       ], draft.source_type, (value) => { draft.source_type = value; this._render(); });
       configureSelect("[data-mqtt-format]", haListManagerPanelText("mqtt.format", {}, this._hass), [
         {value:"json",label:"JSON"},{value:"text",label:haListManagerPanelText("mqtt.text", {}, this._hass)}
       ], draft.mqtt.format, (value) => { draft.mqtt.format = value; if(value === "text") { draft.mqtt.scanner_path=""; draft.mqtt.scanner_value=""; draft.mqtt.scan_id_path=""; } this._render(); });
       this.shadowRoot.querySelectorAll("[data-mqtt-field]").forEach((input) => input.addEventListener("input", () => { draft.mqtt[input.dataset.mqttField] = input.value; }));
+      const entityPicker = this.shadowRoot.querySelector("[data-entity-scanner-picker]");
+      if (entityPicker) {
+        entityPicker.hass = this._hass;
+        entityPicker.label = haListManagerPanelText("entityscan.entity", {}, this._hass);
+        entityPicker.required = true;
+        entityPicker.selector = { entity: draft.source_type === "usb_mqtt" ? { include_entities: (this._usbScanners || []).map(row => row.entity_id) } : {} };
+        entityPicker.value = draft.entity.entity_id || undefined;
+        entityPicker.addEventListener("value-changed", (event) => {
+          draft.entity.entity_id = event.detail.value || "";
+          draft.entity.registry_entry_id = "";
+        });
+      }
+      this.shadowRoot.querySelectorAll("[data-entity-scanner-field]").forEach(input => input.addEventListener("input", () => { draft.entity[input.dataset.entityScannerField] = input.value; }));
       const enabled = this.shadowRoot.querySelector("[data-scanner-enabled]");
       if (enabled) { enabled.checked = draft.enabled; enabled.addEventListener("change", () => { draft.enabled = enabled.checked; }); }
       configureSelect("[data-scanner-routing]", haListManagerPanelText("ui.assignment", {}, this._hass), [{ value: "active_target", label: haListManagerPanelText("ui.active_card_default_target", {}, this._hass) }, { value: "fixed", label: haListManagerPanelText("ui.fixed_list_action", {}, this._hass) }], draft.routing, (value) => { draft.routing = value || "active_target"; if (draft.routing === "active_target") { draft.list_id = ""; draft.action = ""; } this._render(); });
@@ -7043,6 +7072,7 @@ class HaListManagerPanel extends HTMLElement {
       name: record?.name || "",
       address: record?.source_type === "mqtt" ? "" : record?.address || "",
       source_type: record?.source_type || "eyoyo",
+      entity: { entity_id: "", registry_entry_id: "", barcode_attribute: "", scan_id_attribute: "", ...record?.entity },
       mqtt: { topic: "", format: "json", ean_path: "ean", scanner_path: "", scanner_value: "", scan_id_path: "", ...record?.mqtt },
       enabled: record?.enabled !== false,
       routing: record?.routing || "active_target",
@@ -7201,13 +7231,15 @@ class HaListManagerPanel extends HTMLElement {
     const { record, draft } = this._dialog;
     draft.name = draft.name.trim();
     draft.address = draft.address.trim();
-    if (!draft.name || (draft.source_type !== "mqtt" && !draft.address)) return this._showDialogError(haListManagerPanelText("errors.enter_scanner_name_address", {}, this._hass));
+    if (!draft.name || (draft.source_type === "eyoyo" && !draft.address)) return this._showDialogError(haListManagerPanelText("errors.enter_scanner_name_address", {}, this._hass));
+    if (["entity", "usb_mqtt"].includes(draft.source_type) && !draft.entity.entity_id) return this._showDialogError(haListManagerPanelText("entityscan.invalid", {}, this._hass));
     if (draft.routing === "fixed" && (!draft.list_id || !draft.action)) return this._showDialogError(haListManagerPanelText("errors.select_fixed_list_action", {}, this._hass));
     await this._runDialogAction(async () => {
       const payload = {
         type: `${API}/scanners/${record ? "update" : "create"}`,
         name: draft.name, address: draft.address, source_type: draft.source_type,
         mqtt: draft.source_type === "mqtt" ? draft.mqtt : null,
+        entity: ["entity", "usb_mqtt"].includes(draft.source_type) ? draft.entity : null,
         enabled: Boolean(draft.enabled), routing: draft.routing,
         list_id: draft.routing === "fixed" ? draft.list_id : null,
         action: draft.routing === "fixed" ? draft.action : null,

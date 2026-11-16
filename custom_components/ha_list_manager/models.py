@@ -306,6 +306,7 @@ class ScannerRecord:
     updated_at: str
     source_type: str = "eyoyo"
     mqtt: dict[str, Any] | None = None
+    entity: dict[str, Any] | None = None
 
     def as_dict(self) -> dict[str, Any]:
         """Return a JSON-serializable representation."""

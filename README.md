@@ -19,6 +19,21 @@ The interface and complete wiki are available in English and German.
 
 ![Compact dashboard cards for inventory, shopping and tasks](docs/images/en/overview-desktop.jpg)
 
+## Supported scanners
+
+Under **HA List Manager → Scanners**, choose Eyoyo, a configurable MQTT topic,
+a **Home Assistant entity**, or **USB 2 MQTT Scanner**. Entity scanners read the
+barcode from the entity state or a named attribute, with an optional scan-ID
+attribute. A new ID allows the same barcode to be scanned again; repeated IDs
+are ignored even after a Home Assistant restart. Existing values at activation
+or startup do not add items.
+
+[USB 2 MQTT Scanner](https://github.com/Nisbo/usb-scanner-mqtt) connects USB
+keyboard scanners to MQTT and Home Assistant Discovery. Select its automatically
+detected **Last scan** entity; no topic or JSON mapping is needed. Register a
+physical scanner through only one source. Processing runs centrally without an
+open card; existing list and action assignments still apply.
+
 ## Three kinds of lists
 
 ### Shopping lists
@@ -79,6 +94,28 @@ Enable dishes and Tandoor separately for each local shopping list. Adding
 ingredients updates the shopping list without booking any inventory stock.
 
 [Guide to dishes and recipes](https://github.com/Nisbo/ha-list-manager/wiki/Chips-Dishes-and-Recipes)
+
+## Your Tandoor cookbook as a dashboard card
+
+Choose **Tandoor** in the dashboard card picker. Browse
+cookbooks, search recipes, adjust servings and read ingredients and preparation
+side by side on larger screens. Cooking checkmarks stay local to your browser.
+Choose a shopping list with Tandoor enabled to open the existing ingredient,
+amount and category selection before adding anything.
+
+Use a Home Assistant **Panel** view for one card across the full page; the card
+adapts automatically. A fullscreen button is also available. With **Remember my
+place in this browser** enabled, your cookbook, search, page, open recipe,
+servings, checkmarks and scroll position survive a page reload. Multiple cards
+on the same page can use different **Card IDs** to keep their places separate.
+Click the chef hat to enlarge the card within the dashboard, or the title to
+collapse it. Both controls are enabled by default and can be disabled separately.
+The collapsed state is remembered independently of the reading-position option.
+Search recipe names, and optionally include ingredients and recipe text with the
+checkboxes below the search field. These choices are remembered with your search.
+
+The card uses the existing Tandoor connection and also supports browsing without
+a shopping list. Private API credentials remain in the backend.
 
 ## Categories and labels across all three list types
 

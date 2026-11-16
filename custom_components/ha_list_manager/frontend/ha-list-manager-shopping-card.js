@@ -91,7 +91,7 @@ function haListManagerShoppingCardTextRequest(hass, message) {
 const HA_LM_API = "ha_list_manager";
 const HA_LM_ITEMS_EVENT = "ha_list_manager_items_changed";
 const HA_LM_LISTS_EVENT = "ha_list_manager_lists_changed";
-const CARD_VERSION = "1.1.0b3";
+const CARD_VERSION = "1.1.0b4";
 
 const esc = (value) => String(value ?? "").replace(/[&<>'"]/g, (char) => ({
   "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;",
@@ -4447,92 +4447,7 @@ class HaListManagerShoppingCard extends HTMLElement {
     root.querySelectorAll("[data-dialog-dish]").forEach((button) => this._listen(button, "click", () => this._useDish(this._dishes.find((dish) => dish.id === button.dataset.dialogDish))));
   }
 
-  _bind() {
-    const root = this.shadowRoot;
-    globalThis.HaListManagerDialogSections.bindQuick(this);
-    globalThis.HaListManagerScannerUi.fitToolbar(this);
-    globalThis.HaListManagerShoppingScanner?.for(this).bind(root);
-    this._bindLabelFilter(root);
-    this._listen(root, "pointerdown", (event) => {
-      this._pageActionAnchor = event.target.closest?.("[data-item-id],[data-chip-category],[data-quick-chip],[data-dish],[data-category],[data-label-filter-preset],[data-open-label-filter]") || null;
-    });
-    this._bindNotices();
-    this._bindSelectionPopup();
-    this._bindSelectionTriggers(root);
-    this._listen(root.querySelector("[data-toggle-item-actions]"), "click", () => this._toggleItemActions());
-    root.querySelectorAll("[data-item-action]").forEach((button) => this._listen(button, "click", () => this._openItemAction(button.dataset.itemAction)));
-    root.querySelectorAll("[data-item-shortcut]").forEach((button) => this._listen(button, "click", () => this._openItemAction(button.dataset.itemShortcut, button)));
-    this._listen(root.querySelector("[data-confirm-item-action]"), "click", () => this._confirmItemAction());
-    this._listen(root.querySelector("[data-item-action-target]"), "change", (event) => { if (this._itemAction) this._itemAction.target_list_id = event.target.value; });
-    this._listen(root.querySelector("[data-item-action-quantity]"), "input", (event) => { if (this._itemAction) this._itemAction.quantity = event.target.value; });
-    this._listen(root.querySelector("[data-dialog]"), "keydown", (event) => {
-      if (event.key === "Escape" && (this._itemAction || this._dialog?.item_actions_open)) {
-        event.preventDefault(); event.stopPropagation();
-        if (this._itemAction) this._closeItemAction(); else this._toggleItemActions();
-      } else if (event.key === "Escape") {
-        event.preventDefault(); event.stopPropagation(); this._closeDialog();
-      }
-    });
-    this._listen(root.querySelector(".item-actions-menu"), "keydown", (event) => {
-      if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
-      const buttons = [...root.querySelectorAll("[data-item-action]:not(:disabled)")];
-      if (!buttons.length) return;
-      event.preventDefault();
-      const current = buttons.indexOf(root.activeElement);
-      const index = event.key === "Home" ? 0 : event.key === "End" ? buttons.length - 1
-        : (current + (event.key === "ArrowUp" ? -1 : 1) + buttons.length) % buttons.length;
-      buttons[index]?.focus({ preventScroll: true });
-    });
-    this._listen(root.querySelector("ha-card"), "scroll", (event) => {
-      if (this._expandedView) this._expandedScrollTop = event.currentTarget.scrollTop;
-    }, { passive: true });
-    root.querySelectorAll("[data-toggle-expanded-view]").forEach((element) => this._listen(element, "click", (event) => this._toggleExpandedView(event)));
-    this._listen(root.querySelector("[data-toggle-list]"), "click", () => { if (!this._expandedView) this._toggleList(); });
-    const productInput = root.querySelector("[data-product-input]");
-    this._listen(productInput, "input", (event) => this._searchProducts(event.target.value));
-    this._listen(productInput, "focus", () => {
-      this._suggestionsVisible = true;
-      const suggestions = this.shadowRoot.querySelector("[data-suggestions]");
-      if (suggestions) suggestions.hidden = !this._suggestions.length;
-    });
-    this._listen(productInput, "blur", () => setTimeout(() => {
-      this._suggestionsVisible = false;
-      const suggestions = this.shadowRoot.querySelector("[data-suggestions]");
-      if (suggestions) suggestions.hidden = true;
-    }, 120));
-    this._listen(productInput, "keydown", (event) => { if (event.key === "Enter") { event.preventDefault(); this._useInput(); } });
-    this._listen(root.querySelector("[data-clear-input]"), "click", () => this._clearInput());
-    this._listen(root.querySelector("[data-open-chip-dialog]"), "click", () => {
-      this._chipDialog = true;
-      this._lockScroll();
-      this._render();
-    });
-    this._listen(root.querySelector("[data-add]"), "click", () => this._useInput());
-    this._bindChipActions(root);
-    this._listen(root.querySelector("[data-toggle-header-menu]"), "click", () => { this._headerMenuOpen = !this._headerMenuOpen; this._render(); });
-    root.querySelectorAll("[data-send-list]").forEach((button) => this._listen(button, "click", () => { this._headerMenuOpen = false; this._requestShare(); }));
-    root.querySelectorAll("[data-export-pdf]").forEach((button) => this._listen(button, "click", () => { this._headerMenuOpen = false; this._exportPdf(); }));
-    root.querySelectorAll("[data-open-tandoor]").forEach((button) => this._listen(button, "click", () => this._openTandoorDialog()));
-    this._bindFilterMenu(root);
-    this._listen(root.querySelector("ha-card"), "click", (event) => {
-      if (this._filterMenuOpen && !event.target.closest(".filter-menu-host")) this._closeFilterMenu();
-      if (this._headerMenuOpen && !event.target.closest(".compact-header-actions")) { this._headerMenuOpen = false; this._render(); }
-    });
-    this._listen(root.querySelector("[data-dialog]"), "click", (event) => {
-      event.stopPropagation();
-      if (this._dialog?.item_actions_open && !event.target.closest(".item-actions")) {
-        this._dialog.item_actions_open = false;
-        const menu = root.querySelector(".item-actions-menu");
-        if (menu) { this._clearRenderListeners(menu); menu.remove(); }
-        root.querySelector("[data-toggle-item-actions]")?.setAttribute("aria-expanded", "false");
-      }
-    });
-    this._listen(root.querySelector(".backdrop[data-close-product-picker]"), "click", (event) => { if (event.target === event.currentTarget) this._closeProductPicker(); });
-    root.querySelectorAll("button[data-close-product-picker]").forEach((element) => this._listen(element, "click", () => this._closeProductPicker()));
-    this._listen(root.querySelector(".backdrop[data-close-chip-dialog]"), "click", (event) => { if (event.target === event.currentTarget) this._closeChipDialog(); });
-    root.querySelectorAll("button[data-close-chip-dialog]").forEach((element) => this._listen(element, "click", () => this._closeChipDialog()));
-    this._listen(root.querySelector(".backdrop[data-close-dish-dialog]"), "click", (event) => { if (event.target === event.currentTarget) this._closeDishDialog(); });
-    root.querySelectorAll("button[data-close-dish-dialog]").forEach((element) => this._listen(element, "click", () => this._closeDishDialog()));
+  _bindTandoorControls(root) {
     this._listen(root.querySelector(".backdrop[data-close-tandoor]"), "click", (event) => { if (event.target === event.currentTarget) this._closeTandoorDialog(); });
     root.querySelectorAll("button[data-close-tandoor]").forEach((element) => this._listen(element, "click", () => this._closeTandoorDialog()));
     this._listen(root.querySelector("[data-tandoor-search]"), "input", (event) => {
@@ -4662,6 +4577,95 @@ class HaListManagerShoppingCard extends HTMLElement {
       this._render();
     }));
     this._listen(root.querySelector("[data-add-tandoor]"), "click", () => this._addTandoorSelection());
+  }
+
+  _bind() {
+    const root = this.shadowRoot;
+    globalThis.HaListManagerDialogSections.bindQuick(this);
+    globalThis.HaListManagerScannerUi.fitToolbar(this);
+    globalThis.HaListManagerShoppingScanner?.for(this).bind(root);
+    this._bindLabelFilter(root);
+    this._listen(root, "pointerdown", (event) => {
+      this._pageActionAnchor = event.target.closest?.("[data-item-id],[data-chip-category],[data-quick-chip],[data-dish],[data-category],[data-label-filter-preset],[data-open-label-filter]") || null;
+    });
+    this._bindNotices();
+    this._bindSelectionPopup();
+    this._bindSelectionTriggers(root);
+    this._listen(root.querySelector("[data-toggle-item-actions]"), "click", () => this._toggleItemActions());
+    root.querySelectorAll("[data-item-action]").forEach((button) => this._listen(button, "click", () => this._openItemAction(button.dataset.itemAction)));
+    root.querySelectorAll("[data-item-shortcut]").forEach((button) => this._listen(button, "click", () => this._openItemAction(button.dataset.itemShortcut, button)));
+    this._listen(root.querySelector("[data-confirm-item-action]"), "click", () => this._confirmItemAction());
+    this._listen(root.querySelector("[data-item-action-target]"), "change", (event) => { if (this._itemAction) this._itemAction.target_list_id = event.target.value; });
+    this._listen(root.querySelector("[data-item-action-quantity]"), "input", (event) => { if (this._itemAction) this._itemAction.quantity = event.target.value; });
+    this._listen(root.querySelector("[data-dialog]"), "keydown", (event) => {
+      if (event.key === "Escape" && (this._itemAction || this._dialog?.item_actions_open)) {
+        event.preventDefault(); event.stopPropagation();
+        if (this._itemAction) this._closeItemAction(); else this._toggleItemActions();
+      } else if (event.key === "Escape") {
+        event.preventDefault(); event.stopPropagation(); this._closeDialog();
+      }
+    });
+    this._listen(root.querySelector(".item-actions-menu"), "keydown", (event) => {
+      if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
+      const buttons = [...root.querySelectorAll("[data-item-action]:not(:disabled)")];
+      if (!buttons.length) return;
+      event.preventDefault();
+      const current = buttons.indexOf(root.activeElement);
+      const index = event.key === "Home" ? 0 : event.key === "End" ? buttons.length - 1
+        : (current + (event.key === "ArrowUp" ? -1 : 1) + buttons.length) % buttons.length;
+      buttons[index]?.focus({ preventScroll: true });
+    });
+    this._listen(root.querySelector("ha-card"), "scroll", (event) => {
+      if (this._expandedView) this._expandedScrollTop = event.currentTarget.scrollTop;
+    }, { passive: true });
+    root.querySelectorAll("[data-toggle-expanded-view]").forEach((element) => this._listen(element, "click", (event) => this._toggleExpandedView(event)));
+    this._listen(root.querySelector("[data-toggle-list]"), "click", () => { if (!this._expandedView) this._toggleList(); });
+    const productInput = root.querySelector("[data-product-input]");
+    this._listen(productInput, "input", (event) => this._searchProducts(event.target.value));
+    this._listen(productInput, "focus", () => {
+      this._suggestionsVisible = true;
+      const suggestions = this.shadowRoot.querySelector("[data-suggestions]");
+      if (suggestions) suggestions.hidden = !this._suggestions.length;
+    });
+    this._listen(productInput, "blur", () => setTimeout(() => {
+      this._suggestionsVisible = false;
+      const suggestions = this.shadowRoot.querySelector("[data-suggestions]");
+      if (suggestions) suggestions.hidden = true;
+    }, 120));
+    this._listen(productInput, "keydown", (event) => { if (event.key === "Enter") { event.preventDefault(); this._useInput(); } });
+    this._listen(root.querySelector("[data-clear-input]"), "click", () => this._clearInput());
+    this._listen(root.querySelector("[data-open-chip-dialog]"), "click", () => {
+      this._chipDialog = true;
+      this._lockScroll();
+      this._render();
+    });
+    this._listen(root.querySelector("[data-add]"), "click", () => this._useInput());
+    this._bindChipActions(root);
+    this._listen(root.querySelector("[data-toggle-header-menu]"), "click", () => { this._headerMenuOpen = !this._headerMenuOpen; this._render(); });
+    root.querySelectorAll("[data-send-list]").forEach((button) => this._listen(button, "click", () => { this._headerMenuOpen = false; this._requestShare(); }));
+    root.querySelectorAll("[data-export-pdf]").forEach((button) => this._listen(button, "click", () => { this._headerMenuOpen = false; this._exportPdf(); }));
+    root.querySelectorAll("[data-open-tandoor]").forEach((button) => this._listen(button, "click", () => this._openTandoorDialog()));
+    this._bindFilterMenu(root);
+    this._listen(root.querySelector("ha-card"), "click", (event) => {
+      if (this._filterMenuOpen && !event.target.closest(".filter-menu-host")) this._closeFilterMenu();
+      if (this._headerMenuOpen && !event.target.closest(".compact-header-actions")) { this._headerMenuOpen = false; this._render(); }
+    });
+    this._listen(root.querySelector("[data-dialog]"), "click", (event) => {
+      event.stopPropagation();
+      if (this._dialog?.item_actions_open && !event.target.closest(".item-actions")) {
+        this._dialog.item_actions_open = false;
+        const menu = root.querySelector(".item-actions-menu");
+        if (menu) { this._clearRenderListeners(menu); menu.remove(); }
+        root.querySelector("[data-toggle-item-actions]")?.setAttribute("aria-expanded", "false");
+      }
+    });
+    this._listen(root.querySelector(".backdrop[data-close-product-picker]"), "click", (event) => { if (event.target === event.currentTarget) this._closeProductPicker(); });
+    root.querySelectorAll("button[data-close-product-picker]").forEach((element) => this._listen(element, "click", () => this._closeProductPicker()));
+    this._listen(root.querySelector(".backdrop[data-close-chip-dialog]"), "click", (event) => { if (event.target === event.currentTarget) this._closeChipDialog(); });
+    root.querySelectorAll("button[data-close-chip-dialog]").forEach((element) => this._listen(element, "click", () => this._closeChipDialog()));
+    this._listen(root.querySelector(".backdrop[data-close-dish-dialog]"), "click", (event) => { if (event.target === event.currentTarget) this._closeDishDialog(); });
+    root.querySelectorAll("button[data-close-dish-dialog]").forEach((element) => this._listen(element, "click", () => this._closeDishDialog()));
+    this._bindTandoorControls(root);
     root.querySelectorAll("[data-dish-choice]").forEach((checkbox) => this._listen(checkbox, "change", () => {
       if (!this._dishDialog) return;
       if (checkbox.checked) this._dishDialog.selected.add(checkbox.dataset.dishChoice);
@@ -4836,6 +4840,60 @@ class HaListManagerShoppingCardEditor extends HTMLElement {
     this._form.computeHelper = definition.computeHelper;
   }
 }
+
+// Reuse the proven ingredient/category workflow without starting a list card's
+// scanner sessions, subscriptions, polling or dashboard rendering.
+class HaListManagerRecipeSelection extends HaListManagerShoppingCard {
+  constructor() { super(); this._selectionRun = 0; this._selectionAlive = false; }
+  connectedCallback() { this._selectionAlive = true; }
+  disconnectedCallback() {
+    this._selectionAlive = false; this._selectionRun++; this._loadRequestId++;
+    clearTimeout(this._tandoorSearchTimer); this._clearRenderListeners();
+    this._tandoorDialog = null; this._selectionPopup = null; this._unlockScroll();
+  }
+  set hass(value) { this._hass = value; if (haListManagerShoppingCardTextUpdateTranslations(this, value)) this._render(); }
+  async open({hass, listId, recipeId, servings}) {
+    const run = ++this._selectionRun; this._hass = hass;
+    this._config = {...HaListManagerShoppingCard.getStubConfig(hass), list_id:listId};
+    haListManagerShoppingCardTextUpdateTranslations(this, hass);
+    this._tandoorDialog = {mode:"search",query:"",categories:[],recipes:[],loading:true,status:""};
+    this._lockScroll(); this._render();
+    const request = (command, data={}) => haListManagerShoppingCardTextRequest(hass, {type:`${HA_LM_API}/${command}`,...data});
+    const [lists,items,categories,products,chips,labels] = await Promise.all([
+      request("lists/list"),request("items/list",{list_id:listId}),request("categories/order/get",{list_id:listId}),
+      request("products/list"),request("chips/list",{list_id:listId}),request("labels/list",{list_id:listId}),
+    ]);
+    if (!this._selectionAlive || run !== this._selectionRun) return;
+    this._list = (lists.lists || []).find(list=>list.id===listId);
+    this._items = items.items || []; this._categories = categories.categories || [];
+    this._products = products.products || []; this._chips = chips.chips || []; this._labels = labels.labels || [];
+    this._tandoorDialog.skipSmallUnits = this._list?.tandoor_skip_small_units === true;
+    await this._selectTandoorRecipe(recipeId);
+    if (!this._selectionAlive || run !== this._selectionRun) return;
+    if (Number(servings)>0 && Number(this._tandoorDialog?.recipe?.servings)>0) this._tandoorDialog.servings = Number(servings);
+    this._render();
+  }
+  async _load() {} // The standalone selection closes after the existing save workflow.
+  _setNotificationStatus(message) {
+    this.dispatchEvent(new CustomEvent("recipe-selection-saved",{detail:{message}}));
+  }
+  _closeTandoorDialog() {
+    if (this._busy) return;
+    this._tandoorDialog = null; this._unlockScroll();
+    this.dispatchEvent(new CustomEvent("recipe-selection-closed"));
+  }
+  _render() {
+    if (!this._selectionAlive) return;
+    if (!this._tandoorDialog) { this._closeTandoorDialog(); return; }
+    const previous = this.shadowRoot.querySelector(".tandoor-recipe-dialog")?.scrollTop || 0;
+    this._clearRenderListeners();
+    this.shadowRoot.innerHTML = `<style>${this._styles()}ha-card{padding:0;border:0;background:none}.tandoor-backdrop{z-index:10001}.selection-backdrop{z-index:10002}[data-tandoor-back]{display:none!important}.tandoor-recipe-header{grid-template-columns:minmax(0,1fr) 42px}</style><ha-card>${this._renderTandoorDialog()}${this._renderSelectionPopup()}</ha-card>`;
+    const panel = this.shadowRoot.querySelector(".tandoor-recipe-dialog"); if (panel) panel.scrollTop = previous;
+    this._bindNotices(); this._bindSelectionPopup(); this._bindSelectionTriggers(this.shadowRoot);
+    this._bindTandoorControls(this.shadowRoot); this._configureTandoorCategorySelectors(this.shadowRoot);
+  }
+}
+if (!customElements.get("ha-list-manager-recipe-selection")) customElements.define("ha-list-manager-recipe-selection", HaListManagerRecipeSelection);
 
 globalThis.HaListManagerFilters.install(HaListManagerShoppingCard.prototype);
 

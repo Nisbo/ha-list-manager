@@ -69,6 +69,7 @@ class TandoorClient:
         self._token = token.strip()
         self._cache: dict[tuple[str, tuple[tuple[str, Any], ...]], tuple[float, Any]] = {}
         self._image_cache: dict[int, tuple[float, bytes, str]] = {}
+        self._library_search_lock = asyncio.Lock()
 
     async def _get(self, path: str, *, params: dict[str, Any] | None = None) -> Any:
         if not self._base_url or not self._token:
@@ -239,20 +240,97 @@ class TandoorClient:
                 if item.get("id") is not None else item
                 for item in selected_results
             ]
-        recipes = [
-            {
-                "id": int(item["id"]),
-                "name": str(item.get("name") or localized_text("backend.tandoor_recipe")),
-                "image": self._absolute_url(item.get("image")),
-                "servings": item.get("servings"),
-                "servings_text": str(item.get("servings_text") or ""),
-                "working_time": item.get("working_time"),
-                "waiting_time": item.get("waiting_time"),
-            }
-            for item in selected_results
-            if item.get("id") is not None
-        ]
+        recipes = [self._recipe_summary(item) for item in selected_results if item.get("id") is not None]
         return sorted(recipes, key=lambda item: item["name"].casefold())
+
+    def _recipe_summary(self, item):
+        """Keep recipe previews and library pages consistent."""
+        return {
+            "id": int(item["id"]),
+            "name": str(item.get("name") or localized_text("backend.tandoor_recipe")),
+            "image": self._absolute_url(item.get("image")),
+            "servings": item.get("servings"),
+            "servings_text": str(item.get("servings_text") or ""),
+            "working_time": item.get("working_time"),
+            "waiting_time": item.get("waiting_time"),
+        }
+
+    async def async_library(self, query="", book_id=None, page=1, page_size=24,
+                            include_ingredients=False, include_text=False):
+        """Read a complete, paginated library without a shopping-list binding."""
+        if str(query).strip():
+            return await self._search_library(query, book_id, page, page_size, include_ingredients, include_text)
+        params = {"query": "", "page": max(1, int(page)),
+                  "page_size": max(1, min(48, int(page_size))), "sort_order": "name"}
+        if book_id is not None:
+            params["books"] = int(book_id)
+        payload = await self._get("/api/recipe/", params=params)
+        recipes = [self._recipe_summary(item) for item in payload.get("results") or []
+                   if item.get("id") is not None]
+        return {"recipes": recipes, "count": int(payload.get("count") or len(recipes)),
+                "page": params["page"], "has_next": bool(payload.get("next"))}
+
+    async def _search_library(self, query, book_id, page, page_size, include_ingredients, include_text):
+        """Search selected fields without changing Tandoor's user preferences."""
+        needle = str(query).strip().casefold()
+        size = max(1, min(48, int(page_size)))
+        page = max(1, int(page))
+        # One caller owns each cache fill; no detached indexing tasks survive a
+        # failed request, configuration change, or integration shutdown.
+        async with self._library_search_lock:
+            catalog = []
+            for number in range(1, 101):
+                params = {"query": "", "page": number, "page_size": 100, "sort_order": "name"}
+                if book_id is not None:
+                    params["books"] = int(book_id)
+                payload = await self._get_cached("/api/recipe/", params=params, ttl=60)
+                catalog.extend(item for item in payload.get("results") or [] if item.get("id") is not None)
+                if not payload.get("next"):
+                    break
+            else:
+                raise TandoorError(localized_text("library.too_many_recipes"))
+            matches = {int(item["id"]): item for item in catalog
+                       if needle in str(item.get("name") or "").casefold()}
+            if include_ingredients or include_text:
+                remaining = [item for item in catalog if int(item["id"]) not in matches]
+                for start in range(0, len(remaining), 4):
+                    batch = remaining[start:start + 4]
+                    # Wait for the whole bounded batch even on errors. Failed
+                    # details must not silently hide otherwise matching recipes.
+                    details = await asyncio.gather(*(self._get_cached(
+                        f"/api/recipe/{int(item['id'])}/", ttl=300) for item in batch), return_exceptions=True)
+                    for detail in details:
+                        if isinstance(detail, BaseException):
+                            raise detail
+                        texts = []
+                        if include_text:
+                            texts.append(detail.get("description"))
+                        for step in detail.get("steps") or []:
+                            if include_text:
+                                texts.extend((step.get("name"), step.get("instruction")))
+                            if include_ingredients:
+                                for ingredient in step.get("ingredients") or []:
+                                    food = ingredient.get("food") or {}
+                                    texts.extend((food.get("name"), food.get("full_name"), ingredient.get("note"), ingredient.get("original_text")))
+                        if any(needle in _plain_tandoor_text(value).casefold() for value in texts):
+                            matches[int(detail["id"])] = detail
+            ordered = sorted(matches.values(), key=lambda item: str(item.get("name") or "").casefold())
+            offset = (page - 1) * size
+            return {"recipes": [self._recipe_summary(item) for item in ordered[offset:offset + size]],
+                    "count": len(ordered), "page": page, "has_next": offset + size < len(ordered)}
+
+    async def async_library_books(self):
+        """Read every cookbook page, with a bounded guard against broken servers."""
+        books = []
+        for page in range(1, 101):
+            payload = await self._get_cached("/api/recipe-book/",
+                params={"page_size": 100, "page": page, "sort_order": "name"})
+            books.extend({"id": int(item["id"]), "name": str(item.get("name") or "").strip(),
+                          "description": _plain_tandoor_text(item.get("description"))}
+                         for item in payload.get("results") or [] if item.get("id") is not None)
+            if not payload.get("next"):
+                return sorted(books, key=lambda item: item["name"].casefold())
+        raise TandoorError(localized_text("library.too_many_books"))
 
     async def async_recipe(self, recipe_id: int) -> dict[str, Any]:
         """Return one recipe with ordered ingredients and preparation steps."""

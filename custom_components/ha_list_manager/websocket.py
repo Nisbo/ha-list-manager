@@ -310,6 +310,9 @@ def async_register_websocket_commands(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, websocket_list_tandoor_categories)
     websocket_api.async_register_command(hass, websocket_search_tandoor_recipes)
     websocket_api.async_register_command(hass, websocket_get_tandoor_recipe)
+    websocket_api.async_register_command(hass, websocket_tandoor_library_info)
+    websocket_api.async_register_command(hass, websocket_tandoor_library_browse)
+    websocket_api.async_register_command(hass, websocket_tandoor_library_recipe)
     websocket_api.async_register_command(hass, websocket_list_categories)
     websocket_api.async_register_command(hass, websocket_list_category_rules)
     websocket_api.async_register_command(hass, websocket_set_category_rules)
@@ -2489,6 +2492,53 @@ async def websocket_get_tandoor_recipe(
     connection.send_result(msg["id"], {"recipe": recipe})
 
 
+@localized_command({probatio.Required("type"): f"{DOMAIN}/tandoor/library/info"})
+async def websocket_tandoor_library_info(hass, connection, msg):
+    """Read-only cookbook access for authenticated dashboard users."""
+    options = _runtime(hass).config_entry.options
+    configured = bool(options.get("tandoor_url") and options.get("tandoor_token"))
+    try:
+        books = await _tandoor_client(hass).async_library_books() if configured else []
+    except (TandoorError, ValueError) as error:
+        _send_error(connection, msg["id"], "tandoor_error", error)
+        return
+    connection.send_result(msg["id"], {"configured": configured, "books": books})
+
+
+@localized_command({
+    probatio.Required("type"): f"{DOMAIN}/tandoor/library/browse",
+    probatio.Optional("query", default=""): str,
+    probatio.Optional("book_id"): probatio.All(int, probatio.Range(min=1)),
+    probatio.Optional("include_ingredients", default=False): bool,
+    probatio.Optional("include_text", default=False): bool,
+    probatio.Optional("page", default=1): probatio.All(int, probatio.Range(min=1, max=100000)),
+    probatio.Optional("page_size", default=24): probatio.All(int, probatio.Range(min=1, max=48)),
+})
+async def websocket_tandoor_library_browse(hass, connection, msg):
+    try:
+        result = await _tandoor_client(hass).async_library(
+            (_clean_text(msg["query"], maximum=200, required=False) or ""), msg.get("book_id"), msg["page"], msg["page_size"],
+            include_ingredients=msg["include_ingredients"], include_text=msg["include_text"])
+        result["recipes"] = [_relay_tandoor_image(hass, recipe) for recipe in result["recipes"]]
+    except (TandoorError, ValueError) as error:
+        _send_error(connection, msg["id"], "tandoor_error", error)
+        return
+    connection.send_result(msg["id"], result)
+
+
+@localized_command({
+    probatio.Required("type"): f"{DOMAIN}/tandoor/library/recipe",
+    probatio.Required("recipe_id"): probatio.All(int, probatio.Range(min=1)),
+})
+async def websocket_tandoor_library_recipe(hass, connection, msg):
+    try:
+        recipe = await _tandoor_client(hass).async_recipe(msg["recipe_id"])
+    except (TandoorError, ValueError) as error:
+        _send_error(connection, msg["id"], "tandoor_error", error)
+        return
+    connection.send_result(msg["id"], {"recipe": _relay_tandoor_image(hass, recipe)})
+
+
 @websocket_api.require_admin
 @localized_command(
     {
@@ -4483,7 +4533,17 @@ async def websocket_camera_scan(hass, connection, msg):
 async def websocket_list_scanners(hass, connection, msg) -> None:
     records = await _runtime(hass).database.async_list_scanners()
     manager = _runtime(hass).scanner
-    connection.send_result(msg["id"], {"scanners": [item.as_dict() for item in records], "mqtt_error": manager.mqtt_error if manager else None})
+    from .entity_scanner import usb_scanners, prepare_config
+    scanners = []
+    for item in records:
+        data = item.as_dict()
+        if item.entity:
+            try:
+                data["entity"] = prepare_config(hass, item.entity, item.source_type)
+            except ValueError:
+                pass
+        scanners.append(data)
+    connection.send_result(msg["id"], {"scanners": scanners, "usb_scanners": usb_scanners(hass), "mqtt_error": manager.mqtt_error if manager else None})
 
 
 @websocket_api.require_admin
@@ -4492,8 +4552,9 @@ async def websocket_list_scanners(hass, connection, msg) -> None:
         probatio.Required("type"): f"{DOMAIN}/scanners/create",
         probatio.Required("name"): str,
         probatio.Optional("address", default=""): str,
-        probatio.Optional("source_type", default="eyoyo"): probatio.In(("eyoyo", "mqtt")),
+        probatio.Optional("source_type", default="eyoyo"): probatio.In(("eyoyo", "mqtt", "entity", "usb_mqtt")),
         probatio.Optional("mqtt"): probatio.Any(dict, None),
+        probatio.Optional("entity"): probatio.Any(dict, None),
         probatio.Required("enabled"): bool,
         probatio.Required("routing"): probatio.In(SCANNER_ROUTING),
         probatio.Optional("list_id"): probatio.Any(str, None),
@@ -4502,11 +4563,13 @@ async def websocket_list_scanners(hass, connection, msg) -> None:
 )
 async def websocket_create_scanner(hass, connection, msg) -> None:
     try:
+        from .entity_scanner import prepare_config
+        entity = prepare_config(hass, msg.get("entity"), msg["source_type"]) if msg["source_type"] in {"entity", "usb_mqtt"} else None
         routing, list_id, action = _scanner_route_values(msg)
         record = await _runtime(hass).database.async_create_scanner(
             name=_clean_text(msg["name"], maximum=100, required=True),
             address=_clean_scanner_address(msg["address"]) if msg["source_type"] == "eyoyo" else "",
-            source_type=msg["source_type"], mqtt=msg.get("mqtt"),
+            source_type=msg["source_type"], mqtt=msg.get("mqtt"), entity=entity,
             enabled=msg["enabled"], routing=routing,
             list_id=list_id, action=action,
         )
@@ -4531,8 +4594,9 @@ async def websocket_create_scanner(hass, connection, msg) -> None:
         probatio.Required("scanner_id"): str,
         probatio.Required("name"): str,
         probatio.Optional("address", default=""): str,
-        probatio.Optional("source_type", default="eyoyo"): probatio.In(("eyoyo", "mqtt")),
+        probatio.Optional("source_type", default="eyoyo"): probatio.In(("eyoyo", "mqtt", "entity", "usb_mqtt")),
         probatio.Optional("mqtt"): probatio.Any(dict, None),
+        probatio.Optional("entity"): probatio.Any(dict, None),
         probatio.Required("enabled"): bool,
         probatio.Required("routing"): probatio.In(SCANNER_ROUTING),
         probatio.Optional("list_id"): probatio.Any(str, None),
@@ -4541,12 +4605,14 @@ async def websocket_create_scanner(hass, connection, msg) -> None:
 )
 async def websocket_update_scanner(hass, connection, msg) -> None:
     try:
+        from .entity_scanner import prepare_config
+        entity = prepare_config(hass, msg.get("entity"), msg["source_type"]) if msg["source_type"] in {"entity", "usb_mqtt"} else None
         routing, list_id, action = _scanner_route_values(msg)
         record = await _runtime(hass).database.async_update_scanner(
             msg["scanner_id"],
             name=_clean_text(msg["name"], maximum=100, required=True),
             address=_clean_scanner_address(msg["address"]) if msg["source_type"] == "eyoyo" else "",
-            source_type=msg["source_type"], mqtt=msg.get("mqtt"),
+            source_type=msg["source_type"], mqtt=msg.get("mqtt"), entity=entity,
             enabled=msg["enabled"], routing=routing,
             list_id=list_id, action=action,
         )

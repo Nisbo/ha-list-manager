@@ -32,6 +32,7 @@ from .database import (
 )
 from .models import ScanHistoryRecord, ScannerRecord
 from .mqtt_scanner import extract_scan
+from .entity_scanner import EntityScannerSources
 
 from .open_facts import OpenFactsLookupError, async_lookup_open_facts
 from .script_events import SCRIPT_OPERATION, scanner_operation
@@ -95,6 +96,7 @@ class ScannerManager:
         self._mqtt_subscriptions = {}
         self._mqtt_lock = asyncio.Lock()
         self._mqtt_events_unsubscribe = None
+        self.entity_sources = EntityScannerSources(self)
         self.mqtt_error = None
         self._scan_views: dict[str, dict[str, dict[str, Any]]] = {}
         self._scan_editors: dict[str, dict[str, Any]] = {}
@@ -118,7 +120,7 @@ class ScannerManager:
         for receipt in receipts:
             scanner = next((row for row in scanners if row.id == receipt["scanner_id"]), None)
             await self._history(scanner=scanner, address=scanner.address if scanner else None,
-                source="mqtt", ean=receipt["ean"], action=None, list_id=None,
+                source=scanner.source_type if scanner else "mqtt", ean=receipt["ean"], action=None, list_id=None,
                 status="error", message=localized_text("mqtt.interrupted"))
             await self.database.async_finish_mqtt_scan(receipt["scanner_id"], receipt["message_id"])
         if self._unsubscribe is None:
@@ -143,7 +145,8 @@ class ScannerManager:
         task.add_done_callback(self._scan_tasks.discard)
 
     async def async_refresh_mqtt(self):
-        """Keep one native HA subscription per exact topic, not per dashboard."""
+        """Refresh scanner transports once per backend, never per dashboard."""
+        await self.entity_sources.async_refresh()
         async with self._mqtt_lock:
             if self._stopped:
                 return
@@ -215,6 +218,7 @@ class ScannerManager:
     async def async_stop(self) -> None:
         """Stop new scans and finish bookings before clearing their dialogs."""
         self._stopped = True
+        self.entity_sources.stop()
         if self._mqtt_events_unsubscribe is not None:
             self._mqtt_events_unsubscribe()
             self._mqtt_events_unsubscribe = None

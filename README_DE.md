@@ -20,6 +20,21 @@ vollständige Wiki gibt es auf Deutsch und Englisch.
 
 ![Kompakte Dashboard-Karten für Inventar, Einkaufsliste und Aufgaben](docs/images/de/overview-desktop.jpg)
 
+## Unterstützte Scanner
+
+Unter **HA List Manager → Scanner** stehen Eyoyo, ein konfigurierbares MQTT-Topic,
+eine **Home-Assistant-Entität** und **USB 2 MQTT Scanner** zur Wahl. Entitätsscanner
+lesen den Barcode aus dem Zustand oder einem benannten Attribut, optional mit
+einem Scan-ID-Attribut. Eine neue ID erlaubt den erneuten Scan desselben Barcodes;
+wiederholte IDs werden auch nach einem HA-Neustart ignoriert. Vorhandene Werte
+beim Aktivieren oder Starten fügen keine Artikel hinzu.
+
+[USB 2 MQTT Scanner](https://github.com/Nisbo/usb-scanner-mqtt) verbindet USB-
+Tastaturscanner mit MQTT und Home Assistant Discovery. Wähle dessen automatisch
+erkannte **Last-scan**-Entität; Topic und JSON-Zuordnung sind nicht nötig. Richte
+einen physischen Scanner nur über eine Quelle ein. Die Verarbeitung läuft zentral
+ohne geöffnete Karte; die vorhandenen Listen- und Aktionszuordnungen gelten weiter.
+
 ## Drei Listenarten
 
 ### Einkaufslisten
@@ -82,6 +97,29 @@ aktivieren. Die Zutaten werden der Einkaufsliste hinzugefügt; es wird dabei
 kein Inventarbestand gebucht.
 
 [Anleitung zu Gerichten und Rezepten](https://github.com/Nisbo/ha-list-manager/wiki/Chips-Dishes-and-Recipes-DE)
+
+## Dein Tandoor-Kochbuch als Dashboard-Karte
+
+Wähle **Tandoor** in der Kartenauswahl des Dashboards.
+Durchstöbere Kochbücher, suche Rezepte, passe Portionen an und lies Zutaten und
+Zubereitung auf großen Bildschirmen nebeneinander. Koch-Häkchen bleiben lokal
+in deinem Browser. Wähle eine Einkaufsliste mit aktiviertem Tandoor, um vor der
+Übernahme die vorhandene Zutaten-, Mengen- und Kategorieauswahl zu öffnen.
+
+Für eine einzelne, seitenfüllende Karte eignet sich eine HA-Ansicht vom Typ
+**Panel**; die Karte passt sich automatisch an. Zusätzlich gibt es einen
+Vollbild-Button. **Lesestand in diesem Browser merken** erhält Kochbuch, Suche,
+Seite, geöffnetes Rezept, Portionen, Häkchen und Scrollposition beim Neuladen.
+Mehrere Karten auf derselben Seite können mit unterschiedlichen **Karten-IDs**
+ihren eigenen Lesestand behalten. Ein Klick auf die Kochmütze vergrößert die Karte im Dashboard, ein Klick auf
+den Titel klappt sie ein. Beides ist standardmäßig aktiviert und separat
+abschaltbar. Der Klappzustand bleibt unabhängig vom optionalen Lesestand erhalten.
+Unter der Suchmaske lassen sich Zutaten und Rezepttexte zusätzlich zu den
+Rezeptnamen durchsuchen. Diese Auswahl wird zusammen mit der Suche gemerkt.
+
+Die Karte nutzt die vorhandene Tandoor-
+Verbindung und erlaubt das Stöbern auch ohne Einkaufsliste. Private API-Zugangsdaten
+bleiben im Backend.
 
 ## Kategorien und Labels in allen drei Listenarten
 

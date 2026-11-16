@@ -30,6 +30,7 @@ FRONTEND_DIRECTORY = Path(__file__).parent / "frontend"
 CARD_FILES = (
     "ha-list-manager-inventory-card.js", "ha-list-manager-shopping-card.js",
     "ha-list-manager-todo-card.js", "ha-list-manager-history-card.js",
+    "ha-list-manager-tandoor-card.js",
 )
 
 

@@ -29,6 +29,7 @@ from .const import (
     SCANNER_ACTIONS,
     SCANNER_ROUTING,
 )
+from .entity_scanner import validate_config as validate_entity_config
 from .mqtt_scanner import validate_config, validate_shared_topic
 from .script_events import SCRIPT_OPERATION, SCRIPT_CHAIN, event_options, item_script_action
 from .models import (
@@ -1654,22 +1655,22 @@ class HaListManagerDatabase:
     async def async_create_scanner(
         self, *, name: str, address: str, enabled: bool, routing: str,
         list_id: str | None, action: str | None, source_type: str = "eyoyo",
-        mqtt: dict | None = None,
+        mqtt: dict | None = None, entity: dict | None = None,
     ) -> ScannerRecord:
         """Create and return a scanner configuration."""
         return await self._async_run(
-            self._create_scanner, name, address, enabled, routing, list_id, action, source_type, mqtt
+            self._create_scanner, name, address, enabled, routing, list_id, action, source_type, mqtt, entity
         )
 
     async def async_update_scanner(
         self, scanner_id: str, *, name: str, address: str, enabled: bool,
         routing: str, list_id: str | None, action: str | None, source_type: str = "eyoyo",
-        mqtt: dict | None = None,
+        mqtt: dict | None = None, entity: dict | None = None,
     ) -> ScannerRecord:
         """Update and return a scanner configuration."""
         return await self._async_run(
             self._update_scanner, scanner_id, name, address, enabled, routing,
-            list_id, action, source_type, mqtt,
+            list_id, action, source_type, mqtt, entity,
         )
 
     async def async_delete_scanner(self, scanner_id: str) -> None:
@@ -2096,7 +2097,7 @@ class HaListManagerDatabase:
                         "The existing database has no supported schema metadata"
                     )
                 version = self._read_schema_version(connection)
-                if version not in (1, 2, 3, 4, 5, 6, 7, 8, DATABASE_SCHEMA_VERSION):
+                if version not in (1, 2, 3, 4, 5, 6, 7, 8, 9, DATABASE_SCHEMA_VERSION):
                     raise UnsupportedSchemaVersionError(
                         f"Database schema {version} is not supported; "
                         f"expected {DATABASE_SCHEMA_VERSION}"
@@ -2144,11 +2145,17 @@ class HaListManagerDatabase:
                     connection.execute("ALTER TABLE list_items ADD COLUMN last_checked_at TEXT")
                     connection.execute("ALTER TABLE list_items ADD COLUMN monitoring_paused "
                                        "INTEGER NOT NULL DEFAULT 0 CHECK(monitoring_paused IN (0,1))")
+                if version < 10:
+                    self._create_entity_scanner_schema(connection)
                 connection.execute(
                     "UPDATE schema_metadata SET value = ? WHERE key = 'schema_version'",
                     (str(DATABASE_SCHEMA_VERSION),),
                 )
             self._prune_alexa_tombstones_in(connection, self._now())
+
+    @staticmethod
+    def _create_entity_scanner_schema(connection):
+        connection.execute("ALTER TABLE scanners ADD COLUMN entity_json TEXT")
 
     @staticmethod
     def _create_mqtt_scanner_schema(connection):
@@ -2163,8 +2170,8 @@ class HaListManagerDatabase:
             PRIMARY KEY(scanner_id, message_id)
         )""")
 
-    async def async_claim_mqtt_scan(self, scanner_id, message_id, ean):
-        return await self._async_run(self._claim_mqtt_scan, scanner_id, message_id, ean)
+    async def async_claim_mqtt_scan(self, scanner_id, message_id, ean, *, finished=False):
+        return await self._async_run(self._claim_mqtt_scan, scanner_id, message_id, ean, finished)
 
     async def async_finish_mqtt_scan(self, scanner_id, message_id):
         await self._async_run(self._finish_mqtt_scan, scanner_id, message_id)
@@ -2180,13 +2187,14 @@ class HaListManagerDatabase:
         with self._connect() as connection:
             return [dict(row) for row in connection.execute("SELECT * FROM mqtt_scan_receipts WHERE finished=0")]
 
-    def _claim_mqtt_scan(self, scanner_id, message_id, ean):
+    def _claim_mqtt_scan(self, scanner_id, message_id, ean, finished=False):
         # Reserve before any inventory side effect. Replays remain suppressed
         # across reconnects/restarts, including interrupted deliveries.
         with self._connect() as connection:
             return connection.execute(
-                "INSERT OR IGNORE INTO mqtt_scan_receipts(scanner_id, message_id, received_at, ean) VALUES (?, ?, ?, ?)",
-                (scanner_id, message_id, self._now(), ean),
+                "INSERT OR IGNORE INTO mqtt_scan_receipts(scanner_id, message_id, received_at, ean, finished) "
+                "SELECT ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM scanners WHERE id=?)",
+                (scanner_id, message_id, self._now(), ean, int(finished), scanner_id),
             ).rowcount == 1
 
     @staticmethod
@@ -2758,6 +2766,7 @@ CREATE UNIQUE INDEX chips_list_name_unique ON chips(list_id, priority_name) WHER
         self._create_label_filters_schema(connection)
         self._create_completed_cleanup_schema(connection)
         self._create_mqtt_scanner_schema(connection)
+        self._create_entity_scanner_schema(connection)
 
     @staticmethod
     def _create_label_filters_schema(connection: sqlite3.Connection) -> None:
@@ -8891,7 +8900,7 @@ WHERE registry_entry_id IS NOT NULL;
     def _create_scanner(
         self, name: str, address: str, enabled: bool, routing: str,
         list_id: str | None, action: str | None, source_type: str = "eyoyo",
-        mqtt: dict | None = None,
+        mqtt: dict | None = None, entity: dict | None = None,
     ) -> ScannerRecord:
         now = self._now()
         try:
@@ -8900,15 +8909,19 @@ WHERE registry_entry_id IS NOT NULL;
                 self._validate_scanner_route(connection, routing, list_id, action)
                 scanner_id = str(uuid4())
                 mqtt = self._validate_scanner_source(connection, scanner_id, source_type, mqtt)
-                if source_type == "mqtt":
+                entity = validate_entity_config(entity, source_type) if source_type in {"entity", "usb_mqtt"} else None
+                if entity:
+                    address = "entity:" + (entity.get("registry_entry_id") or entity["entity_id"])
+                elif source_type == "mqtt":
                     address = "mqtt:" + scanner_id
                 connection.execute(
                     """INSERT INTO scanners(
                         id, name, address, enabled, routing, list_id, action,
-                        created_at, updated_at, source_type, mqtt_json
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        created_at, updated_at, source_type, mqtt_json, entity_json
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (scanner_id, name, address, int(enabled), routing, list_id,
-                     action, now, now, source_type, json.dumps(mqtt) if mqtt else None),
+                     action, now, now, source_type, json.dumps(mqtt) if mqtt else None,
+                     json.dumps(entity) if entity else None),
                 )
                 row = connection.execute(
                     "SELECT * FROM scanners WHERE id = ?", (scanner_id,)
@@ -8922,21 +8935,25 @@ WHERE registry_entry_id IS NOT NULL;
     def _update_scanner(
         self, scanner_id: str, name: str, address: str, enabled: bool,
         routing: str, list_id: str | None, action: str | None, source_type: str = "eyoyo",
-        mqtt: dict | None = None,
+        mqtt: dict | None = None, entity: dict | None = None,
     ) -> ScannerRecord:
         try:
             with self._connect() as connection:
                 connection.execute("BEGIN IMMEDIATE")
                 self._validate_scanner_route(connection, routing, list_id, action)
                 mqtt = self._validate_scanner_source(connection, scanner_id, source_type, mqtt)
-                if source_type == "mqtt":
+                entity = validate_entity_config(entity, source_type) if source_type in {"entity", "usb_mqtt"} else None
+                if entity:
+                    address = "entity:" + (entity.get("registry_entry_id") or entity["entity_id"])
+                elif source_type == "mqtt":
                     address = "mqtt:" + scanner_id
                 cursor = connection.execute(
                     """UPDATE scanners
                     SET name = ?, address = ?, enabled = ?, routing = ?,
-                        list_id = ?, action = ?, updated_at = ?, source_type = ?, mqtt_json = ? WHERE id = ?""",
+                        list_id = ?, action = ?, updated_at = ?, source_type = ?, mqtt_json = ?, entity_json = ? WHERE id = ?""",
                     (name, address, int(enabled), routing, list_id, action,
-                     self._now(), source_type, json.dumps(mqtt) if mqtt else None, scanner_id),
+                     self._now(), source_type, json.dumps(mqtt) if mqtt else None,
+                     json.dumps(entity) if entity else None, scanner_id),
                 )
                 if cursor.rowcount != 1:
                     raise ScannerNotFoundError(scanner_id)
@@ -8951,7 +8968,7 @@ WHERE registry_entry_id IS NOT NULL;
 
     @staticmethod
     def _validate_scanner_source(connection, scanner_id, source_type, config):
-        if source_type not in {"eyoyo", "mqtt"}:
+        if source_type not in {"eyoyo", "mqtt", "entity", "usb_mqtt"}:
             raise ValueError(localized_text("mqtt.source_invalid"))
         if source_type != "mqtt":
             return None
@@ -9946,6 +9963,7 @@ WHERE registry_entry_id IS NOT NULL;
             created_at=row["created_at"], updated_at=row["updated_at"],
             source_type=row["source_type"],
             mqtt=json.loads(row["mqtt_json"]) if row["mqtt_json"] else None,
+            entity=json.loads(row["entity_json"]) if row["entity_json"] else None,
         )
 
     @staticmethod
