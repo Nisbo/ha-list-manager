@@ -6,7 +6,7 @@
   const monitors = new Map(), owners = new WeakMap();
   let banner = null;
   const text = (host, key) => host._hass?.localize?.(`component.ha_list_manager.config_panel.frontend_update.${key}`) || "";
-  const dirty = () => [...monitors.values()].some(m => [...m.hosts].some(h => h._dialog || h._actionDialog || h._selectionPopup || h._productDialog || h._labelFilterDialog || h._filterDialog || h._templateDialog));
+  const dirty = () => [...monitors.values()].some(m => [...m.hosts].some(h => h._todoQrDialog || h._todoQr?.camera.camera || h._dialog || h._actionDialog || h._selectionPopup || h._productDialog || h._labelFilterDialog || h._filterDialog || h._templateDialog));
   const currentHost = () => [...monitors.values()].flatMap(m => [...m.hosts]).find(h => h.isConnected);
   async function reload(host, renew = false) {
     if (dirty() && !window.confirm(text(host, "discard"))) return false;

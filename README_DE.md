@@ -66,6 +66,22 @@ ohne geöffnete Karte; die vorhandenen Listen- und Aktionszuordnungen gelten wei
 
 ![Inventar und Einkaufsliste in der mobilen Kartenansicht](docs/images/de/overview-tablet.jpg)
 
+
+### QR-Aktionen für vorhandene Aufgaben
+
+Öffne in einer bestehenden To-do-Aufgabe **Aktion wählen → QR-Code erstellen …**.
+Wähle „Neue Fälligkeit ab jetzt“, „Neue Fälligkeit ab bisherigem Termin“,
+„Als erledigt markieren“ oder „Nur Zuletzt geprüft auf jetzt setzen“.
+Der Code lässt sich als Bild kopieren, als PNG herunterladen oder mit Aufgabenname
+und Aktion drucken. Er bleibt nach einer Umbenennung gültig.
+
+**Aufgaben-QR scannen** in der Buttonleiste öffnet die Kamera. Vor der Ausführung
+erscheint eine Bestätigung; der Karteneditor bietet optional einen Direktmodus.
+Registrierte Scanner führen die Aktion zentral und unabhängig vom Scannerziel aus.
+Pausierte Überwachung bleibt pausiert. Doppellesungen werden drei Sekunden lang
+geräteübergreifend unterdrückt; wiederholte Anfragen bleiben auch nach einem
+HA-Neustart ohne weitere Wirkung. Ein späterer neuer Scan ist wieder möglich.
+
 ## Einkaufen mit Alexa
 
 „Alexa, setze Gurken auf die Einkaufsliste“ — und der Eintrag landet in

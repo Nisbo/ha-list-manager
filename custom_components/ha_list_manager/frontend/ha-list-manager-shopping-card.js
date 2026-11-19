@@ -1,3 +1,4 @@
+import "./ha-list-manager-item-sort.js";
 import "./ha-list-manager-frontend-refresh.js";
 import "./ha-list-manager-shopping-scanner.js?v=1.1.0b3-toolbar2";
 import "./ha-list-manager-filters.js";
@@ -91,7 +92,7 @@ function haListManagerShoppingCardTextRequest(hass, message) {
 const HA_LM_API = "ha_list_manager";
 const HA_LM_ITEMS_EVENT = "ha_list_manager_items_changed";
 const HA_LM_LISTS_EVENT = "ha_list_manager_lists_changed";
-const CARD_VERSION = "1.1.0b4";
+const CARD_VERSION = "1.1.0b5";
 
 const esc = (value) => String(value ?? "").replace(/[&<>'"]/g, (char) => ({
   "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;",
@@ -230,7 +231,7 @@ class HaListManagerShoppingCard extends HTMLElement {
       show_labels: haListManagerShoppingCardText("ui.show_labels", {}, hass), show_share_button: haListManagerShoppingCardText("ui.show_share_button", {}, hass), show_pdf_export_button: haListManagerShoppingCardText("ui.show_pdf_export", {}, hass),
       show_clear_completed_button: haListManagerShoppingCardText("ui.bulk_delete_completed_items", {}, hass),
       show_label_filter_button: haListManagerShoppingCardText("filters.show", {}, hass),
-      show_edit_shortcuts: haListManagerShoppingCardText("shopping.show_edit_shortcuts", {}, hass),
+      sort_mode: haListManagerShoppingCardText("ui.sort_order", {}, hass), show_edit_shortcuts: haListManagerShoppingCardText("shopping.show_edit_shortcuts", {}, hass), save_dialog_on_enter: haListManagerShoppingCardText("ui.save_dialog_on_enter", {}, hass), focus_dialog_input: haListManagerShoppingCardText("ui.focus_dialog_input", {}, hass),
       show_chips: haListManagerShoppingCardText("chips.show", {}, hass), listed_chip_display: haListManagerShoppingCardText("chips.listed_display", {}, hass), chip_font_size: haListManagerShoppingCardText("chips.font_size", {}, hass), filter_chips: haListManagerShoppingCardText("ui.filter_chips_typing", {}, hass),
       category_chip_layout: haListManagerShoppingCardText("chips.category_appearance", {}, hass),
       category_chip_colors: haListManagerShoppingCardText("ui.grouped_chips_category_color", {}, hass),
@@ -295,7 +296,10 @@ class HaListManagerShoppingCard extends HTMLElement {
           { name: "category_font_scale", selector: { number: { min: 80, max: 160, step: 5, mode: "box", unit_of_measurement: "%" } }, default: 110 },
         ] },
         { type: "expandable", label: haListManagerShoppingCardText("ui.item", {}, hass), icon: "mdi:format-list-bulleted", schema: [
+          { name: "sort_mode", selector: { select: { mode: "dropdown", options: [{value:"alpha", label:haListManagerShoppingCardText("ui.alphabetical", {}, hass)}, {value:"manual", label:haListManagerShoppingCardText("ui.manual_drag_drop", {}, hass)}] } }, default:"alpha" },
           { name: "show_edit_shortcuts", selector: { boolean: {} }, default: true },
+          { name: "save_dialog_on_enter", selector: { boolean: {} }, default: false },
+          { name: "focus_dialog_input", selector: { boolean: {} }, default: false },
           { name: "quantity_position", selector: { select: { mode: "dropdown", options: [
             { value: "beginning", label: haListManagerShoppingCardText("ui.before_item_name", {}, hass) }, { value: "end", label: haListManagerShoppingCardText("ui.after_item_name", {}, hass) },
             { value: "controls", label: haListManagerShoppingCardText("ui.between_plus_minus", {}, hass) },
@@ -414,7 +418,10 @@ class HaListManagerShoppingCard extends HTMLElement {
         if (schema.name === "acknowledged") return haListManagerShoppingCardText("help.completed_item_placement", {}, hass);
         if (schema.name === "show_done_hidden_items_in_search") return haListManagerShoppingCardText("help.search_completed_items", {}, hass);
         if (schema.name === "show_clear_completed_button") return haListManagerShoppingCardText("help.delete_completed_button", {}, hass);
+        if (schema.name === "sort_mode") return haListManagerShoppingCardText("help.shopping_manual_sort", {}, hass);
         if (schema.name === "show_edit_shortcuts") return haListManagerShoppingCardText("help.shopping_edit_shortcuts", {}, hass);
+        if (schema.name === "save_dialog_on_enter") return haListManagerShoppingCardText("help.shopping_enter_actions", {}, hass);
+        if (schema.name === "focus_dialog_input") return haListManagerShoppingCardText("help.shopping_dialog_focus", {}, hass);
         if (schema.name === "show_category_count") return haListManagerShoppingCardText("help.shopping_category_counts", {}, hass);
         if (schema.name === "show_labels") return haListManagerShoppingCardText("help.item_label_visibility", {}, hass);
         if (schema.name === "category_sort") return haListManagerShoppingCardText("help.shopping_category_order", {}, hass);
@@ -453,7 +460,7 @@ class HaListManagerShoppingCard extends HTMLElement {
       quantity_position: "beginning", show_quantity_box: true, show_submit_button: true,
       show_plus_minus: true, show_item_dividers: true, item_divider_before_spacing: 10, item_divider_after_spacing: 10, item_font_size: 16, category_font_scale: 110, acknowledged: "show", show_quantity_one: false,
       allow_filter: true, auto_expand_search: true, allow_suggestions: true, show_done_hidden_items_in_search: true,
-      show_share_button: true, show_pdf_export_button: false, show_clear_completed_button: true, show_edit_shortcuts: true,
+      show_share_button: true, show_pdf_export_button: false, show_clear_completed_button: true, sort_mode: "alpha", show_edit_shortcuts: true, save_dialog_on_enter: false, focus_dialog_input: false,
       show_images: false, show_brand: false, show_quantity: false, show_category_count: true, show_labels: true, category_sort: "alphabetical",
       show_chips: true, show_chip_popup_button: true, show_browser_chips: true, browser_chips_for_products: false, allow_save_browser_chips: true,
       filter_chips: true, category_chip_layout: "none", category_chip_colors: true, show_important_chips: true, chips_limit: 8, chips_position: "auto", chip_color_mode: "scope_fallback",
@@ -467,6 +474,7 @@ class HaListManagerShoppingCard extends HTMLElement {
     const previousFilterScope = this._filterOwnerKey();
     this._config = { ...HaListManagerShoppingCard.getStubConfig(this._hass), ...config };
     if (previousFilterScope !== this._filterOwnerKey()) this._resetLabelFilterScope();
+    if (!["alpha", "manual"].includes(this._config.sort_mode)) this._config.sort_mode = "alpha";
     const normalizeAppearanceNumber = (value, fallback, min, max) => {
       const parsed = Number(value);
       return Number.isFinite(parsed) ? Math.max(min, Math.min(max, parsed)) : fallback;
@@ -530,6 +538,7 @@ class HaListManagerShoppingCard extends HTMLElement {
     }
   }
   disconnectedCallback() {
+    globalThis.HaListManagerItemSort.detach(this);
     globalThis.HaListManagerFrontendRefresh.detach(this);
     globalThis.HaListManagerScannerUi.cancel(this);
     globalThis.HaListManagerScannerUi.stopToolbar(this);
@@ -2254,14 +2263,15 @@ class HaListManagerShoppingCard extends HTMLElement {
     const offerFilter = this._offerFilter();
     const labelFilter = this._activeLabelFilter();
     const compareNames = (a, b) => a.name.localeCompare(b.name, haListManagerShoppingCardTextLocale(this._hass), { sensitivity: "base", numeric: true });
+    const compareItems = this._config.sort_mode === "manual" ? (a, b) => Number(a.position) - Number(b.position) : compareNames;
     let items = this._items
       .filter((item) => this._matchesLabelFilter(item, labelFilter))
       .filter((item) => offerFilter === "all" || (offerFilter === "only" ? item.offer_only === true : item.offer_only !== true))
       .filter((item) => !query || `${item.name} ${item.description || ""} ${(item.labels || []).map((label) => label.name).join(" ")}`.toLocaleLowerCase().includes(query))
-      .sort(compareNames);
+      .sort(compareItems);
     const revealCompleted = query && this._config.show_done_hidden_items_in_search;
     if (!revealCompleted && this._config.acknowledged === "hide") items = items.filter((item) => !item.completed);
-    if (!revealCompleted && this._config.acknowledged === "end") items.sort((a, b) => Number(a.completed) - Number(b.completed) || compareNames(a, b));
+    if (!revealCompleted && this._config.acknowledged === "end") items.sort((a, b) => Number(a.completed) - Number(b.completed) || compareItems(a, b));
     return items;
   }
 
@@ -3819,13 +3829,19 @@ class HaListManagerShoppingCard extends HTMLElement {
     }).join("");
   }
 
+  _saveManualOrder(itemIds) {
+    return haListManagerShoppingCardTextRequest(this._hass, {type:`${HA_LM_API}/items/reorder`, list_id:this._listId(), item_ids:itemIds});
+  }
+
   _renderItem(item) {
+    const manual = globalThis.HaListManagerItemSort.enabled(this);
+    const grip = manual ? `<button type="button" class="sort-grip" data-sort-grip="${esc(item.id)}" title="${esc(haListManagerShoppingCardText("ui.sort_item_grip", {}, this._hass))}" aria-label="${esc(haListManagerShoppingCardText("ui.sort_item_grip", {}, this._hass))}"><ha-icon icon="mdi:drag-vertical"></ha-icon></button>` : "";
     const product = this._products.find((entry) => entry.id === item.product_id);
     const image = this._config.show_images
       ? (product?.image_url ? `<button type="button" class="item-image" data-view-item-image="${esc(item.id)}"><img src="${esc(product.image_url)}" alt="${esc(item.name)}"></button>` : `<span class="item-image placeholder"><ha-icon icon="mdi:image-off-outline"></ha-icon></span>`)
       : "";
     const controlsQuantity = this._config.quantity_position === "controls" ? `<strong class="controls-quantity">${Math.max(0, Number(item.quantity || 0))}</strong>` : "";
-    return `<article class="item ${item.completed ? "completed" : ""} ${this._config.show_images ? "with-image" : "without-image"}" data-item-id="${esc(item.id)}"><button type="button" class="complete-button" data-complete title="${item.completed ? haListManagerShoppingCardText("ui.show_again", {}, this._hass) : haListManagerShoppingCardText("ui.mark_completed", {}, this._hass)}">${item.completed ? "✓" : "☐"}</button>${image}<button type="button" class="item-main" data-edit-item="${esc(item.id)}"><span class="item-name">${esc(this._displayName(item))}${item.offer_only ? ` <span class="offer-only-badge" title="${haListManagerShoppingCardText("ui.buy_on_offer_only", {}, this._hass)}"><ha-icon icon="mdi:tag-outline"></ha-icon>${haListManagerShoppingCardText("ui.special_offer", {}, this._hass)}</span>` : ""}</span>${item.description ? `<span class="meta">${esc(item.description)}</span>` : ""}${this._config.show_labels && item.labels?.length ? `<span class="labels">${this._renderLabels(item.labels)}</span>` : ""}</button>${this._config.show_plus_minus ? `<div class="quantity-actions"><button type="button" data-quantity-change="${esc(item.id)}:1" title="${haListManagerShoppingCardText("ui.increase_quantity", {}, this._hass)}">+</button>${controlsQuantity}<button type="button" data-quantity-change="${esc(item.id)}:-1" title="${haListManagerShoppingCardText("ui.decrease_count", {}, this._hass)}">−</button></div>` : ""}</article>`;
+    return `<article class="item${manual ? " manual-sort" : ""} ${item.completed ? "completed" : ""} ${this._config.show_images ? "with-image" : "without-image"}" data-item-id="${esc(item.id)}">${grip}<button type="button" class="complete-button" data-complete title="${item.completed ? haListManagerShoppingCardText("ui.show_again", {}, this._hass) : haListManagerShoppingCardText("ui.mark_completed", {}, this._hass)}">${item.completed ? "✓" : "☐"}</button>${image}<button type="button" class="item-main" data-edit-item="${esc(item.id)}"><span class="item-name">${esc(this._displayName(item))}${item.offer_only ? ` <span class="offer-only-badge" title="${haListManagerShoppingCardText("ui.buy_on_offer_only", {}, this._hass)}"><ha-icon icon="mdi:tag-outline"></ha-icon>${haListManagerShoppingCardText("ui.special_offer", {}, this._hass)}</span>` : ""}</span>${item.description ? `<span class="meta">${esc(item.description)}</span>` : ""}${this._config.show_labels && item.labels?.length ? `<span class="labels">${this._renderLabels(item.labels)}</span>` : ""}</button>${this._config.show_plus_minus ? `<div class="quantity-actions"><button type="button" data-quantity-change="${esc(item.id)}:1" title="${haListManagerShoppingCardText("ui.increase_quantity", {}, this._hass)}">+</button>${controlsQuantity}<button type="button" data-quantity-change="${esc(item.id)}:-1" title="${haListManagerShoppingCardText("ui.decrease_count", {}, this._hass)}">−</button></div>` : ""}</article>`;
   }
 
   _contentHtml() {
@@ -3912,7 +3928,7 @@ class HaListManagerShoppingCard extends HTMLElement {
   }
 
   _styles() {
-    return `${globalThis.HaListManagerDialogSections.styles()}.product-label-preview p{margin:7px 0;overflow-wrap:anywhere;font-size:13px;line-height:1.45}.product-label-added{color:var(--success-color,#43a047)}.product-label-removed{padding-left:9px;border-left:3px solid var(--warning-color,#e0a526);color:var(--warning-color,#e0a526)}.product-label-scope-warning{line-height:1.45}
+    return `${globalThis.HaListManagerItemSort.styles()}${globalThis.HaListManagerDialogSections.styles()}.product-label-preview p{margin:7px 0;overflow-wrap:anywhere;font-size:13px;line-height:1.45}.product-label-added{color:var(--success-color,#43a047)}.product-label-removed{padding-left:9px;border-left:3px solid var(--warning-color,#e0a526);color:var(--warning-color,#e0a526)}.product-label-scope-warning{line-height:1.45}
 
 .dismissible-notice{align-items:center}.dismissible-notice .notice-text{flex:1;min-width:0;overflow-wrap:anywhere}.notice-dismiss{display:inline-grid!important;place-items:center;flex:0 0 32px;width:32px!important;height:32px!important;min-height:32px!important;padding:0!important;margin-left:auto;border:0!important;border-radius:50%!important;background:transparent!important;color:inherit!important;cursor:pointer}.notice-dismiss:hover,.notice-dismiss:focus-visible{background:color-mix(in srgb,currentColor 12%,transparent)!important}.notice-dismiss ha-icon{--mdc-icon-size:20px}.selection-field-heading{display:block;min-height:30px}.picker-popup-host{position:relative}.picker-trigger-host.picker-popup-host input{padding-right:86px!important}.picker-popup-host>.picker-list-trigger{right:44px}.picker-popup-host>.selection-open{position:absolute;z-index:4;right:4px;top:50%;display:grid;place-items:center;width:34px;height:34px;min-width:34px;min-height:34px;padding:0;transform:translateY(-50%);border:0;border-radius:50%;color:var(--primary-color);background:transparent;cursor:pointer}.selection-open:hover,.selection-open:focus-visible{background:color-mix(in srgb,var(--primary-color) 16%,transparent)}.selection-open:disabled,.picker-list-trigger:disabled{opacity:.4;cursor:default}.selection-open ha-icon{--mdc-icon-size:21px}.selection-backdrop{z-index:1250}.dialog.selection-dialog{width:min(640px,100%);display:flex;flex-direction:column;max-height:calc(100dvh - 36px)}.selection-dialog header{flex:0 0 auto}.selection-dialog header h2{min-width:0;overflow-wrap:anywhere}.selection-search{flex:0 0 auto;margin-top:14px}.selection-grid{display:flex;flex-wrap:wrap;align-content:flex-start;gap:9px;overflow:auto;overscroll-behavior:contain;min-height:0;margin-top:16px;padding:3px;max-height:55dvh}.selection-chip{display:flex;align-items:center;gap:8px;min-height:46px;max-width:100%;padding:7px 11px;border:1px solid color-mix(in srgb,var(--selection-color,var(--primary-color)) 60%,var(--divider-color));border-radius:22px;color:var(--primary-text-color);background:color-mix(in srgb,var(--selection-color,var(--primary-color)) 16%,var(--card-background-color));text-align:left;cursor:pointer}.selection-chip.selected{outline:2px solid var(--primary-color);outline-offset:1px}.selection-chip>span{display:flex;flex-direction:column;min-width:0;gap:2px}.selection-chip strong{font-size:14px;overflow-wrap:anywhere}.selection-chip small{font-size:11px;color:var(--secondary-text-color)}.selection-chip>ha-icon:not(.selection-check){--mdc-icon-size:20px;box-sizing:content-box;padding:4px;border-radius:50%;color:var(--selection-ink,#fff);background:var(--selection-color,var(--primary-color));flex:0 0 auto}.selection-chip .selection-check{--mdc-icon-size:18px;color:var(--primary-text-color)}.selection-dialog footer{flex:0 0 auto;margin-top:18px}.selection-dialog input[type=search]{width:100%}@media(max-width:600px){.selection-grid{gap:8px}.selection-chip{padding:7px 9px}.dialog.selection-dialog{max-height:calc(100dvh - 24px)}}
       .edit-shortcuts{display:flex;flex-wrap:wrap;gap:8px;margin:14px 0 6px;position:static}.edit-shortcut{display:grid;place-items:center;flex:0 0 44px;width:44px;height:44px;padding:0;border:1px solid var(--divider-color);border-radius:10px;color:var(--primary-color);background:var(--secondary-background-color);cursor:pointer;touch-action:manipulation}.edit-shortcut ha-icon{--mdc-icon-size:24px}.edit-shortcut:hover{background:color-mix(in srgb,var(--primary-color) 12%,var(--card-background-color))}.edit-shortcut:focus-visible{outline:2px solid var(--primary-color);outline-offset:2px}.edit-shortcut:disabled{opacity:.4;cursor:default}.product-dialog:has(.edit-shortcuts) .dialog-image-button{top:132px}
@@ -3939,6 +3955,7 @@ class HaListManagerShoppingCard extends HTMLElement {
   }
 
   _render() {
+    globalThis.HaListManagerItemSort.cancel(this);
     if (!this._hass || this._nativeTranslationState?.ready === false) return;
     if (!this.shadowRoot) return;
     const pageAnchor = this._capturePageScrollAnchor();
@@ -4377,6 +4394,7 @@ class HaListManagerShoppingCard extends HTMLElement {
   }
 
   _bindDynamicContent(root = this.shadowRoot, bindCategories = true) {
+    globalThis.HaListManagerItemSort.bind(this, root);
     root.querySelectorAll("[data-product-id]").forEach((button) => this._listen(button, "click", () => {
       const product = this._suggestions.find((entry) => entry.id === button.dataset.productId);
       if (product) this._handleProduct(product, "", this._requestedQuantity());
@@ -4632,14 +4650,14 @@ class HaListManagerShoppingCard extends HTMLElement {
       const suggestions = this.shadowRoot.querySelector("[data-suggestions]");
       if (suggestions) suggestions.hidden = true;
     }, 120));
-    this._listen(productInput, "keydown", (event) => { if (event.key === "Enter") { event.preventDefault(); this._useInput(); } });
+    this._listen(productInput, "keydown", (event) => { globalThis.HaListManagerDialogSections.handleEnter(this, event, async () => { if (this._dialog || this._productPicker) return; await this._useInput(); }); });
     this._listen(root.querySelector("[data-clear-input]"), "click", () => this._clearInput());
     this._listen(root.querySelector("[data-open-chip-dialog]"), "click", () => {
       this._chipDialog = true;
       this._lockScroll();
       this._render();
     });
-    this._listen(root.querySelector("[data-add]"), "click", () => this._useInput());
+    this._listen(root.querySelector("[data-add]"), "click", async () => { if (this._dialog || this._productPicker) return; await this._useInput(); });
     this._bindChipActions(root);
     this._listen(root.querySelector("[data-toggle-header-menu]"), "click", () => { this._headerMenuOpen = !this._headerMenuOpen; this._render(); });
     root.querySelectorAll("[data-send-list]").forEach((button) => this._listen(button, "click", () => { this._headerMenuOpen = false; this._requestShare(); }));

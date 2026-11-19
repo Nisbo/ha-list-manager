@@ -953,6 +953,58 @@ class HaListManagerDatabase:
         self._fire_item_mutated(before, record)
         return record
 
+    async def async_apply_todo_qr(self, code, request_id, timezone, scanner_id=None, source="todo_camera"):
+        return await self._async_run(self._apply_todo_qr, code, request_id, timezone, scanner_id, source)
+
+    def _apply_todo_qr(self, code, request_id, timezone, scanner_id=None, source="todo_camera"):
+        from uuid import UUID, uuid5, NAMESPACE_URL
+        from .todo_qr import parse_code, validate_task, next_due
+        item_id, action = parse_code(code)
+        try:
+            request_id = str(UUID(request_id))
+        except (ValueError, TypeError, AttributeError) as error:
+            raise ValueError(localized_text("todoqr.invalid")) from error
+        code = code.strip()
+        history_id = str(uuid5(NAMESPACE_URL, "ha-lm:todo-qr:" + request_id))
+        with self._connect() as connection:
+            # Receipt and mutation commit together, including concurrent devices
+            # and retries after a disconnected response or HA restart.
+            connection.execute("BEGIN IMMEDIATE")
+            prior = connection.execute("SELECT * FROM scan_history WHERE id=?", (history_id,)).fetchone()
+            if prior:
+                if prior["ean"] != code:
+                    raise ValueError(localized_text("todoqr.invalid"))
+                return {"history": self._scan_history_from_row(prior).as_dict(), "duplicate": True}
+            row = connection.execute("SELECT * FROM list_items WHERE id=?", (item_id,)).fetchone()
+            if row is None:
+                raise ValueError(localized_text("todoqr.unavailable"))
+            labels = self._labels_for(connection, "list_item_labels", "item_id", item_id, row["list_id"])
+            before = self._item_record_from_row(row, labels)
+            target = self._get_list(row["list_id"])
+            validate_task(before, target, action)
+            scanner = None
+            if scanner_id:
+                scanner = connection.execute("SELECT * FROM scanners WHERE id=? AND enabled=1", (scanner_id,)).fetchone()
+                if scanner is None:
+                    raise ValueError(localized_text("backend.scanner_unavailable"))
+            now = self._now()
+            recent = connection.execute("SELECT * FROM scan_history WHERE ean=? AND action=? AND status='success' ORDER BY scanned_at DESC LIMIT 1", (code, "todo_" + action)).fetchone()
+            if recent and (datetime.fromisoformat(now) - datetime.fromisoformat(recent["scanned_at"])).total_seconds() < 3:
+                receipt = self._add_scan_history(scanner_id, scanner["name"] if scanner else None,
+                    scanner["address"] if scanner else None, source, code, "todo_" + action,
+                    before.list_id, None, before.name, None, 1, None, None, "ignored",
+                    localized_text("todoqr.duplicate"), history_id=history_id, connection=connection)
+                return {"history": receipt.as_dict(), "duplicate": True}
+            due = next_due(before, action, now, timezone) if action in {"now", "next"} else before.due_at
+            completed = True if action == "done" else False if action in {"now", "next"} else before.completed
+            connection.execute("UPDATE list_items SET due_at=?, completed=?, last_checked_at=?, updated_at=? WHERE id=?", (due, int(completed), now, now, item_id))
+            after = self._item_record_from_row(connection.execute("SELECT * FROM list_items WHERE id=?", (item_id,)).fetchone(), labels)
+            history = self._add_scan_history(scanner_id, scanner["name"] if scanner else None,
+                scanner["address"] if scanner else None, source, code, "todo_" + action,
+                before.list_id, None, before.name, None, 1, None, None, "success",
+                localized_text("todoqr.applied"), history_id=history_id, connection=connection)
+        return {"item": after.as_dict(), "history": history.as_dict(), "duplicate": False, "_before": before, "_after": after}
+
     async def async_check_item(self, item_id: str) -> ListItemRecord:
         """Record an explicit check without changing any task fields."""
         before = await self._async_run(self._get_item, item_id)
@@ -1885,7 +1937,7 @@ class HaListManagerDatabase:
                 })
             except Exception:
                 logging.getLogger(__name__).exception("Unable to publish a committed script action")
-        if target.__name__ == "_add_shopping_scan" and not result.get("duplicate"):
+        if target.__name__ in {"_add_shopping_scan", "_apply_todo_qr"} and not result.get("duplicate"):
             self._fire_item_mutated(result.pop("_before"), result.pop("_after"))
         if ((target.__name__ == "_accept_alexa_item" and result.get("accepted"))
                 or (target.__name__ == "_apply_alexa_sync_local" and result.get("applied"))):

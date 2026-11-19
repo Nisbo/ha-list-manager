@@ -536,7 +536,12 @@
     "entityscan_not_usb": "Diese Entität ist kein erkannter Last-scan-Sensor von USB 2 MQTT Scanner.",
     "entityscan_failed": "Der Entitätsscan konnte nicht verarbeitet werden. Prüfe den Scanverlauf.",
     "library_too_many_books": "Die Kochbuchliste ist zu groß oder liefert eine ungültige Seiteneinteilung.",
-    "library_too_many_recipes": "Diese Rezeptsammlung ist für eine vollständige Suche zu groß. Bitte wähle ein kleineres Kochbuch."
+    "library_too_many_recipes": "Diese Rezeptsammlung ist für eine vollständige Suche zu groß. Bitte wähle ein kleineres Kochbuch.",
+    "todoqr_invalid": "Ungültiger Aufgaben-Aktionscode.",
+    "todoqr_unavailable": "Die Aufgabe ist nicht mehr verfügbar oder gehört nicht zu einer aktiven lokalen To-do-Liste.",
+    "todoqr_interval_required": "Für diese Aktion benötigt die Aufgabe eine Fälligkeit und ein Wiederholungsintervall.",
+    "todoqr_applied": "QR-Aktion ausgeführt.",
+    "todoqr_duplicate": "Doppellesung ignoriert. Die Aktion wurde bereits ausgeführt."
   },
   "config_panel": {
     "backup": {
@@ -756,7 +761,7 @@
       "list_type_quick_actions": "Schnellaktionen für den aktuellen Listentyp zusätzlich anbieten.",
       "ntfy_delivery": "Sendet über die installierte Ntfy-Integration.",
       "mode_auto_reset": "Setzt einen vorübergehend gewählten Modus nach dieser Zeit auf den Startmodus zurück. 0 deaktiviert das Zurücksetzen.",
-      "todo_sorting": "Sortiert alphabetisch, nach Fälligkeit, per Drag & Drop oder nach der gespeicherten Reihenfolge.",
+      "todo_sorting": "Manuell erlaubt Ziehen am Griff oder Verschieben mit den Pfeiltasten innerhalb einer Kategorie. Neue Aufgaben kommen ans Kategorieende. Die Reihenfolge bleibt beim Wechsel zu ABC oder Fälligkeit gespeichert. Bei Labelgruppierung und externen Listen sind Ziehgriffe deaktiviert.",
       "backend_defaults": "Standardwerte für neue Produkte und weitere Backend-Funktionen.",
       "shopping_product_search": "Sucht während der Eingabe nach passenden Artikeln aus der Produktdatenbank.",
       "category_rule_lines": "Trage für „{p0}“ eine Regel pro Zeile ein. Leere Zeilen und doppelte Regeln werden beim Speichern entfernt.",
@@ -924,7 +929,14 @@
       "date_only_end_of_day": "Aufgaben ohne Uhrzeit werden ab dem nächsten lokalen Tagesbeginn rot markiert. Termine mit Uhrzeit gelten weiterhin zum angegebenen Zeitpunkt. Standard: aus.",
       "capitalize_first_letter": "Gilt beim Anlegen oder Bearbeiten freier Einkaufsartikel und Aufgaben, auch über Alexa und ohne geöffnete Karte. Das Aktivieren benennt vorhandene Einträge nicht rückwirkend um. Verknüpfte Produktnamen bleiben unverändert.",
       "last_checked": "Zeigt den letzten Prüfzeitpunkt am Eintrag. Er wird beim Erledigen und bei beiden Aktionen für eine neue Fälligkeit automatisch gesetzt; im Aktionsmenü lässt er sich zusätzlich manuell setzen.",
-      "dates_inline": "Zeigt Fälligkeit und letzten Prüfzeitpunkt nebeneinander statt untereinander. Bei wenig Platz werden sie umgebrochen."
+      "dates_inline": "Zeigt Fälligkeit und letzten Prüfzeitpunkt nebeneinander statt untereinander. Bei wenig Platz werden sie umgebrochen.",
+      "shopping_manual_sort": "Alphabetisch ist Standard. Manuell speichert die Reihenfolge gemeinsam für die Liste; neue Artikel stehen am Kategorieende. Ziehen am Griff oder Pfeiltasten verwenden. Verschieben bleibt innerhalb einer Kategorie. Bei Labelgruppierung und externen Listen sind Ziehgriffe deaktiviert.",
+      "shopping_enter_actions": "Bestätigt Einkaufsartikel, Artikelaktionen und Filter mit Enter. Im EAN-Feld werden zuerst Produktdaten abgefragt. Mehrzeilige Texte und Auswahlfelder behalten ihre Bedienung; Löschen wird nicht automatisch bestätigt. Standardmäßig ausgeschaltet.",
+      "shopping_dialog_focus": "Fokussiert beim Öffnen eines Artikel- oder Produktdialogs das Namensfeld. Auf Handys und Tablets kann dadurch die Bildschirmtastatur geöffnet werden. Das kann als störend empfunden werden. Standardmäßig ausgeschaltet.",
+      "inventory_enter_actions": "Bestätigt Produkte, Bestandskorrekturen, Gruppen, Artikelaktionen und Filter mit Enter. Im EAN-Feld werden zuerst Produktdaten abgefragt. Mehrzeilige Texte und Auswahlfelder behalten ihre Bedienung; Löschen wird nicht automatisch bestätigt. Standardmäßig ausgeschaltet.",
+      "inventory_dialog_focus": "Fokussiert beim Öffnen eines Produkt- oder Gruppendialogs das Namensfeld. Auf Handys und Tablets kann dadurch die Bildschirmtastatur geöffnet werden. Das kann als störend empfunden werden. Standardmäßig ausgeschaltet.",
+      "todo_enter_actions": "Bestätigt Aufgaben, Aufgabenvorlagen, gewählte Aufgabenaktionen und Filter mit Enter. Mehrzeilige Texte und Auswahlfelder behalten ihre Bedienung; Löschen wird nicht automatisch bestätigt. Standardmäßig ausgeschaltet.",
+      "todo_dialog_focus": "Fokussiert beim Öffnen eines Aufgaben- oder Vorlagendialogs das Namensfeld. Auf Handys und Tablets kann dadurch die Bildschirmtastatur geöffnet werden. Das kann als störend empfunden werden. Standardmäßig ausgeschaltet."
     },
     "history": {
       "add_sample": "Messwert ergänzen",
@@ -2029,7 +2041,11 @@
       "dismiss_message": "Meldung ausblenden",
       "back_to_inventory_item": "Zurück zum Inventarartikel",
       "save_product": "Produkt speichern",
-      "release_beta": "Beta"
+      "release_beta": "Beta",
+      "save_dialog_on_enter": "Dialogaktionen mit Enter ausführen",
+      "focus_dialog_input": "Eingabefeld beim Öffnen fokussieren",
+      "sort_item_grip": "Zum Sortieren ziehen oder Pfeiltasten nach oben/unten verwenden",
+      "sort_order": "Artikel sortieren"
     },
     "scanner": {
       "active_then_default": "Aktive Karte, danach Standardziel",
@@ -2217,9 +2233,11 @@
       "listed_normal": "Normal anzeigen",
       "listed_dim": "Abblenden",
       "listed_hide": "Ausblenden",
-      "listed_help": "Gilt für Chips in der Karte und im Auswahlpopup. Nur offene Einträge zählen; nach Erledigen oder Löschen erscheinen die Chips wieder normal. Abgeblendete Chips bleiben bedienbar. Produktchips werden über die Produktverknüpfung erkannt, andere über den vollständigen Namen ohne Beachtung der Groß-/Kleinschreibung. Bei To-do zählt der Aufgabenname der Vorlage.",
+      "listed_help": "Gilt für Chips in der Karte und im Auswahlpopup. Nur offene Einträge zählen; nach Erledigen oder Löschen erscheinen die Chips wieder normal. Abgeblendete Chips bleiben bedienbar. Produktchips werden über die Produktverknüpfung erkannt, andere über den vollständigen Namen ohne Beachtung der Groß-/Kleinschreibung.",
       "listed_inventory_help": "Gilt für Chips in der Karte und im Auswahlpopup. Ein vorhandener Inventareintrag zählt als gelistet, auch bei Bestand 0. Nach dem Entfernen aus dem Inventar erscheint der Chip wieder normal. Abgeblendete Chips bleiben bedienbar. Produktchips werden über die Produktverknüpfung erkannt, andere über den vollständigen Namen ohne Beachtung der Groß-/Kleinschreibung.",
-      "already_listed": "Bereits in dieser Liste. Weiterhin verwendbar."
+      "already_listed": "Bereits in dieser Liste. Weiterhin verwendbar.",
+      "listed_todo_display": "Bereits gelistete Aufgabenvorlagen",
+      "listed_todo_help": "Gilt für Aufgabenvorlagen in der Karte und im Auswahlpopup. Nur offene Aufgaben zählen; nach Erledigen oder Löschen erscheinen die Vorlagen wieder normal. Abgeblendete Vorlagen bleiben bedienbar. Verglichen wird der vollständige Aufgabenname der Vorlage ohne Beachtung der Groß-/Kleinschreibung."
     },
     "recipes": {
       "search_all": "Alle Rezepte durchsuchen",
@@ -3245,6 +3263,35 @@
       "help_welcome_heading": "Eigener Text über der Hauptüberschrift auf der Startansicht. Leer lassen für den übersetzten Standardtext.",
       "help_welcome_title": "Eigener großer Begrüßungstext auf der Startansicht. Bei Suche oder Kochbuchauswahl erscheint weiterhin die passende Überschrift. Leer lassen für den übersetzten Standardtext.",
       "help_welcome_description": "Eigener Beschreibungstext auf der Startansicht. Leer lassen für den übersetzten Standardtext."
+    },
+    "todoqr": {
+      "invalid": "Ungültiger Aufgaben-Aktionscode.",
+      "unavailable": "Die Aufgabe ist nicht mehr verfügbar oder gehört nicht zu einer aktiven lokalen To-do-Liste.",
+      "interval_required": "Für diese Aktion benötigt die Aufgabe eine Fälligkeit und ein Wiederholungsintervall.",
+      "applied": "QR-Aktion ausgeführt.",
+      "duplicate": "Doppellesung ignoriert. Die Aktion wurde bereits ausgeführt.",
+      "create": "QR-Code erstellen …",
+      "choose": "Aktion beim Scannen",
+      "action_now": "Neue Fälligkeit ab jetzt",
+      "action_next": "Neue Fälligkeit ab bisherigem Termin",
+      "action_done": "Als erledigt markieren",
+      "action_checked": "Nur „Zuletzt geprüft“ auf jetzt setzen",
+      "code_help": "Der Code bleibt nach dem Umbenennen gültig. Registrierte Scanner führen die festgelegte Aktion direkt aus, unabhängig vom Scannerziel. Eine pausierte Überwachung bleibt pausiert.",
+      "duplicates_help": "Doppellesungen desselben Codes werden drei Sekunden lang gemeinsam unterdrückt. Danach ist ein neuer bewusster Scan möglich.",
+      "copy_image": "Bild kopieren",
+      "download": "PNG herunterladen",
+      "print": "Drucken",
+      "close": "Schließen",
+      "scan": "Aufgaben-QR scannen",
+      "apply": "Aktion ausführen",
+      "copy_unavailable": "Bildkopieren ist hier nicht verfügbar. Bitte das PNG herunterladen.",
+      "copied": "Bild kopiert.",
+      "failed": "QR-Code konnte nicht erstellt werden.",
+      "direct": "Aufgaben-QR ohne Rückfrage ausführen",
+      "direct_help": "Kamerascans führen die im QR-Code festgelegte Aktion nach Erkennung direkt aus. Standardmäßig wird vorher eine Bestätigung angezeigt. Registrierte Scanner führen die Aktion immer direkt aus.",
+      "show_scan": "Button zum Scannen von Aufgaben-QR anzeigen",
+      "show_scan_help": "Öffnet die Handykamera über die Buttonleiste.",
+      "camera": "Handykamera"
     }
   },
   "exceptions": {

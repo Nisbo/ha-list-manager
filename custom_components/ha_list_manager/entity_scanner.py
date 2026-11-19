@@ -215,7 +215,7 @@ class EntityScannerSources:
             return  # Numeric states lose leading zeroes; booleans are not codes.
         try:
             barcode = barcode.strip()
-            if not parse_inventory_control_code(barcode):
+            if not parse_inventory_control_code(barcode) and not barcode.startswith("HA-LM:TODO:"):
                 barcode = normalize_ean(barcode)
         except ValueError:
             return

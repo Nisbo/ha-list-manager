@@ -295,6 +295,8 @@ def async_register_websocket_commands(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, websocket_update_item)
     websocket_api.async_register_command(hass, websocket_set_item_completed)
     websocket_api.async_register_command(hass, websocket_check_item)
+    websocket_api.async_register_command(hass, websocket_todo_qr_preview)
+    websocket_api.async_register_command(hass, websocket_todo_qr_apply)
     websocket_api.async_register_command(hass, websocket_reorder_items)
     websocket_api.async_register_command(hass, websocket_delete_item)
     websocket_api.async_register_command(hass, websocket_list_products)
@@ -1828,6 +1830,32 @@ async def websocket_check_item(hass, connection, msg):
         return
     _fire_items_changed(hass, record.list_id)
     connection.send_result(msg["id"], {"item": record.as_dict()})
+
+
+@localized_command({probatio.Required("type"): f"{DOMAIN}/todo_qr/preview", probatio.Required("code"): str})
+async def websocket_todo_qr_preview(hass, connection, msg):
+    from .todo_qr import parse_code, validate_task
+    try:
+        item_id, action = parse_code(msg["code"])
+        item = await _runtime(hass).database.async_get_item(item_id)
+        target = await _runtime(hass).database.async_get_list(item.list_id)
+        validate_task(item, target, action)
+    except (ValueError, ListItemNotFoundError, ListNotFoundError):
+        _send_input_error(connection, msg, ValueError(localized_text("todoqr.unavailable")))
+        return
+    connection.send_result(msg["id"], {"item": item.as_dict(), "list_name": target.name, "action": action})
+
+
+@localized_command({probatio.Required("type"): f"{DOMAIN}/todo_qr/apply", probatio.Required("code"): str, probatio.Required("request_id"): str})
+async def websocket_todo_qr_apply(hass, connection, msg):
+    try:
+        result = await _runtime(hass).database.async_apply_todo_qr(msg["code"], msg["request_id"], hass.config.time_zone)
+    except ValueError as error:
+        _send_input_error(connection, msg, error)
+        return
+    if not result["duplicate"]:
+        _fire_items_changed(hass, result["item"]["list_id"])
+    connection.send_result(msg["id"], result)
 
 
 @localized_command(

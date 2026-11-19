@@ -31,6 +31,7 @@ from .database import (
     HaListManagerDatabase,
 )
 from .models import ScanHistoryRecord, ScannerRecord
+from .todo_qr import PREFIX as TODO_QR_PREFIX
 from .mqtt_scanner import extract_scan
 from .entity_scanner import EntityScannerSources
 
@@ -188,7 +189,7 @@ class ScannerManager:
                     scan = extract_scan(scanner.mqtt, payload)
                     if scanner.mqtt["scanner_path"] and scan["scanner"] != scanner.mqtt["scanner_value"]:
                         continue
-                    if not parse_inventory_control_code(scan["ean"]):
+                    if not parse_inventory_control_code(scan["ean"]) and not scan["ean"].startswith(TODO_QR_PREFIX):
                         normalize_ean(scan["ean"])
                     if scan["scan_id"]:
                         # Topic and identity scope allow the same message ID on
@@ -571,6 +572,8 @@ class ScannerManager:
         """Resolve and process a real or simulated scan exactly once."""
         await async_prepare(self.hass)
         normalized_address = normalize_scanner_address(address) or None
+        if str(ean or "").strip().startswith("HA-LM:TODO:"):
+            return await self._async_process_todo_qr(str(ean).strip(), normalized_address, source, scanner_id)
         control = parse_inventory_control_code(ean)
         if control is not None:
             return await self._async_process_control_code(
@@ -955,6 +958,22 @@ class ScannerManager:
             "history": history.as_dict(), "product": product.as_dict(),
             "entry": entry.as_dict() if entry else None,
         }
+
+    async def _async_process_todo_qr(self, code, address, source, scanner_id):
+        scanner = next((row for row in await self.database.async_list_scanners() if row.id == scanner_id), None)
+        if scanner is None and address:
+            scanner = await self.database.async_get_scanner_by_address(address)
+        try:
+            if scanner is None or not scanner.enabled:
+                raise ValueError(localized_text("backend.scanner_unavailable"))
+            result = await self.database.async_apply_todo_qr(code, str(uuid4()), self.hass.config.time_zone, scanner.id, source)
+        except ValueError as error:
+            return {"history": (await self._history(scanner=scanner, address=address, source=source, ean=code,
+                action=None, list_id=None, status="error", message=str(error))).as_dict(), "todo_qr": True}
+        if not result["duplicate"]:
+            self.hass.bus.async_fire(EVENT_ITEMS_CHANGED, {"list_id": result["item"]["list_id"]})
+            self.hass.bus.async_fire(EVENT_SCAN_PROCESSED, result["history"])
+        return {**result, "todo_qr": True}
 
     async def _async_process_control_code(
         self, *, code: str, control: tuple[str | None, str],

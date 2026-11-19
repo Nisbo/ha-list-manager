@@ -65,6 +65,21 @@ open card; existing list and action assignments still apply.
 
 ![Inventory and shopping list in the mobile card layout](docs/images/en/overview-tablet.jpg)
 
+
+### QR actions for existing tasks
+
+For an existing To-do task, open **Choose action → Create QR code …**. Choose
+next due date from now, next due date from the previous date, mark as completed,
+or only set Last checked to now. Copy the image, download a PNG, or print it with
+the task name and action. Renaming the task does not invalidate its code.
+
+**Scan task QR** in the toolbar opens the camera. Confirmation is shown before
+applying an action; the card editor offers an optional direct mode. Registered
+scanners apply actions centrally, independently of their scanner target. Paused
+monitoring stays paused. Repeated readings are suppressed across devices for
+three seconds; retries of the same request remain ignored after a HA restart.
+A later intentional new scan remains possible.
+
 ## Alexa shopping
 
 Say “Alexa, add cucumbers to the shopping list” and have the entry arrive in

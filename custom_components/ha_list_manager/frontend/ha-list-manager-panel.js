@@ -75,7 +75,7 @@ function haListManagerPanelTextRequest(hass, message) {
   return hass.callWS(message.type?.startsWith("ha_list_manager/") ? { ...message, language: haListManagerPanelTextLanguage(hass) } : message);
 }
 
-const PANEL_VERSION = "1.1.0b4";
+const PANEL_VERSION = "1.1.0b5";
 const GROUP_PICKER_RESULT_LIMIT = 100;
 const API = "ha_list_manager";
 const ITEMS_EVENT = "ha_list_manager_items_changed";
@@ -2498,10 +2498,10 @@ class HaListManagerPanel extends HTMLElement {
     if (this._scanHistoryLoading && !this._scanHistoryLoaded) return this._loadingCard(haListManagerPanelText("scanner.loading_history", {}, this._hass));
     const rows = this._scanHistory.map((record) => {
       const list = this._findList(record.list_id);
-      const action = SCANNER_ACTIONS(this._hass)[record.action]?.label || (record.action === "product" ? haListManagerPanelText("product_scan.review_action",{},this._hass) : record.action) || haListManagerPanelText("ui.no_target", {}, this._hass);
+      const action = (["todo_now", "todo_next", "todo_done", "todo_checked"].includes(record.action) ? haListManagerPanelText(({todo_now:"todoqr.action_now",todo_next:"todoqr.action_next",todo_done:"todoqr.action_done",todo_checked:"todoqr.action_checked"})[record.action], {}, this._hass) : "") || SCANNER_ACTIONS(this._hass)[record.action]?.label || (record.action === "product" ? haListManagerPanelText("product_scan.review_action",{},this._hass) : record.action) || haListManagerPanelText("ui.no_target", {}, this._hass);
       const stock = record.stock_before === null || record.stock_after === null ? "" : `<span>${haListManagerPanelText("ui.stock_change", {p0:(record.stock_before), p1:(record.stock_after)}, this._hass)}</span>`;
       const tone = ["success", "resolved"].includes(record.status) ? "success" : ["queued", "offered", "needs_input", "not_found", "processing"].includes(record.status) ? "warning" : ["ignored", "dismissed"].includes(record.status) ? "neutral" : "error";
-      return `<article class="history-row"><span class="history-status ${tone}"><ha-icon icon="mdi:${tone === "success" ? "check-circle-outline" : tone === "warning" ? "pencil-clock-outline" : tone === "neutral" ? "minus-circle-outline" : "alert-circle-outline"}"></ha-icon></span><div class="history-main"><strong>${this._escape(record.product_name || `EAN ${record.ean}`)}</strong><small>${this._escape(this._formatScanTime(record.scanned_at))} · ${this._escape(record.scanner_name || (record.source === "simulation" ? haListManagerPanelText("scanner.simulation", {}, this._hass) : record.scanner_address || haListManagerPanelText("scanner.unknown", {}, this._hass)))}</small><span>${this._escape(`${action}${list ? ` · ${list.name}` : ""}`)}</span>${stock}${record.message ? `<em>${this._escape(record.message)}</em>` : ""}</div><code>${this._escape(record.ean)}</code></article>`;
+      return `<article class="history-row"><span class="history-status ${tone}"><ha-icon icon="mdi:${tone === "success" ? "check-circle-outline" : tone === "warning" ? "pencil-clock-outline" : tone === "neutral" ? "minus-circle-outline" : "alert-circle-outline"}"></ha-icon></span><div class="history-main"><strong>${this._escape(record.product_name || `EAN ${record.ean}`)}</strong><small>${this._escape(this._formatScanTime(record.scanned_at))} · ${this._escape(record.scanner_name || (record.source === "todo_camera" ? haListManagerPanelText("todoqr.camera", {}, this._hass) : record.source === "simulation" ? haListManagerPanelText("scanner.simulation", {}, this._hass) : record.scanner_address || haListManagerPanelText("scanner.unknown", {}, this._hass)))}</small><span>${this._escape(`${action}${list ? ` · ${list.name}` : ""}`)}</span>${stock}${record.message ? `<em>${this._escape(record.message)}</em>` : ""}</div><code>${this._escape(record.ean)}</code></article>`;
     }).join("");
     const queueStart = (this._scanQueuePage - 1) * this._scanQueuePageSize;
     const visiblePendingScans = this._pendingScans.slice(queueStart, queueStart + this._scanQueuePageSize);

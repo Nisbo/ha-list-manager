@@ -536,7 +536,12 @@
     "entityscan_not_usb": "This entity is not a detected USB 2 MQTT Scanner Last scan sensor.",
     "entityscan_failed": "The entity scan could not be processed. Check the scan history.",
     "library_too_many_books": "The cookbook list is too large or returned invalid pagination.",
-    "library_too_many_recipes": "This recipe collection is too large to search completely. Please choose a smaller cookbook."
+    "library_too_many_recipes": "This recipe collection is too large to search completely. Please choose a smaller cookbook.",
+    "todoqr_invalid": "Invalid task action code.",
+    "todoqr_unavailable": "The task is unavailable or does not belong to an enabled local To-do list.",
+    "todoqr_interval_required": "This action requires a due date and a recurrence interval.",
+    "todoqr_applied": "QR action applied.",
+    "todoqr_duplicate": "Duplicate scan ignored. The action has already been applied."
   },
   "config_panel": {
     "backup": {
@@ -756,7 +761,7 @@
       "list_type_quick_actions": "Also offer quick actions for the current list type.",
       "ntfy_delivery": "Sends through the installed Ntfy integration.",
       "mode_auto_reset": "Resets a temporarily selected mode to the initial mode after this time. 0 disables resetting.",
-      "todo_sorting": "Sorts alphabetically, by due date, using drag & drop or by the saved order.",
+      "todo_sorting": "Manual allows dragging the grip or using arrow keys within one category. New tasks go to the end of their category. The order is retained when switching to alphabetical or due-date sorting. Grips are disabled for label grouping and external lists.",
       "backend_defaults": "Defaults for new products and other backend features.",
       "shopping_product_search": "Searches for matching items in the product database while you type.",
       "category_rule_lines": "Enter one rule per line for “{p0}”. Empty lines and duplicate rules are removed when saving.",
@@ -924,7 +929,14 @@
       "date_only_end_of_day": "Tasks without a time turn red at the next local midnight. Tasks with a time keep their exact deadline. Default: off.",
       "capitalize_first_letter": "Applies when creating or editing free shopping items and tasks, including Alexa imports and when no card is open. Enabling this option does not retroactively rename existing entries. Linked product names remain unchanged.",
       "last_checked": "Shows when the task was last checked. Completing it or using either next-due action sets this automatically; it can also be set manually from the action menu.",
-      "dates_inline": "Shows the due date and last-check time side by side instead of on separate lines. They wrap when space is limited."
+      "dates_inline": "Shows the due date and last-check time side by side instead of on separate lines. They wrap when space is limited.",
+      "shopping_manual_sort": "Alphabetical is the default. Manual saves the shared list order; new items go to the end of their category. Drag the grip or use arrow keys. Moves stay within one category. Grips are disabled for label grouping and external lists.",
+      "shopping_enter_actions": "Confirms shopping items, item actions and filters with Enter. In EAN fields, product data is looked up first. Multiline text and pickers keep their usual behavior; deletion is not confirmed automatically. Disabled by default.",
+      "shopping_dialog_focus": "Focuses the name field when opening a shopping-item or product dialog. On phones and tablets this may open the on-screen keyboard, which can be distracting. Disabled by default.",
+      "inventory_enter_actions": "Confirms products, stock corrections, groups, item actions and filters with Enter. In EAN fields, product data is looked up first. Multiline text and pickers keep their usual behavior; deletion is not confirmed automatically. Disabled by default.",
+      "inventory_dialog_focus": "Focuses the name field when opening a product or group dialog. On phones and tablets this may open the on-screen keyboard, which can be distracting. Disabled by default.",
+      "todo_enter_actions": "Confirms tasks, task templates, selected task actions and filters with Enter. Multiline text and pickers keep their usual behavior; deletion is not confirmed automatically. Disabled by default.",
+      "todo_dialog_focus": "Focuses the name field when opening a task or template dialog. On phones and tablets this may open the on-screen keyboard, which can be distracting. Disabled by default."
     },
     "history": {
       "add_sample": "Add reading",
@@ -2029,7 +2041,11 @@
       "dismiss_message": "Dismiss message",
       "back_to_inventory_item": "Back to inventory item",
       "save_product": "Save product",
-      "release_beta": "Beta"
+      "release_beta": "Beta",
+      "save_dialog_on_enter": "Run dialog actions with Enter",
+      "focus_dialog_input": "Focus input when opening the dialog",
+      "sort_item_grip": "Drag to reorder or use the up/down arrow keys",
+      "sort_order": "Sort items"
     },
     "scanner": {
       "active_then_default": "Active card, then default target",
@@ -2217,9 +2233,11 @@
       "listed_normal": "Show normally",
       "listed_dim": "Dim",
       "listed_hide": "Hide",
-      "listed_help": "Applies to chips in the card and their picker popup. Only open entries count; chips return to normal when the entry is completed or deleted. Dimmed chips remain usable. Product chips match by product link; other chips match the full name, ignoring case. To-do templates match their task name.",
+      "listed_help": "Applies to chips in the card and their picker popup. Only open entries count; chips return to normal when the entry is completed or deleted. Dimmed chips remain usable. Product chips match by product link; other chips match the full name, ignoring case.",
       "listed_inventory_help": "Applies to chips in the card and their picker popup. An existing inventory entry counts as listed, even with stock 0. The chip returns to normal when the entry is removed from inventory. Dimmed chips remain usable. Product chips match by product link; other chips match the full name, ignoring case.",
-      "already_listed": "Already on this list. Still usable."
+      "already_listed": "Already on this list. Still usable.",
+      "listed_todo_display": "Templates already on the task list",
+      "listed_todo_help": "Applies to task templates in the card and their picker popup. Only open tasks count; templates return to normal when the task is completed or deleted. Dimmed templates remain usable. Matching uses the full task name stored in the template, ignoring case."
     },
     "recipes": {
       "search_all": "Search all recipes",
@@ -3245,6 +3263,35 @@
       "help_welcome_heading": "Custom text above the main heading on the home view. Leave empty for the translated default.",
       "help_welcome_title": "Custom large welcome heading on the home view. Search and cookbook selection still show their relevant heading. Leave empty for the translated default.",
       "help_welcome_description": "Custom description on the home view. Leave empty for the translated default."
+    },
+    "todoqr": {
+      "invalid": "Invalid task action code.",
+      "unavailable": "The task is unavailable or does not belong to an enabled local To-do list.",
+      "interval_required": "This action requires a due date and a recurrence interval.",
+      "applied": "QR action applied.",
+      "duplicate": "Duplicate scan ignored. The action has already been applied.",
+      "create": "Create QR code …",
+      "choose": "Action when scanned",
+      "action_now": "Next due date from now",
+      "action_next": "Next due date from previous due date",
+      "action_done": "Mark as completed",
+      "action_checked": "Only set “Last checked” to now",
+      "code_help": "The code remains valid after renaming. Registered scanners apply its action directly, regardless of the scanner target. Paused monitoring remains paused.",
+      "duplicates_help": "Repeated readings of the same code are suppressed across devices for three seconds. A new intentional scan is possible afterwards.",
+      "copy_image": "Copy image",
+      "download": "Download PNG",
+      "print": "Print",
+      "close": "Close",
+      "scan": "Scan task QR",
+      "apply": "Apply action",
+      "copy_unavailable": "Image copying is unavailable here. Please download the PNG.",
+      "copied": "Image copied.",
+      "failed": "Could not create QR code.",
+      "direct": "Apply task QR without confirmation",
+      "direct_help": "Camera scans apply the encoded action immediately after recognition. Confirmation is shown by default. Registered scanners always apply it directly.",
+      "show_scan": "Show task QR scan button",
+      "show_scan_help": "Opens the phone camera from the toolbar.",
+      "camera": "Phone camera"
     }
   },
   "exceptions": {
