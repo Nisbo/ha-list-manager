@@ -221,5 +221,22 @@
     return `[data-quick-section-body][hidden]{display:none!important}ha-card h3>button.quick-section-toggle{display:inline-flex;align-items:center;gap:5px;min-height:32px;padding:0;border:0;border-radius:0;background:transparent;color:inherit;font:inherit;cursor:pointer}ha-card h3>button.quick-section-toggle:focus-visible{outline:2px solid var(--primary-color)}.quick-section-toggle ha-icon{--mdc-icon-size:17px}.editor-section-wrap{margin-top:14px;min-width:0;border:1px solid var(--divider-color);border-radius:9px}.editor-section{min-width:0}.editor-section-wrap>[data-editor-notice]:not(:empty){padding:0 11px 11px}.editor-section-wrap>[data-editor-notice]>.field-help:first-child{margin-top:0}.editor-section>summary{display:flex;align-items:center;gap:7px;min-height:44px;padding:9px 11px;list-style:none;cursor:pointer;color:var(--primary-text-color);font-size:14px;font-weight:400}.editor-section>summary::-webkit-details-marker{display:none}.editor-section>summary:focus-visible{outline:2px solid var(--primary-color);outline-offset:2px;border-radius:9px}.editor-section-summary{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--secondary-text-color)}.editor-section>summary>ha-icon{flex:0 0 auto;margin-left:auto;--mdc-icon-size:20px;color:var(--secondary-text-color)}.editor-section[open]>summary>ha-icon{transform:rotate(180deg)}.editor-section-body{min-width:0;padding:0 11px 11px}.editor-section-body>.dialog-field,.editor-section-body>.label-selector{margin-top:0}.editor-section-body .selection-field-heading{display:none}`;
   }
 
-  globalThis.HaListManagerDialogSections = { stateKey, isOpen, render, bind, refresh, styles, bindQuick, labelMarker, renderLabelGroups, handleEnter, bindActionEnter, runAction };
+  function prepareAddFocus(card, selector) {
+    if (card._config.refocus_after_add !== true) return;
+    const config = card._config;
+    const listId = card._listId();
+    const connection = card._hass?.connection;
+    const userId = card._hass?.user?.id;
+    return () => {
+      if (!card.isConnected || card._config !== config || card._listId() !== listId
+          || card._hass?.connection !== connection || card._hass?.user?.id !== userId) return;
+      if (card._dialog || card.shadowRoot.querySelector('[aria-modal="true"]')) return;
+      const input = card.shadowRoot.querySelector(selector);
+      if (input?.getClientRects().length && !input.disabled && !input.readOnly) {
+        input.focus({ preventScroll: true });
+      }
+    };
+  }
+
+  globalThis.HaListManagerDialogSections = { stateKey, isOpen, render, bind, refresh, styles, bindQuick, labelMarker, renderLabelGroups, handleEnter, bindActionEnter, runAction, prepareAddFocus };
 })();

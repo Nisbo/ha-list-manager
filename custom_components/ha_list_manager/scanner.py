@@ -7,6 +7,7 @@ import logging
 from hashlib import sha256
 from contextlib import asynccontextmanager
 from dataclasses import replace
+from datetime import UTC, datetime
 from time import monotonic
 from uuid import uuid4, uuid5, NAMESPACE_URL
 from typing import Any
@@ -31,7 +32,7 @@ from .database import (
     HaListManagerDatabase,
 )
 from .models import ScanHistoryRecord, ScannerRecord
-from .todo_qr import PREFIX as TODO_QR_PREFIX
+from .todo_qr import NAMESPACE as TODO_QR_NAMESPACE
 from .mqtt_scanner import extract_scan
 from .entity_scanner import EntityScannerSources
 
@@ -42,6 +43,9 @@ _LOGGER = logging.getLogger(__name__)
 
 SCANNER_EVENT = "eyoyo_barcode_scanned"
 INVENTORY_CONTROL_PREFIX = "HA-LM:INVENTORY:"
+SCRIPT_QR_NAMESPACE = "HA-LM:SCRIPT:"
+SCRIPT_QR_PREFIX = SCRIPT_QR_NAMESPACE + "1:"
+ACTION_QR_NAMESPACES = (TODO_QR_NAMESPACE, SCRIPT_QR_NAMESPACE)
 
 
 def normalize_scanner_address(value: Any) -> str:
@@ -101,6 +105,7 @@ class ScannerManager:
         self.mqtt_error = None
         self._scan_views: dict[str, dict[str, dict[str, Any]]] = {}
         self._scan_editors: dict[str, dict[str, Any]] = {}
+        self._recent_script_codes: dict[str, float] = {}
         self._scan_operations: dict[str, list[Any]] = {}
         self._collaboration_task: asyncio.Task | None = None
         self._offer_tasks: set[asyncio.Task] = set()
@@ -189,7 +194,7 @@ class ScannerManager:
                     scan = extract_scan(scanner.mqtt, payload)
                     if scanner.mqtt["scanner_path"] and scan["scanner"] != scanner.mqtt["scanner_value"]:
                         continue
-                    if not parse_inventory_control_code(scan["ean"]) and not scan["ean"].startswith(TODO_QR_PREFIX):
+                    if not parse_inventory_control_code(scan["ean"]) and not scan["ean"].startswith(ACTION_QR_NAMESPACES):
                         normalize_ean(scan["ean"])
                     if scan["scan_id"]:
                         # Topic and identity scope allow the same message ID on
@@ -243,6 +248,7 @@ class ScannerManager:
                 except asyncio.CancelledError as error:
                     cancelled = error
         self._scan_tasks.clear()
+        self._recent_script_codes.clear()
         tasks = [task for task in [self._collaboration_task, *self._offer_tasks] if task]
         for task in tasks:
             task.cancel()
@@ -572,8 +578,11 @@ class ScannerManager:
         """Resolve and process a real or simulated scan exactly once."""
         await async_prepare(self.hass)
         normalized_address = normalize_scanner_address(address) or None
-        if str(ean or "").strip().startswith("HA-LM:TODO:"):
-            return await self._async_process_todo_qr(str(ean).strip(), normalized_address, source, scanner_id)
+        code = str(ean or "").strip()
+        if code.startswith(SCRIPT_QR_NAMESPACE):
+            return await self._async_process_script_qr(code, normalized_address, source, scanner_id)
+        if code.startswith(TODO_QR_NAMESPACE):
+            return await self._async_process_todo_qr(code, normalized_address, source, scanner_id)
         control = parse_inventory_control_code(ean)
         if control is not None:
             return await self._async_process_control_code(
@@ -670,13 +679,13 @@ class ScannerManager:
         if product is None:
             try:
                 lookup = await async_lookup_open_facts(self.hass, normalized_ean)
-            except OpenFactsLookupError:
+            except OpenFactsLookupError as error:
                 status = "queued" if queue_on_failure else "error"
                 history = await self._history(
                     scanner=scanner, address=normalized_address, source=source,
                     ean=normalized_ean, action=target_action,
                     list_id=target_list_id, quantity=quantity, status=status,
-                    message=localized_text("backend.off_unavailable"),
+                    message=getattr(error, "message", localized_text("backend.off_unavailable")),
                     event_extra={"queued": queue_on_failure},
                 )
                 return {"history": history.as_dict()}
@@ -959,10 +968,61 @@ class ScannerManager:
             "entry": entry.as_dict() if entry else None,
         }
 
-    async def _async_process_todo_qr(self, code, address, source, scanner_id):
+    async def _resolve_qr_scanner(self, scanner_id, address):
         scanner = next((row for row in await self.database.async_list_scanners() if row.id == scanner_id), None)
         if scanner is None and address:
-            scanner = await self.database.async_get_scanner_by_address(address)
+            return await self.database.async_get_scanner_by_address(address)
+        return scanner
+
+    async def _async_process_script_qr(self, code, address, source, scanner_id):
+        """Run only a saved script assignment from an enabled scanner."""
+        scanner = await self._resolve_qr_scanner(scanner_id, address)
+        assignment = None
+        status = "error"
+        message = "scripts.qr_unknown"
+        if not scanner or not scanner.enabled or self._stopped:
+            message = "backend.scanner_unavailable"
+        elif code.startswith(SCRIPT_QR_PREFIX):
+            identifier = code[len(SCRIPT_QR_PREFIX):]
+            assignment = self.config_entry.options.get("script_qr_codes", {}).get(identifier)
+            if assignment:
+                script = assignment["script_entity"]
+                now = monotonic()
+                self._recent_script_codes = {
+                    key: seen for key, seen in self._recent_script_codes.items() if now - seen < 3
+                }
+                if identifier in self._recent_script_codes:
+                    return {"script_qr": True, "duplicate": True}
+                if self.hass.states.get(script) is None or not self.hass.services.has_service("script", "turn_on"):
+                    message = "scripts.qr_unavailable"
+                else:
+                    # Reserve before any await so concurrent readers start the script once.
+                    self._recent_script_codes[identifier] = now
+                    variables = {
+                        "scanner_id": scanner.id,
+                        "scanner_name": scanner.name,
+                        "scanned_at": datetime.now(UTC).isoformat(),
+                    }
+                    if assignment.get("identifier"):
+                        variables["identifier"] = assignment["identifier"]
+                    try:
+                        await self.hass.services.async_call(
+                            "script", "turn_on", {"entity_id": script, "variables": variables}, blocking=True,
+                        )
+                    except Exception:
+                        _LOGGER.exception("Could not start the script assigned to a scan code")
+                        message = "scripts.qr_failed"
+                    else:
+                        status, message = "success", "scripts.qr_started"
+        record = await self._history(
+            scanner=scanner, address=address, source=source, ean="",
+            action="script_qr", list_id=None, product_name=assignment["script_entity"] if assignment else None,
+            status=status, message=localized_text(message),
+        )
+        return {"history": record.as_dict(), "script_qr": True}
+
+    async def _async_process_todo_qr(self, code, address, source, scanner_id):
+        scanner = await self._resolve_qr_scanner(scanner_id, address)
         try:
             if scanner is None or not scanner.enabled:
                 raise ValueError(localized_text("backend.scanner_unavailable"))

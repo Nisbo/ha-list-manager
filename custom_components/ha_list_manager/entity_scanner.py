@@ -208,14 +208,14 @@ class EntityScannerSources:
         self.manager._track_scan_task(self.async_process(row, barcode, scan_id))
 
     async def async_process(self, row, barcode, scan_id):
-        from .scanner import normalize_ean, parse_inventory_control_code
+        from .scanner import ACTION_QR_NAMESPACES, normalize_ean, parse_inventory_control_code
 
         await async_prepare(self.hass)
         if not isinstance(barcode, str):
             return  # Numeric states lose leading zeroes; booleans are not codes.
         try:
             barcode = barcode.strip()
-            if not parse_inventory_control_code(barcode) and not barcode.startswith("HA-LM:TODO:"):
+            if not parse_inventory_control_code(barcode) and not barcode.startswith(ACTION_QR_NAMESPACES):
                 barcode = normalize_ean(barcode)
         except ValueError:
             return

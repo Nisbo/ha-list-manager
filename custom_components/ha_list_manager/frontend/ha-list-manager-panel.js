@@ -1,3 +1,4 @@
+import "./ha-list-manager-qr-encoder.js";
 import "./ha-list-manager-frontend-refresh.js";
 import "./ha-list-manager-dialog-sections.js?v=1.1.0b3-labels";
 import "./ha-list-manager-shopping-scanner.js?v=1.1.0b3-toolbar2";
@@ -75,7 +76,7 @@ function haListManagerPanelTextRequest(hass, message) {
   return hass.callWS(message.type?.startsWith("ha_list_manager/") ? { ...message, language: haListManagerPanelTextLanguage(hass) } : message);
 }
 
-const PANEL_VERSION = "1.1.0b5";
+const PANEL_VERSION = "1.1.0b6";
 const GROUP_PICKER_RESULT_LIMIT = 100;
 const API = "ha_list_manager";
 const ITEMS_EVENT = "ha_list_manager_items_changed";
@@ -225,6 +226,7 @@ class HaListManagerPanel extends HTMLElement {
     this._viewedPendingScanId = null;
     this._pendingScanNotice = "";
     this._scanHistoryTab = null;
+    this._scriptQr = {codes: [], loading: false};
     this._scanHistoryPage = 1;
     this._scanHistoryPageSize = 100;
     this._scanQueuePage = 1;
@@ -242,6 +244,9 @@ class HaListManagerPanel extends HTMLElement {
     this._settings = { append_brand_to_product_name: false, append_quantity_to_product_name: false, scanner_default_list_id: null, scanner_default_action: "add", tandoor_url: "", tandoor_token: "", tandoor_token_configured: false };
     this._settingsLoaded = false;
     this._tandoorTestStatus = "";
+    this._productSourceStatus = "";
+    this._productKeyVisible = false;
+    this._productSourceRequest = null;
     this._notificationProfiles = [];
     this._notificationAssignments = [];
     this._notificationEntityPlatforms = {};
@@ -270,6 +275,12 @@ class HaListManagerPanel extends HTMLElement {
   }
 
   set hass(value) {
+    if (this._hass && (this._hass.connection !== value?.connection || this._hass.user?.id !== value?.user?.id)) {
+      this._scriptQr = {codes: [], loading: false};
+      this._productSourceRequest = null;
+      this._productKeyVisible = false;
+      delete this._settings.product_api_key;
+    }
     this._hass = value;
     globalThis.HaListManagerFrontendRefresh.attach(this);
     const translationsChanged = haListManagerPanelTextUpdateTranslations(this, this._hass);
@@ -320,6 +331,8 @@ class HaListManagerPanel extends HTMLElement {
   }
 
   disconnectedCallback() {
+    this._productSourceRequest = null;
+    this._productKeyVisible = false;
     globalThis.HaListManagerFrontendRefresh.detach(this);
     globalThis.HaListManagerScannerUi.cancel(this);
     this._shoppingScanOpenToken = null;
@@ -768,7 +781,7 @@ class HaListManagerPanel extends HTMLElement {
       this._loading = false;
       this._render();
       if (this._loaded && this._activeSection === "products" && !this._productsLoaded) this._loadProducts();
-      if (this._loaded && this._activeSection === "history" && !this._scanHistoryLoaded) this._loadScanHistory();
+      if (this._loaded && this._activeSection === "history") this._loadScannerSection();
       if (this._loaded && this._activeSection === "backup") this._loadDataBackupInfo();
       if (this._loaded && this._activeSection === "alexa") this._loadAlexa();
     }
@@ -1130,7 +1143,7 @@ class HaListManagerPanel extends HTMLElement {
       this._scanHistory = result.history || [];
       this._scanHistoryTotal = result.total ?? this._scanHistory.length;
       this._pendingScans = pending.scans || [];
-      if (!this._scanHistoryTab || (!hadPendingScans && this._pendingScans.length)) this._scanHistoryTab = this._pendingScans.length ? "queue" : "history";
+      if (!this._scanHistoryTab || (this._scanHistoryTab !== "script-qr" && !hadPendingScans && this._pendingScans.length)) this._scanHistoryTab = this._pendingScans.length ? "queue" : "history";
       if (this._scanHistoryTab === "queue" && !this._pendingScans.length) this._scanHistoryTab = "history";
       const historyPages = Math.max(1, Math.ceil(this._scanHistoryTotal / this._scanHistoryPageSize));
       if (this._scanHistoryPage > historyPages) this._scanHistoryPage = historyPages;
@@ -1343,7 +1356,7 @@ class HaListManagerPanel extends HTMLElement {
       const detail = favorite.tab === "items" ? haListManagerPanelText("ui.entries", {}, this._hass) : haListManagerPanelText("ui.overview", {}, this._hass);
       return { title: list.name, subtitle: `${LIST_TYPES(this._hass)[list.list_type]?.label || haListManagerPanelText("ui.list", {}, this._hass)} · ${detail}`, icon: list.icon || "mdi:format-list-bulleted" };
     }
-    const tabNames = { global: haListManagerPanelText("ui.global", {}, this._hass), shopping: haListManagerPanelText("ui.shopping_list", {}, this._hass), inventory: haListManagerPanelText("ui.inventory", {}, this._hass), todo: haListManagerPanelText("ui.todo", {}, this._hass), specific: haListManagerPanelText("ui.specific", {}, this._hass), dynamic: haListManagerPanelText("ui.dynamic", {}, this._hass), queue: haListManagerPanelText("ui.scan_queue", {}, this._hass), history: haListManagerPanelText("ui.history", {}, this._hass), devices: haListManagerPanelText("ui.devices", {}, this._hass), simulation: haListManagerPanelText("scanner.simulation", {}, this._hass), profiles: haListManagerPanelText("ui.delivery_targets", {}, this._hass), assignments: haListManagerPanelText("ui.assign_lists", {}, this._hass) };
+    const tabNames = { global: haListManagerPanelText("ui.global", {}, this._hass), shopping: haListManagerPanelText("ui.shopping_list", {}, this._hass), inventory: haListManagerPanelText("ui.inventory", {}, this._hass), todo: haListManagerPanelText("ui.todo", {}, this._hass), specific: haListManagerPanelText("ui.specific", {}, this._hass), dynamic: haListManagerPanelText("ui.dynamic", {}, this._hass), queue: haListManagerPanelText("ui.scan_queue", {}, this._hass), history: haListManagerPanelText("ui.history", {}, this._hass), devices: haListManagerPanelText("ui.devices", {}, this._hass), simulation: haListManagerPanelText("scanner.simulation", {}, this._hass), "script-qr": haListManagerPanelText("script_qr.title", {}, this._hass), profiles: haListManagerPanelText("ui.delivery_targets", {}, this._hass), assignments: haListManagerPanelText("ui.assign_lists", {}, this._hass) };
     const sections = {
       lists: [haListManagerPanelText("ui.lists", {}, this._hass), "mdi:format-list-bulleted"], products: [haListManagerPanelText("ui.products", {}, this._hass), "mdi:barcode-scan"], categories: [haListManagerPanelText("ui.categories", {}, this._hass), "mdi:shape-outline"], labels: [haListManagerPanelText("ui.labels", {}, this._hass), "mdi:label-multiple-outline"], chips: [haListManagerPanelText("ui.chips_and_templates", {}, this._hass), "mdi:gesture-tap-button"], dishes: [haListManagerPanelText("recipes.dishes", {}, this._hass), "mdi:food-variant"], inventory: [haListManagerPanelText("ui.inventory", {}, this._hass), "mdi:package-variant-closed"], entity_history: [haListManagerPanelText("ui.entity_inventory", {}, this._hass), "mdi:database-clock-outline"], history: [haListManagerPanelText("ui.scanner", {}, this._hass), "mdi:barcode-scan"], notifications: [haListManagerPanelText("ui.notifications", {}, this._hass), "mdi:bell-outline"], alexa: [haListManagerPanelText("alexa.title", {}, this._hass), "mdi:microphone-message"], settings: [haListManagerPanelText("ui.settings", {}, this._hass), "mdi:cog-outline"], backup: [haListManagerPanelText("backup.title", {}, this._hass), "mdi:database-export-outline"], statistics: [haListManagerPanelText("ui.statistics", {}, this._hass), "mdi:chart-box-outline"],
     };
@@ -1438,7 +1451,7 @@ class HaListManagerPanel extends HTMLElement {
     }
     if (favorite.section === "alexa") this._loadAlexa();
     if (favorite.section === "products" && !this._productsLoaded) this._loadProducts();
-    if (favorite.section === "history" && !this._scanHistoryLoaded) this._loadScanHistory();
+    if (favorite.section === "history") this._loadScannerSection();
     if (favorite.section === "backup") this._loadDataBackupInfo();
   }
 
@@ -2498,10 +2511,10 @@ class HaListManagerPanel extends HTMLElement {
     if (this._scanHistoryLoading && !this._scanHistoryLoaded) return this._loadingCard(haListManagerPanelText("scanner.loading_history", {}, this._hass));
     const rows = this._scanHistory.map((record) => {
       const list = this._findList(record.list_id);
-      const action = (["todo_now", "todo_next", "todo_done", "todo_checked"].includes(record.action) ? haListManagerPanelText(({todo_now:"todoqr.action_now",todo_next:"todoqr.action_next",todo_done:"todoqr.action_done",todo_checked:"todoqr.action_checked"})[record.action], {}, this._hass) : "") || SCANNER_ACTIONS(this._hass)[record.action]?.label || (record.action === "product" ? haListManagerPanelText("product_scan.review_action",{},this._hass) : record.action) || haListManagerPanelText("ui.no_target", {}, this._hass);
+      const action = record.action === "script_qr" ? haListManagerPanelText("script_qr.history", {}, this._hass) : (["todo_now", "todo_next", "todo_done", "todo_checked"].includes(record.action) ? haListManagerPanelText(({todo_now:"todoqr.action_now",todo_next:"todoqr.action_next",todo_done:"todoqr.action_done",todo_checked:"todoqr.action_checked"})[record.action], {}, this._hass) : "") || SCANNER_ACTIONS(this._hass)[record.action]?.label || (record.action === "product" ? haListManagerPanelText("product_scan.review_action",{},this._hass) : record.action) || haListManagerPanelText("ui.no_target", {}, this._hass);
       const stock = record.stock_before === null || record.stock_after === null ? "" : `<span>${haListManagerPanelText("ui.stock_change", {p0:(record.stock_before), p1:(record.stock_after)}, this._hass)}</span>`;
       const tone = ["success", "resolved"].includes(record.status) ? "success" : ["queued", "offered", "needs_input", "not_found", "processing"].includes(record.status) ? "warning" : ["ignored", "dismissed"].includes(record.status) ? "neutral" : "error";
-      return `<article class="history-row"><span class="history-status ${tone}"><ha-icon icon="mdi:${tone === "success" ? "check-circle-outline" : tone === "warning" ? "pencil-clock-outline" : tone === "neutral" ? "minus-circle-outline" : "alert-circle-outline"}"></ha-icon></span><div class="history-main"><strong>${this._escape(record.product_name || `EAN ${record.ean}`)}</strong><small>${this._escape(this._formatScanTime(record.scanned_at))} · ${this._escape(record.scanner_name || (record.source === "todo_camera" ? haListManagerPanelText("todoqr.camera", {}, this._hass) : record.source === "simulation" ? haListManagerPanelText("scanner.simulation", {}, this._hass) : record.scanner_address || haListManagerPanelText("scanner.unknown", {}, this._hass)))}</small><span>${this._escape(`${action}${list ? ` · ${list.name}` : ""}`)}</span>${stock}${record.message ? `<em>${this._escape(record.message)}</em>` : ""}</div><code>${this._escape(record.ean)}</code></article>`;
+      return `<article class="history-row"><span class="history-status ${tone}"><ha-icon icon="mdi:${tone === "success" ? "check-circle-outline" : tone === "warning" ? "pencil-clock-outline" : tone === "neutral" ? "minus-circle-outline" : "alert-circle-outline"}"></ha-icon></span><div class="history-main"><strong>${this._escape(record.product_name || (record.action === "script_qr" ? action : `EAN ${record.ean}`))}</strong><small>${this._escape(this._formatScanTime(record.scanned_at))} · ${this._escape(record.scanner_name || (record.source === "todo_camera" ? haListManagerPanelText("todoqr.camera", {}, this._hass) : record.source === "simulation" ? haListManagerPanelText("scanner.simulation", {}, this._hass) : record.scanner_address || haListManagerPanelText("scanner.unknown", {}, this._hass)))}</small><span>${this._escape(`${action}${list ? ` · ${list.name}` : ""}`)}</span>${stock}${record.message ? `<em>${this._escape(record.message)}</em>` : ""}</div><code>${this._escape(record.ean)}</code></article>`;
     }).join("");
     const queueStart = (this._scanQueuePage - 1) * this._scanQueuePageSize;
     const visiblePendingScans = this._pendingScans.slice(queueStart, queueStart + this._scanQueuePageSize);
@@ -2512,10 +2525,10 @@ class HaListManagerPanel extends HTMLElement {
     }).join("");
     const queueContent = pendingRows ? `<ha-card class="list-card history-card">${pendingRows}</ha-card>${this._renderScanPagination("queue", this._pendingScans.length, this._scanQueuePage, this._scanQueuePageSize)}` : `<ha-card class="empty-state"><ha-icon icon="mdi:tray-check"></ha-icon><h3>${haListManagerPanelText("scanner.no_open_scans", {}, this._hass)}</h3><p>${haListManagerPanelText("help.scanner_pending_queue", {}, this._hass)}</p></ha-card>`;
     const historyContent = rows ? `<ha-card class="list-card history-card">${rows}</ha-card>${this._renderScanPagination("history", this._scanHistoryTotal, this._scanHistoryPage, this._scanHistoryPageSize)}` : `<ha-card class="empty-state"><ha-icon icon="mdi:history"></ha-icon><h3>${haListManagerPanelText("ui.no_scans_yet", {}, this._hass)}</h3><p>${haListManagerPanelText("help.scanner_history_sources", {}, this._hass)}</p></ha-card>`;
-    const activeTab = ["queue", "history", "devices", "simulation"].includes(this._scanHistoryTab) ? this._scanHistoryTab : "history";
+    const activeTab = ["queue", "history", "devices", "simulation", "script-qr"].includes(this._scanHistoryTab) ? this._scanHistoryTab : "history";
     const tab = (id, icon, label) => `<button type="button" class="${activeTab === id ? "active" : ""}" data-history-tab="${id}" role="tab" aria-selected="${activeTab === id}"><ha-icon icon="${icon}"></ha-icon>${label}</button>`;
-    const tabs = `<div class="scan-history-tabs" role="tablist">${tab("queue", "mdi:tray-alert", haListManagerPanelText("scanner.queue_with_suffix", {p0:(this._pendingScans.length ? ` (${this._pendingScans.length})` : "")}, this._hass))}${tab("history", "mdi:history", haListManagerPanelText("ui.history", {}, this._hass))}${tab("devices", "mdi:barcode-scan", haListManagerPanelText("ui.devices", {}, this._hass))}${tab("simulation", "mdi:test-tube", haListManagerPanelText("scanner.simulation", {}, this._hass))}</div>`;
-    const content = activeTab === "queue" ? queueContent : activeTab === "history" ? historyContent : activeTab === "devices" ? this._renderScannerDevices() : this._renderScannerSimulation();
+    const tabs = `<div class="scan-history-tabs" role="tablist">${tab("queue", "mdi:tray-alert", haListManagerPanelText("scanner.queue_with_suffix", {p0:(this._pendingScans.length ? ` (${this._pendingScans.length})` : "")}, this._hass))}${tab("history", "mdi:history", haListManagerPanelText("ui.history", {}, this._hass))}${tab("devices", "mdi:barcode-scan", haListManagerPanelText("ui.devices", {}, this._hass))}${tab("script-qr", "mdi:qrcode", haListManagerPanelText("script_qr.title", {}, this._hass))}${tab("simulation", "mdi:test-tube", haListManagerPanelText("scanner.simulation", {}, this._hass))}</div>`;
+    const content = activeTab === "queue" ? queueContent : activeTab === "history" ? historyContent : activeTab === "devices" ? this._renderScannerDevices() : activeTab === "script-qr" ? this._renderScriptQr() : this._renderScannerSimulation();
     const refresh = ["queue", "history"].includes(activeTab) ? `<button class="ha-button" type="button" data-refresh-history><ha-icon icon="mdi:refresh"></ha-icon>${haListManagerPanelText("ui.refresh", {}, this._hass)}</button>` : "";
     return `<section class="content-header with-action"><div class="heading-wrap"><ha-icon icon="mdi:barcode-scan"></ha-icon><div><h2>${haListManagerPanelText("ui.scanner", {}, this._hass)}</h2><p>${haListManagerPanelText("help.scanner_overview", {}, this._hass)}</p></div></div>${refresh}</section>${this._inlineError()}${this._pendingScanNotice ? `<p class="pending-scan-notice" role="status">${this._escape(this._pendingScanNotice)}</p>` : ""}${tabs}${content}`;
   }
@@ -3560,10 +3573,128 @@ class HaListManagerPanel extends HTMLElement {
         <div class="setting-row checkbox-only"><ha-checkbox data-setting-brand aria-label="${haListManagerPanelText("products.append_brand", {}, this._hass)}"></ha-checkbox><span><strong>${haListManagerPanelText("products.append_brand", {}, this._hass)}</strong><small>${haListManagerPanelText("help.append_brand_if_missing", {}, this._hass)}</small></span></div>
         <div class="setting-row checkbox-only"><ha-checkbox data-setting-quantity aria-label="${haListManagerPanelText("ui.append_package_quantity", {}, this._hass)}"></ha-checkbox><span><strong>${haListManagerPanelText("ui.append_package_quantity", {}, this._hass)}</strong><small>${haListManagerPanelText("ui.product_name_example", {}, this._hass)}</small></span></div>
       </ha-card>
+      ${this._renderProductSourceSettings()}
       <ha-card class="settings-card scanner-defaults"><h3>${haListManagerPanelText("ui.default_scanner_target", {}, this._hass)}</h3><p class="field-help">${haListManagerPanelText("help.default_inventory_target", {}, this._hass)}</p><div class="field-grid scanner-default-grid"><ha-select data-setting-scanner-list></ha-select><ha-select data-setting-scanner-action></ha-select></div></ha-card>
       <ha-card class="settings-card"><h3>${haListManagerPanelText("ui.tandoor_recipe_source", {}, this._hass)}</h3><p class="field-help">${haListManagerPanelText("help.tandoor_credentials", {}, this._hass)}</p><label class="field"><span>${haListManagerPanelText("recipes.tandoor_url", {}, this._hass)}</span><input type="url" data-setting-tandoor-url value="${this._escape(this._settings.tandoor_url || "")}" placeholder="https://rezepte.example.local" autocomplete="url"></label><label class="field"><span>${haListManagerPanelText("ui.api_token", {}, this._hass)}</span><input type="password" data-setting-tandoor-token value="" placeholder="${this._settings.tandoor_token_configured ? haListManagerPanelText("ui.token_saved_placeholder", {}, this._hass) : haListManagerPanelText("ui.tandoor_api_token", {}, this._hass)}" autocomplete="new-password"></label><div class="settings-inline-actions"><button class="ha-button" type="button" data-test-tandoor ${this._busy ? "disabled" : ""}><ha-icon icon="mdi:connection"></ha-icon>${haListManagerPanelText("ui.test_connection", {}, this._hass)}</button><a class="ha-button" href="https://github.com/TandoorRecipes/recipes" target="_blank" rel="noopener noreferrer"><ha-icon icon="mdi:open-in-new"></ha-icon>${haListManagerPanelText("ui.tandoor_recipe_source", {}, this._hass)}</a>${this._tandoorTestStatus ? `<span class="field-help settings-test-status">${this._escape(this._tandoorTestStatus)}</span>` : ""}</div></ha-card>
       <div class="settings-actions"><button class="ha-button primary" type="button" data-save-settings ${this._busy ? "disabled" : ""}>${this._busy ? haListManagerPanelText("ui.save_pending", {}, this._hass) : haListManagerPanelText("ui.save_settings", {}, this._hass)}</button></div>
       <ha-card class="settings-card frontend-refresh-card"><h3>${haListManagerPanelText("frontend_update.title", {}, this._hass)}</h3><p class="field-help">${haListManagerPanelText("frontend_update.help", {}, this._hass)}</p><button class="ha-button primary" type="button" data-reload-frontend><ha-icon icon="mdi:reload"></ha-icon>${haListManagerPanelText("frontend_update.reload_ui", {}, this._hass)}</button></ha-card>`;
+  }
+
+  _renderProductSourceSettings() {
+    const t = key => haListManagerPanelText(`product_source.${key}`, {}, this._hass);
+    const custom = this._settings.product_data_source === "custom";
+    return `<ha-card class="settings-card product-source-settings"><h3>${t("title")}</h3><p class="field-help">${t("help")}</p>
+      <label class="field"><ha-select data-setting-product-source></ha-select></label>
+      ${custom ? `<p class="field-help">${t("custom_help")}</p><p class="field-help product-source-example">${t("example_prefix")} <a href="https://github.com/Nisbo/off-proxy-server" target="_blank" rel="noopener noreferrer" aria-label="${t("example_link_label")}">OFF Proxy Server<ha-icon icon="mdi:open-in-new" aria-hidden="true"></ha-icon></a> ${t("example_suffix")}</p><label class="field"><span>${t("url")}</span><input type="url" data-setting-product-url value="${this._escape(this._settings.product_api_url || "")}" placeholder="http://server:8097" autocomplete="url"><small class="field-help">${t("url_help")}</small></label>
+      <label class="field"><span>${t("key")}</span><div class="product-source-key"><input type="${this._productKeyVisible ? "text" : "password"}" data-setting-product-key value="${this._escape(this._settings.product_api_key || "")}" placeholder="${this._settings.product_api_key_configured ? t("key_saved") : t("key_empty")}" autocomplete="new-password"><button class="ha-button icon-only" type="button" data-product-key-toggle aria-pressed="${Boolean(this._productKeyVisible)}" aria-label="${t(this._productKeyVisible ? "hide_key" : "show_key")}" ${this._busy ? "disabled" : ""}><ha-icon icon="mdi:${this._productKeyVisible ? "eye-off" : "eye"}"></ha-icon></button><button class="ha-button" type="button" data-product-key-clear ${this._busy ? "disabled" : ""}>${t("clear_key")}</button></div><small class="field-help">${t("key_help")}</small></label>
+      <div class="setting-row checkbox-only"><ha-checkbox data-setting-product-fallback-missing></ha-checkbox><span><strong>${t("fallback_missing")}</strong><small>${t("fallback_missing_help")}</small></span></div>
+      <div class="setting-row checkbox-only"><ha-checkbox data-setting-product-fallback-error></ha-checkbox><span><strong>${t("fallback_error")}</strong><small>${t("fallback_error_help")}</small></span></div>` : ""}
+      <p class="field-help">${t("images")}</p><div class="settings-inline-actions"><button class="ha-button" type="button" data-test-product-source ${this._busy ? "disabled" : ""}><ha-icon icon="mdi:connection"></ha-icon>${haListManagerPanelText("ui.test_connection", {}, this._hass)}</button></div><p data-product-source-status class="field-help product-source-status ${this._productSourceTone || ""}" role="${this._productSourceTone === "error" ? "alert" : "status"}" ${this._productSourceStatus ? "" : "hidden"}>${this._escape(this._productSourceStatus || "")}</p></ha-card>`;
+  }
+
+  _productSourceValues() {
+    return {product_data_source:this._settings.product_data_source || "off",
+      product_api_url:String(this._settings.product_api_url || "").trim() || null,
+      ...(Object.hasOwn(this._settings, "product_api_key") ? {product_api_key:this._settings.product_api_key || null} : {}),
+      product_fallback_missing:Boolean(this._settings.product_fallback_missing),
+      product_fallback_error:Boolean(this._settings.product_fallback_error)};
+  }
+
+  _updateProductSourceKey() {
+    // Keep the input and its surrounding settings/scroll containers in place.
+    const input = this.shadowRoot.querySelector("[data-setting-product-key]");
+    if (input) {
+      input.type = this._productKeyVisible ? "text" : "password";
+      const value = this._settings.product_api_key || "";
+      if (input.value !== value) input.value = value;
+      input.placeholder = haListManagerPanelText(this._settings.product_api_key_configured
+        ? "product_source.key_saved" : "product_source.key_empty", {}, this._hass);
+    }
+    const button = this.shadowRoot.querySelector("[data-product-key-toggle]");
+    if (button) {
+      button.setAttribute("aria-label", haListManagerPanelText(this._productKeyVisible
+        ? "product_source.hide_key" : "product_source.show_key", {}, this._hass));
+      button.setAttribute("aria-pressed", String(Boolean(this._productKeyVisible)));
+      button.setAttribute("aria-busy", String(this._busy));
+      button.querySelector("ha-icon")?.setAttribute("icon", this._productKeyVisible ? "mdi:eye-off" : "mdi:eye");
+    }
+  }
+
+  async _toggleProductSourceKey() {
+    if (this._busy) return;
+    if (!this._productKeyVisible && !Object.hasOwn(this._settings, "product_api_key") && this._settings.product_api_key_configured) {
+      const settings = this._settings, url = settings.product_api_url, connection = this._hass.connection, request = {};
+      this._productSourceRequest = request;
+      this._busy = true;
+      this._updateProductSourceKey();
+      try {
+        const result = await haListManagerPanelTextRequest(this._hass, {type:`${API}/product_source/key`});
+        if (this._productSourceRequest !== request || this.isConnected === false || this._settings !== settings || settings.product_api_url !== url || this._hass.connection !== connection || Object.hasOwn(settings, "product_api_key")) return;
+        settings.product_api_key = result.key;
+      } catch (error) {
+        if (this._productSourceRequest === request && this.isConnected !== false) {
+          this._productSourceTone = "error";
+          this._productSourceStatus = this._formatError(error);
+        }
+        return;
+      } finally {
+        this._busy = false;
+        if (this.isConnected !== false) {
+          this._updateProductSourceKey();
+          this._updateProductSourceStatus();
+        }
+      }
+    }
+    this._productKeyVisible = !this._productKeyVisible;
+    if (this.isConnected !== false) this._updateProductSourceKey();
+  }
+
+  _clearProductSourceStatus() {
+    this._productSourceRequest = null;
+    this._productSourceStatus = "";
+    this._productSourceTone = "";
+    this._updateProductSourceStatus();
+  }
+
+  _updateProductSourceStatus() {
+    // Retain the settings DOM, focus and scroll containers during the request.
+    const status = this.shadowRoot.querySelector("[data-product-source-status]");
+    if (status) {
+      status.textContent = this._productSourceStatus || "";
+      status.hidden = !this._productSourceStatus;
+      status.className = `field-help product-source-status ${this._productSourceTone || ""}`;
+      status.setAttribute("role", this._productSourceTone === "error" ? "alert" : "status");
+    }
+    this.shadowRoot.querySelectorAll("[data-test-product-source],[data-save-settings],[data-product-key-toggle],[data-product-key-clear]").forEach(button => {
+      button.disabled = this._busy;
+    });
+    this.shadowRoot.querySelector("[data-test-product-source]")?.setAttribute("aria-busy", String(this._busy));
+  }
+
+  async _testProductSource() {
+    if (this._busy) return;
+    const request = {};
+    this._productSourceRequest = request;
+    this._busy = true;
+    this._productSourceTone = "pending";
+    this._productSourceStatus = haListManagerPanelText("ui.checking_connection", {}, this._hass);
+    this._updateProductSourceStatus();
+    try {
+      const values = this._productSourceValues();
+      await haListManagerPanelTextRequest(this._hass, {type:`${API}/product_source/test`, product_data_source:values.product_data_source, product_api_url:values.product_api_url, ...(Object.hasOwn(values,"product_api_key") ? {product_api_key:values.product_api_key} : {})});
+      if (this._productSourceRequest === request) {
+        this._productSourceTone = "success";
+        this._productSourceStatus = haListManagerPanelText("product_source.connected", {}, this._hass);
+      }
+    } catch (error) {
+      if (this._productSourceRequest === request) {
+        this._productSourceTone = "error";
+        this._productSourceStatus = this._formatError(error);
+      }
+    } finally {
+      this._busy = false;
+      if (this.isConnected !== false) this._updateProductSourceStatus();
+    }
   }
 
   _renderNotifications() {
@@ -3684,7 +3815,7 @@ class HaListManagerPanel extends HTMLElement {
         <img src="${this._escape(this._openFoodFactsImageUrl(this._dialog.record.image_url, "400"))}" alt="${haListManagerPanelText("products.image_alt", {p0:(this._escape(this._dialog.record.name))}, this._hass)}">
       </section></div>`;
     }
-    if (["delete-list", "delete-item", "delete-product", "delete-category", "delete-label", "delete-chip", "delete-dish", "delete-inventory", "delete-inventory-group", "delete-scanner", "delete-notification", "delete-category-rule"].includes(this._dialog.kind)) {
+    if (["delete-list", "delete-item", "delete-product", "delete-category", "delete-label", "delete-chip", "delete-dish", "delete-inventory", "delete-inventory-group", "delete-scanner", "delete-script-qr", "delete-notification", "delete-category-rule"].includes(this._dialog.kind)) {
       const isList = this._dialog.kind === "delete-list";
       const isProduct = this._dialog.kind === "delete-product";
       const isCategory = this._dialog.kind === "delete-category";
@@ -3695,6 +3826,7 @@ class HaListManagerPanel extends HTMLElement {
       const isInventory = this._dialog.kind === "delete-inventory";
       const isInventoryGroup = this._dialog.kind === "delete-inventory-group";
       const isScanner = this._dialog.kind === "delete-scanner";
+      const isScriptQr = this._dialog.kind === "delete-script-qr";
       const isNotification = this._dialog.kind === "delete-notification";
       const isBringList = isList && this._dialog.record.list_type === "bring";
       const label = isList ? haListManagerPanelText("ui.list", {}, this._hass) : isProduct ? haListManagerPanelText("ui.product", {}, this._hass) : isCategory ? haListManagerPanelText("ui.category", {}, this._hass) : isCategoryRule ? haListManagerPanelText("ui.rule", {}, this._hass) : isLabel ? haListManagerPanelText("ui.label", {}, this._hass) : isChip ? haListManagerPanelText("ui.chip", {}, this._hass) : isDish ? haListManagerPanelText("ui.dish", {}, this._hass) : isInventory ? haListManagerPanelText("ui.inventory_assignment", {}, this._hass) : isInventoryGroup ? haListManagerPanelText("inventory.group", {}, this._hass) : isScanner ? haListManagerPanelText("ui.scanner", {}, this._hass) : isNotification ? haListManagerPanelText("notifications.delivery_target", {}, this._hass) : haListManagerPanelText("ui.entry", {}, this._hass);
@@ -3703,7 +3835,7 @@ class HaListManagerPanel extends HTMLElement {
         ? (linkedChipCount === 1 ? (" " + haListManagerPanelText("chips.product_unlinked_one", {count: linkedChipCount}, this._hass)) : (" " + haListManagerPanelText("chips.product_unlinked_many", {count: linkedChipCount}, this._hass)))
         : "";
       return `<div class="dialog-backdrop" data-close-dialog><section class="dialog" role="dialog" aria-modal="true" data-dialog-panel>
-        ${this._dialogHeader(isInventoryGroup ? haListManagerPanelText("inventory.confirm_dissolve_group", {}, this._hass) : haListManagerPanelText("ui.confirm_delete_named", {p0:(label)}, this._hass))}<p>${isInventoryGroup ? haListManagerPanelText("ui.dissolve_group_warning", {p0:(this._escape(this._dialog.record.name))}, this._hass) : isBringList ? haListManagerPanelText("bring.unlink_effect", {p0:(this._escape(this._dialog.record.name))}, this._hass) : haListManagerPanelText("ui.confirm_permanent_remove_named", {p0:(this._escape(isInventory ? this._dialog.record.product.name : this._dialog.record.name)), p1:(isList ? (" " + haListManagerPanelText("ui.delete_list_items_warning", {}, this._hass)) : isCategory ? (" " + haListManagerPanelText("categories.delete_assignment_impact", {}, this._hass)) : isCategoryRule ? (" " + haListManagerPanelText("categories.delete_rule_impact", {}, this._hass)) : isInventory ? (" " + haListManagerPanelText("inventory.product_record_kept", {}, this._hass)) : productChipNotice)}, this._hass)}</p>
+        ${this._dialogHeader(isScriptQr ? haListManagerPanelText("script_qr.delete", {}, this._hass) : isInventoryGroup ? haListManagerPanelText("inventory.confirm_dissolve_group", {}, this._hass) : haListManagerPanelText("ui.confirm_delete_named", {p0:(label)}, this._hass))}<p>${isScriptQr ? haListManagerPanelText("script_qr.delete_help", {name: this._escape(this._scriptQrName(this._dialog.record))}, this._hass) : isInventoryGroup ? haListManagerPanelText("ui.dissolve_group_warning", {p0:(this._escape(this._dialog.record.name))}, this._hass) : isBringList ? haListManagerPanelText("bring.unlink_effect", {p0:(this._escape(this._dialog.record.name))}, this._hass) : haListManagerPanelText("ui.confirm_permanent_remove_named", {p0:(this._escape(isInventory ? this._dialog.record.product.name : this._dialog.record.name)), p1:(isList ? (" " + haListManagerPanelText("ui.delete_list_items_warning", {}, this._hass)) : isCategory ? (" " + haListManagerPanelText("categories.delete_assignment_impact", {}, this._hass)) : isCategoryRule ? (" " + haListManagerPanelText("categories.delete_rule_impact", {}, this._hass)) : isInventory ? (" " + haListManagerPanelText("inventory.product_record_kept", {}, this._hass)) : productChipNotice)}, this._hass)}</p>
         ${this._dialogError()}
         <div class="dialog-actions"><button class="ha-button destructive" data-confirm-delete ${this._busy ? "disabled" : ""}>${this._busy ? haListManagerPanelText("ui.processing", {}, this._hass) : isInventoryGroup ? haListManagerPanelText("ui.dissolve_group", {}, this._hass) : haListManagerPanelText("ui.delete", {}, this._hass)}</button><button class="ha-button" data-cancel-dialog>${haListManagerPanelText("ui.cancel", {}, this._hass)}</button></div>
       </section></div>`;
@@ -3727,6 +3859,7 @@ class HaListManagerPanel extends HTMLElement {
     if (this._dialog.kind === "inventory-group-editor") return this._renderInventoryGroupDialog();
     if (this._dialog.kind === "inventory-restock-settings") return this._renderInventoryRestockSettingsDialog();
     if (this._dialog.kind === "scanner-editor") return this._renderScannerDialog();
+    if (["script-qr-create", "script-qr-view"].includes(this._dialog.kind)) return this._renderScriptQrDialog();
     if (this._dialog.kind === "notification-editor") return this._renderNotificationDialog();
     return this._renderItemDialog();
   }
@@ -4085,6 +4218,167 @@ class HaListManagerPanel extends HTMLElement {
     return `<div class="dialog-backdrop" data-close-dialog><section class="dialog inventory-group-dialog" role="dialog" aria-modal="true" data-dialog-panel>${this._dialogHeader(this._dialog.record ? haListManagerPanelText("ui.edit_group", {}, this._hass) : haListManagerPanelText("ui.create_group", {}, this._hass))}<label class="field"><span>${haListManagerPanelText("ui.group_name", {}, this._hass)}</span><input type="text" maxlength="200" data-inventory-group-name value="${this._escape(draft.name)}" autocomplete="off"></label><div class="inventory-group-fields"><label class="field"><span>${haListManagerPanelText("ui.minimum_stock_optional", {}, this._hass)}</span><input type="number" min="0" max="1000000" step="1" data-inventory-group-minimum value="${this._escape(draft.minimum_stock)}"></label>${this._inventoryGroupCategoryPickerMarkup()}</div>${this._inventoryRestockRuleMarkup(draft, haListManagerPanelText("inventory.group", {}, this._hass))}<fieldset class="group-member-list"><legend>${haListManagerPanelText("ui.member_count", {p0:(selected.size)}, this._hass)}</legend><div class="selected-group-members">${memberRows}</div><h4 class="group-add-title">${haListManagerPanelText("ui.add_members", {}, this._hass)}</h4><div class="group-move-warning"><ha-icon icon="mdi:alert-outline"></ha-icon><span>${haListManagerPanelText("help.single_group_membership", {}, this._hass)}</span><label class="show-grouped-toggle"><input type="checkbox" data-admin-show-grouped ${this._inventoryGroupShowGrouped ? "checked" : ""}>${haListManagerPanelText("ui.show_grouped_items", {}, this._hass)}</label></div><label class="group-member-search"><ha-icon icon="mdi:magnify"></ha-icon><input type="text" value="${this._escape(this._inventoryGroupSearch)}" placeholder="${haListManagerPanelText("ui.search_item_brand_ean", {}, this._hass)}" autocomplete="off" data-inventory-group-search></label><div class="group-member-scroll">${choices}${resultNote}</div></fieldset>${this._dialogError()}<div class="dialog-actions"><button class="ha-button primary" data-save-inventory-group ${this._busy ? "disabled" : ""}>${this._busy ? haListManagerPanelText("ui.save_pending", {}, this._hass) : haListManagerPanelText("ui.save", {}, this._hass)}</button><button class="ha-button" data-cancel-dialog>${haListManagerPanelText("ui.cancel", {}, this._hass)}</button></div></section>${moveConfirmation}</div>`;
   }
 
+  _renderScriptQr() {
+    const {codes, loading} = this._scriptQr;
+    const t = (key) => haListManagerPanelText(`script_qr.${key}`, {}, this._hass);
+    const rows = codes.map(record => `
+      <article class="scanner-row script-qr-row">
+        <span class="scanner-icon"><ha-icon icon="mdi:qrcode"></ha-icon></span>
+        <button type="button" class="scanner-open" data-open-script-qr="${this._escape(record.id)}">
+          <strong>${this._escape(this._scriptQrName(record))}</strong>
+          <small>${this._escape(record.script_entity)}</small>
+          ${record.identifier ? `<span>${t("identifier_label")} · ${this._escape(record.identifier)}</span>` : ""}
+        </button>
+        <div class="row-actions"><button class="icon-button danger" type="button" data-remove-script-qr="${this._escape(record.id)}" title="${t("delete")}" aria-label="${t("delete")}"><ha-icon icon="mdi:delete-outline"></ha-icon></button></div>
+      </article>`).join("");
+    return `
+      <section class="content-header with-action scanner-heading">
+        <div><h3>${t("saved")}</h3><p>${t("help")}</p></div>
+        <button class="ha-button primary" type="button" data-add-script-qr ${loading ? "disabled" : ""}><ha-icon icon="mdi:plus"></ha-icon>${t("new")}</button>
+      </section>
+      ${rows ? `<ha-card class="list-card">${rows}</ha-card>` : loading ? this._loadingCard(t("loading")) : `<ha-card class="empty-state compact"><ha-icon icon="mdi:qrcode"></ha-icon><h3>${t("empty")}</h3></ha-card>`}`;
+  }
+
+  _scriptQrName(record) {
+    return this._hass.states?.[record.script_entity]?.attributes.friendly_name || record.script_entity;
+  }
+
+  _renderScriptQrDialog() {
+    const {record, draft} = this._dialog;
+    const t = (key, args = {}) => haListManagerPanelText(`script_qr.${key}`, args, this._hass);
+    const identifierHelp = t("identifier_help", {variable: "<code>identifier</code>", example: "<code>{{ identifier }}</code>"});
+    const close = (key) => `<button class="ha-button" type="button" data-cancel-dialog>${haListManagerPanelText(key, {}, this._hass)}</button>`;
+    const content = record ? `
+      <p class="field-help script-qr-detail">${this._escape(record.script_entity)}</p>
+      ${record.identifier ? `<p class="script-qr-detail"><strong>${t("identifier_label")}</strong> · ${this._escape(record.identifier)}</p>` : ""}
+      <div data-script-qr-image class="script-qr-image"></div>
+      <p class="field-help" data-script-qr-draw-error role="status"></p>
+      <div class="dialog-actions">
+        <a class="ha-button primary" data-script-qr-download download="ha-list-manager-${this._escape(record.id)}.png" hidden>${t("download")}</a>
+        ${close("ui.close")}
+      </div>` : `
+      <label class="field"><span>${haListManagerPanelText("scripts.script", {}, this._hass)}</span>
+        <select data-script-qr-entity required ${this._busy ? "disabled" : ""}><option value="">${t("choose_script")}</option>${this._scriptQrOptions(draft.script_entity)}</select>
+      </label>
+      <label class="field"><span>${t("identifier")}</span><input type="text" maxlength="100" data-script-qr-identifier value="${this._escape(draft.identifier)}" aria-describedby="script-qr-identifier-help" ${this._busy ? "disabled" : ""}></label>
+      <p class="field-help" id="script-qr-identifier-help">${identifierHelp}</p>
+      <p class="field-help">${t("scan_variables", {scanner_id: "<code>{{ scanner_id }}</code>", scanner_name: "<code>{{ scanner_name }}</code>", scanned_at: "<code>{{ scanned_at }}</code>"})}</p>
+      ${this._dialogError()}
+      <div class="dialog-actions">
+        <button type="button" class="ha-button primary" data-script-qr-create ${this._busy || !draft.script_entity ? "disabled" : ""}>${t("create")}</button>
+        ${close("ui.cancel")}
+      </div>`;
+    return `<div class="dialog-backdrop" data-close-dialog><section class="dialog" role="dialog" aria-modal="true" data-dialog-panel>
+      ${this._dialogHeader(record ? this._scriptQrName(record) : t("new"))}
+      ${content}
+    </section></div>`;
+  }
+
+  _scriptQrOptions(selected) {
+    return Object.values(this._hass.states || {})
+      .filter(state => state.entity_id.startsWith("script."))
+      .map(state => ({id: state.entity_id, name: state.attributes.friendly_name || state.entity_id}))
+      .sort((left, right) => left.name.localeCompare(right.name) || left.id.localeCompare(right.id))
+      .map(({id, name}) => `<option value="${this._escape(id)}" ${id === selected ? "selected" : ""}>${this._escape(name)} · ${this._escape(id)}</option>`)
+      .join("");
+  }
+
+  _loadScannerSection() {
+    if (this._scanHistoryTab === "script-qr") this._loadScriptQr();
+    else if (!this._scanHistoryLoaded) this._loadScanHistory();
+    else this._render();
+  }
+
+  async _loadScriptQr() {
+    const dialog = this._scriptQr;
+    if (dialog.loading) return;
+    dialog.loading = true;
+    this._error = "";
+    this._render();
+    try {
+      const result = await haListManagerPanelTextRequest(this._hass, {type: `${API}/script_qr/list`});
+      dialog.codes = result.codes;
+    } catch (error) {
+      if (this._scriptQr === dialog && this._activeSection === "history" && this._scanHistoryTab === "script-qr") this._error = this._formatError(error);
+    } finally {
+      dialog.loading = false;
+      if (this.isConnected && this._scriptQr === dialog && this._activeSection === "history" && this._scanHistoryTab === "script-qr") this._render();
+    }
+  }
+
+  async _createScriptQr() {
+    const dialog = this._dialog;
+    if (this._busy || !dialog?.draft.script_entity) return;
+    const state = this._scriptQr;
+    await this._runDialogAction(async () => {
+      const result = await haListManagerPanelTextRequest(this._hass, {type: `${API}/script_qr/create`, ...dialog.draft});
+      if (this._scriptQr !== state) return;
+      state.codes = result.codes;
+      if (this._dialog === dialog) {
+        const record = state.codes.find(row => row.id === result.created_id);
+        this._dialog = record ? {kind: "script-qr-view", record} : null;
+      }
+    });
+  }
+
+  _bindScriptQr() {
+    const root = this.shadowRoot;
+    const state = this._scriptQr;
+    root.querySelector("[data-add-script-qr]")?.addEventListener("click", () => {
+      this._error = "";
+      this._dialog = {kind: "script-qr-create", draft: {script_entity: "", identifier: ""}};
+      this._render();
+    });
+    root.querySelectorAll("[data-open-script-qr]").forEach(button => button.addEventListener("click", () => {
+      const record = state.codes.find(row => row.id === button.dataset.openScriptQr);
+      if (!record) return;
+      this._error = "";
+      this._dialog = {kind: "script-qr-view", record};
+      this._render();
+    }));
+    root.querySelectorAll("[data-remove-script-qr]").forEach(button => button.addEventListener("click", () => {
+      const record = state.codes.find(row => row.id === button.dataset.removeScriptQr);
+      if (record) this._openDeleteDialog("delete-script-qr", record);
+    }));
+    const dialog = this._dialog;
+    if (dialog?.kind === "script-qr-create") {
+      const create = root.querySelector("[data-script-qr-create]");
+      root.querySelector("[data-script-qr-entity]")?.addEventListener("change", event => {
+        dialog.draft.script_entity = event.target.value;
+        create.disabled = this._busy || !dialog.draft.script_entity;
+      });
+      root.querySelector("[data-script-qr-identifier]")?.addEventListener("input", event => { dialog.draft.identifier = event.target.value; });
+      create?.addEventListener("click", () => this._createScriptQr());
+    }
+    const image = root.querySelector("[data-script-qr-image]");
+    if (image && dialog?.kind === "script-qr-view") this._drawScriptQr(image, dialog.record.code);
+  }
+
+  async _drawScriptQr(image, code) {
+    try {
+      await globalThis.HaListManagerQrEncoder.load();
+      if (!image.isConnected) return;
+      new globalThis.QRCode(image, {text: code, width: 224, height: 224, correctLevel: globalThis.QRCode.CorrectLevel.M});
+      const qr = image.querySelector("canvas");
+      const download = this.shadowRoot.querySelector("[data-script-qr-download]");
+      if (qr && download) {
+        // The downloaded code needs the same white border as the preview.
+        const border = 32;
+        const png = document.createElement("canvas");
+        png.width = qr.width + 2 * border;
+        png.height = qr.height + 2 * border;
+        const context = png.getContext("2d");
+        context.fillStyle = "#fff";
+        context.fillRect(0, 0, png.width, png.height);
+        context.drawImage(qr, border, border);
+        download.href = png.toDataURL("image/png");
+        download.hidden = false;
+      }
+    } catch {
+      if (image.isConnected) this.shadowRoot.querySelector("[data-script-qr-draw-error]").textContent = haListManagerPanelText("script_qr.draw_error", {}, this._hass);
+    }
+  }
+
   _renderScannerDialog() {
     const draft = this._dialog.draft;
     return `<div class="dialog-backdrop" data-close-dialog><section class="dialog scanner-dialog" role="dialog" aria-modal="true" data-dialog-panel>${this._dialogHeader(this._dialog.record ? haListManagerPanelText("scanner.edit", {}, this._hass) : haListManagerPanelText("ui.create_scanner", {}, this._hass))}<label class="field"><span>${haListManagerPanelText("ui.name", {}, this._hass)}</span><input type="text" maxlength="100" data-scanner-name value="${this._escape(draft.name)}" placeholder="${haListManagerPanelText("scanner.name_example", {}, this._hass)}"></label><ha-select class="selector-field" data-scanner-source></ha-select>${draft.source_type === "mqtt" ? this._renderMqttScannerFields(draft.mqtt) : ["entity", "usb_mqtt"].includes(draft.source_type) ? this._renderEntityScannerFields(draft) : `<label class="field"><span>${haListManagerPanelText("ui.address", {}, this._hass)}</span><input type="text" maxlength="100" data-scanner-address value="${this._escape(draft.address)}" placeholder="AA:FC:87:59:04:38"></label>`}<label class="setting-row compact-setting"><ha-checkbox data-scanner-enabled></ha-checkbox><span><strong>${haListManagerPanelText("ui.scanner_enabled", {}, this._hass)}</strong><small>${haListManagerPanelText("help.disabled_scanner_events", {}, this._hass)}</small></span></label><ha-select class="selector-field" data-scanner-routing></ha-select>${draft.routing === "fixed" ? `<div class="scanner-route-fields"><ha-select data-scanner-list></ha-select><ha-select data-scanner-action></ha-select></div>` : `<p class="field-help">${haListManagerPanelText("help.active_inventory_target", {}, this._hass)}</p>`}${this._dialogError()}<div class="dialog-actions"><button class="ha-button primary" data-save-scanner ${this._busy ? "disabled" : ""}>${this._busy ? haListManagerPanelText("ui.save_pending", {}, this._hass) : haListManagerPanelText("ui.save", {}, this._hass)}</button><button class="ha-button" data-cancel-dialog>${haListManagerPanelText("ui.cancel", {}, this._hass)}</button></div></section></div>`;
@@ -4326,6 +4620,7 @@ class HaListManagerPanel extends HTMLElement {
       }
     });
     this._bindAlexaEvents();
+    this._bindScriptQr();
     this.shadowRoot.querySelectorAll("[data-list-script]").forEach(button => button.addEventListener("click", () => this._openListScript(button.dataset.listScript)));
     if (this._dialog?.kind === "list-script") {
       const dialog = this._dialog;
@@ -4389,7 +4684,7 @@ class HaListManagerPanel extends HTMLElement {
       else if (this._activeSection === "dishes" && !this._dishesLoaded) this._loadDishes();
       else if (this._activeSection === "inventory") this._loadInventory();
       else if (this._activeSection === "entity_history") this._render();
-      else if (this._activeSection === "history") this._loadScanHistory();
+      else if (this._activeSection === "history") this._loadScannerSection();
       else if (this._activeSection === "settings") {
         if (!this._settingsLoaded) this._loadSettings();
         else this._render();
@@ -4805,6 +5100,9 @@ class HaListManagerPanel extends HTMLElement {
       finally { button.disabled = false; }
     });
     this.shadowRoot.querySelector("[data-save-settings]")?.addEventListener("click", () => this._saveSettings());
+    this.shadowRoot.querySelector("[data-test-product-source]")?.addEventListener("click", () => this._testProductSource());
+    this.shadowRoot.querySelector("[data-product-key-toggle]")?.addEventListener("click", () => this._toggleProductSourceKey());
+    this.shadowRoot.querySelector("[data-product-key-clear]")?.addEventListener("click", () => { if (this._busy) return; this._settings.product_api_key = ""; this._settings.product_api_key_configured = false; this._productKeyVisible = false; this._clearProductSourceStatus(); this._updateProductSourceKey(); });
     this.shadowRoot.querySelector("[data-test-tandoor]")?.addEventListener("click", () => this._testTandoor());
     this.shadowRoot.querySelector("[data-save-category]")?.addEventListener("click", () => this._saveCategory());
     this.shadowRoot.querySelector("[data-save-category-rules-bulk]")?.addEventListener("click", () => this._saveCategoryRulesBulk());
@@ -4867,8 +5165,7 @@ class HaListManagerPanel extends HTMLElement {
     this.shadowRoot.querySelector("[data-run-simulation]")?.addEventListener("click", () => this._runScannerSimulation());
     this.shadowRoot.querySelectorAll("[data-history-tab]").forEach((button) => button.addEventListener("click", () => {
       this._scanHistoryTab = button.dataset.historyTab;
-      if (["queue", "history"].includes(this._scanHistoryTab) && !this._scanHistoryLoaded) this._loadScanHistory();
-      else this._render();
+      this._loadScannerSection();
     }));
     this.shadowRoot.querySelectorAll("[data-scan-page-size]").forEach((select) => select.addEventListener("change", async () => {
       const size = Number(select.value);
@@ -5343,6 +5640,15 @@ class HaListManagerPanel extends HTMLElement {
       const quantity = this.shadowRoot.querySelector("[data-setting-quantity]");
       if (brand) { brand.checked = this._settings.append_brand_to_product_name; brand.addEventListener("change", () => { this._settings.append_brand_to_product_name = brand.checked; }); }
       if (quantity) { quantity.checked = this._settings.append_quantity_to_product_name; quantity.addEventListener("change", () => { this._settings.append_quantity_to_product_name = quantity.checked; }); }
+      configureSelect("[data-setting-product-source]", haListManagerPanelText("product_source.source", {}, this._hass), [{value:"off",label:"Open Food Facts"},{value:"custom",label:haListManagerPanelText("product_source.custom", {}, this._hass)}], this._settings.product_data_source || "off", value => { this._settings.product_data_source = value; this._clearProductSourceStatus(); this._productKeyVisible = false; this._render(); });
+      const sourceUrl = this.shadowRoot.querySelector("[data-setting-product-url]");
+      const sourceKey = this.shadowRoot.querySelector("[data-setting-product-key]");
+      if (sourceUrl) sourceUrl.addEventListener("input", () => { this._settings.product_api_url = sourceUrl.value; this._settings.product_api_key = ""; this._settings.product_api_key_configured = false; if(sourceKey){sourceKey.value="";sourceKey.placeholder=haListManagerPanelText("product_source.key_empty",{},this._hass);} this._clearProductSourceStatus(); });
+      if (sourceKey) sourceKey.addEventListener("input", () => { this._settings.product_api_key = sourceKey.value; this._clearProductSourceStatus(); });
+      for (const [selector,key] of [["[data-setting-product-fallback-missing]","product_fallback_missing"],["[data-setting-product-fallback-error]","product_fallback_error"]]) {
+        const checkbox = this.shadowRoot.querySelector(selector);
+        if (checkbox) { checkbox.checked = Boolean(this._settings[key]); checkbox.setAttribute("aria-label",haListManagerPanelText(key.endsWith("missing")?"product_source.fallback_missing":"product_source.fallback_error",{},this._hass));checkbox.addEventListener("change",()=>{this._settings[key]=checkbox.checked;}); }
+      }
       const tandoorUrl = this.shadowRoot.querySelector("[data-setting-tandoor-url]");
       const tandoorToken = this.shadowRoot.querySelector("[data-setting-tandoor-token]");
       if (tandoorUrl) tandoorUrl.addEventListener("input", () => { this._settings.tandoor_url = tandoorUrl.value; this._tandoorTestStatus = ""; });
@@ -5727,7 +6033,7 @@ class HaListManagerPanel extends HTMLElement {
         draft.base_name = product.name || "";
         this._applyProductNameOptions(false);
       }
-      draft.lookup_status = { type: "success", text: haListManagerPanelText("products.loaded_unsaved", {}, this._hass) };
+      draft.lookup_status = { type: "success", text: haListManagerPanelText(result.lookup_source === "custom" ? "product_source.loaded_custom" : "product_source.loaded_off", {}, this._hass) };
     } catch (error) {
       if (this._dialog !== dialog) return;
       this._dialog.draft.lookup_status = error?.code === "product_not_found"
@@ -6435,6 +6741,7 @@ class HaListManagerPanel extends HTMLElement {
     await this._runDialogAction(async () => {
       this._settings = await haListManagerPanelTextRequest(this._hass, {
         type: `${API}/settings/update`,
+        ...this._productSourceValues(),
         append_brand_to_product_name: Boolean(this._settings.append_brand_to_product_name),
         append_quantity_to_product_name: Boolean(this._settings.append_quantity_to_product_name),
         scanner_default_list_id: this._settings.scanner_default_list_id || null,
@@ -6443,6 +6750,7 @@ class HaListManagerPanel extends HTMLElement {
         tandoor_token: String(this._settings.tandoor_token || "").trim() || null,
       });
       this._settings.tandoor_token = "";
+      this._productKeyVisible = false;
       this._settingsLoaded = true;
     });
   }
@@ -8328,6 +8636,12 @@ class HaListManagerPanel extends HTMLElement {
         await haListManagerPanelTextRequest(this._hass, { type: `${API}/inventory/groups/delete`, group_id: record.id });
         this._dialog = null;
         await this._loadInventory();
+      } else if (kind === "delete-script-qr") {
+        const dialog = this._dialog;
+        const state = this._scriptQr;
+        const result = await haListManagerPanelTextRequest(this._hass, {type: `${API}/script_qr/delete`, code_id: record.id});
+        if (this._scriptQr === state) state.codes = result.codes;
+        if (this._dialog === dialog) this._dialog = null;
       } else if (kind === "delete-scanner") {
         await haListManagerPanelTextRequest(this._hass, { type: `${API}/scanners/delete`, scanner_id: record.id });
         this._dialog = null;
@@ -8920,7 +9234,7 @@ class HaListManagerPanel extends HTMLElement {
     if (error?.code === "chip_already_exists") return haListManagerPanelText("ui.chip_name_exists_in_scope", {}, this._hass);
     if (error?.code === "scanner_exists") return haListManagerPanelText("errors.scanner_address_exists", {}, this._hass);
     if (error?.code === "product_not_found") return haListManagerPanelText("products.ean_data_not_found", {}, this._hass);
-    if (error?.code === "lookup_unavailable") return haListManagerPanelText("ui.open_food_facts_unavailable", {}, this._hass);
+    if (error?.code === "lookup_unavailable") return error?.message || haListManagerPanelText("product_source.failed", {}, this._hass);
     if (error?.code === "not_found") return haListManagerPanelText("errors.record_missing_reload", {}, this._hass);
     return error?.message || haListManagerPanelText("ui.request_failed", {}, this._hass);
   }
@@ -9032,6 +9346,8 @@ class HaListManagerPanel extends HTMLElement {
     .alexa-outbound-jobs{margin-top:16px}.alexa-outbound-jobs>summary{cursor:pointer}.alexa-outbound-job{padding:14px 0;border-bottom:1px solid var(--divider-color);overflow-wrap:anywhere}.alexa-outbound-job>.ha-button{margin:6px 8px 6px 0}.alexa-outbound-job select{width:100%;min-width:0}.alexa-outbound-job>.field{min-width:0}
     .alexa-alias-toolbar{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:end;gap:12px;margin:16px 0}.alexa-alias-toolbar>.field{min-width:0;margin:0}.alexa-alias-toolbar>.ha-button{margin:0;min-height:48px}.alexa-alias-row,.alexa-alias-header{display:grid;grid-template-columns:minmax(0,1fr) 320px 96px;align-items:center;gap:16px;padding:12px 0;border-bottom:1px solid var(--divider-color)}.alexa-alias-header{font-size:13px;color:var(--secondary-text-color)}.alexa-alias-expressions{min-width:0;overflow-wrap:anywhere}.alexa-alias-row>.settings-inline-actions{display:flex;flex-wrap:nowrap;justify-content:flex-end;gap:4px;margin:0}.alexa-alias-target,.alexa-alias-selected{display:flex;align-items:center;gap:10px;min-width:0}.alexa-alias-selected{margin:8px 0}.alexa-alias-target>.category-product-image,.alexa-alias-selected>.category-product-image{width:36px;height:36px;flex:0 0 36px}.alexa-alias-target>.category-product-copy,.alexa-alias-selected>.category-product-copy{flex:1}.alexa-alias-target .category-product-copy strong,.alexa-alias-target .category-product-copy small,.alexa-alias-selected .category-product-copy strong,.alexa-alias-selected .category-product-copy small{white-space:normal;overflow-wrap:anywhere}.alexa-alias-products{max-height:32dvh;overflow:auto}[data-alexa-alias-error][hidden]{display:none!important}@media(max-width:700px){.alexa-alias-header{display:none}.alexa-alias-row{grid-template-columns:minmax(0,1fr) 96px;gap:8px 12px;align-items:start}.alexa-alias-expressions{grid-column:1;grid-row:1}.alexa-alias-target{grid-column:1;grid-row:2}.alexa-alias-row>.settings-inline-actions{grid-column:2;grid-row:1 / span 2}.alexa-alias-toolbar{grid-template-columns:minmax(0,1fr)}.alexa-alias-toolbar>.ha-button{justify-self:start}}
     .alexa-rule-table{width:100%;border-collapse:collapse;margin:12px 0;table-layout:fixed}.alexa-rule-table th,.alexa-rule-table td{text-align:left;vertical-align:top;padding:8px;border-bottom:1px solid var(--divider-color);overflow-wrap:anywhere}.alexa-rule-table th:first-child,.alexa-rule-table td:first-child{width:28%}.alexa-flow-table caption{text-align:left;font-weight:500;padding:12px 0 8px}.alexa-flow-table th:first-child,.alexa-flow-table td:first-child{width:40%}.alexa-flow-table td p{margin:0 0 8px}.alexa-flow-table td p:last-child{margin-bottom:0}.alexa-rule-results{overflow:visible}.alexa-rules-dialog>.alexa-rule-results{overflow:auto;overscroll-behavior:contain}.alexa-rule-search,.alexa-test-input-row{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:end;gap:12px;margin:16px 0}.alexa-rule-search>.field,.alexa-test-input-row>.field{min-width:0;margin:0}.alexa-rule-search input,.alexa-test-input-row input,.alexa-rule-search>.ha-button,.alexa-test-input-row>.ha-button{height:48px;min-height:48px;box-sizing:border-box;margin:0}.alexa-rules-dialog{display:flex;flex-direction:column;max-height:calc(100dvh - 40px);overflow:hidden}.alexa-rules-dialog>.alexa-rule-results{flex:1 1 auto;min-height:0;max-height:none}.alexa-rules-dialog>:not(.alexa-rule-results){flex-shrink:0}.alexa-rules-dialog .dialog-title{display:flex;align-items:center;justify-content:space-between;gap:12px}.alexa-rules-dialog .dialog-title h2{margin:0}.alexa-confirm ha-checkbox{flex:0 0 auto}@media(max-width:600px){.alexa-rule-search,.alexa-test-input-row{grid-template-columns:minmax(0,1fr)}.alexa-rule-search>.ha-button,.alexa-test-input-row>.ha-button{justify-self:start}}
+    .scanner-row.script-qr-row{grid-template-columns:auto minmax(0,1fr) auto}.script-qr-row .scanner-open{justify-content:center;overflow-wrap:anywhere}.script-qr-detail{overflow-wrap:anywhere}.script-qr-image{width:fit-content;max-width:100%;margin:12px auto;padding:24px;background:white;border-radius:8px}.script-qr-image canvas,.script-qr-image img{max-width:100%;height:auto}[data-script-qr-download]{text-decoration:none}[data-script-qr-download][hidden]{display:none}
+    .product-source-example a{color:var(--primary-color);text-decoration:underline;text-underline-offset:2px}.product-source-example ha-icon{--mdc-icon-size:14px;vertical-align:middle;margin-inline-start:4px}.product-source-status.success{color:var(--success-color,#43a047)}.product-source-status.error{color:var(--error-color,#db4437)}.product-source-status[hidden]{display:none}.product-source-key{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.product-source-key input{flex:1 1 180px;min-width:0}.product-source-key .ha-button{margin:0;min-height:44px}.product-source-settings .field{min-width:0}.product-source-settings ha-select{width:100%;min-width:0}.product-source-settings .settings-inline-actions{flex-wrap:wrap}
     .alexa-card h3{display:flex;align-items:center;gap:10px}.alexa-card h3 ha-icon{color:var(--primary-color)}.alexa-card textarea{box-sizing:border-box;width:100%;max-width:100%;resize:vertical;font:inherit;line-height:1.5}.alexa-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.alexa-card .field,.alexa-card .setting-row{min-width:0}.alexa-card .field select{min-width:0;max-width:100%}.alexa-feedback{display:flex;align-items:flex-start;gap:10px;margin:14px 0 0;padding:12px;border-left:4px solid var(--success-color,#43a047);border-radius:7px;background:color-mix(in srgb,var(--success-color,#43a047) 10%,transparent);overflow-wrap:anywhere}.alexa-feedback ha-icon{flex:0 0 auto}.alexa-feedback.error{border-left-color:var(--error-color);background:color-mix(in srgb,var(--error-color) 10%,transparent)}.alexa-connection-status{display:flex;align-items:center;gap:10px;color:var(--secondary-text-color)}.alexa-connection-status.ready{color:var(--success-color,#43a047)}.alexa-status-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin:18px 0}.alexa-status-grid dt{color:var(--secondary-text-color)}.alexa-status-grid dd{margin:5px 0 0;overflow-wrap:anywhere}.alexa-speaking-help,.alexa-recent{margin-top:18px}.alexa-speaking-help summary,.alexa-recent summary{cursor:pointer;color:var(--primary-color)}.alexa-confirm{display:flex;gap:10px;align-items:flex-start;margin:16px 0}.alexa-import-preview{padding:16px;margin-top:15px;border:1px solid var(--divider-color);border-radius:9px}.alexa-preview-rows{max-height:360px;overflow:auto}.alexa-preview-row,.alexa-receipt{display:flex;gap:10px;padding:12px 0;border-bottom:1px solid var(--divider-color)}.alexa-preview-row>div,.alexa-receipt>div{display:flex;flex-direction:column;gap:5px;min-width:0;overflow-wrap:anywhere}.alexa-preview-row small,.alexa-receipt small{color:var(--secondary-text-color)}.alexa-receipt>ha-icon{color:var(--primary-color);flex:0 0 auto}.alexa-warning{color:var(--warning-color,#ffa600)}.alexa-card [hidden],.alexa-rules-dialog [hidden]{display:none!important}@media(max-width:600px){.alexa-grid,.alexa-status-grid{grid-template-columns:minmax(0,1fr)}.alexa-card .settings-inline-actions{align-items:stretch}.alexa-card .settings-inline-actions .ha-button{white-space:normal}}
     .notification-list-card{padding:0;overflow:hidden}.notification-list-toggle{display:flex;align-items:center;justify-content:space-between;gap:14px;width:100%;min-height:72px;padding:13px 16px;border:0;color:var(--primary-text-color);background:transparent;text-align:left;cursor:pointer}.notification-list-toggle:hover{background:var(--secondary-background-color)}.notification-list-toggle>span{display:flex;flex-direction:column;gap:4px;min-width:0}.notification-list-toggle strong{font-size:17px}.notification-list-toggle small{color:var(--secondary-text-color)}.notification-list-toggle ha-icon{flex:0 0 auto;color:var(--secondary-text-color)}.notification-list-body[hidden]{display:none}.notification-list-body{padding:0 14px 14px;border-top:1px solid var(--divider-color)}.notification-list-actions{display:flex;justify-content:flex-end;flex-wrap:wrap;gap:8px;padding-top:12px}.notification-assignment-heading{justify-content:space-between}.notification-assignment-identity{display:flex;align-items:center;gap:10px;min-width:0;cursor:pointer}.notification-assignment-identity>span{display:flex;flex-direction:column;min-width:0}.notification-assignment-identity small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.notification-settings-toggle{flex:0 0 auto}.notification-settings-toggle ha-icon{--mdc-icon-size:19px}
     @media(max-width:520px){.inventory-dialog-product-actions{align-items:stretch;flex-direction:column}.inventory-dialog-product-actions .ha-button{width:100%}.category-row.definition-row{grid-template-columns:auto minmax(0,1fr) auto}.category-row.definition-row>.category-symbol{grid-column:1;margin-left:10px}.category-row.definition-row>.category-open{grid-column:2;display:flex;min-width:0;flex-direction:column;align-items:flex-start;gap:4px;padding:10px 8px}.category-row.definition-row>.category-open strong,.category-row.definition-row>.category-open small{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.category-row.definition-row>.row-actions{grid-column:3;grid-row:1;padding-right:2px}.entity-history-add{grid-template-columns:1fr}.entity-history-add .ha-button{width:100%}.entity-history-row{grid-template-columns:44px minmax(0,1fr);align-items:start;padding:12px}.entity-history-details{grid-column:2;min-width:0}.entity-history-actions{grid-column:1/3;display:flex;flex-wrap:wrap;justify-content:flex-end;width:100%;padding-top:8px}.entity-history-actions .ha-button{flex:1 1 auto}.notification-profile-row{grid-template-columns:48px minmax(0,1fr);align-items:start;padding:10px 8px}.notification-profile-icon{margin-left:0}.notification-profile-main{min-width:0;padding:4px 10px}.notification-profile-main small,.notification-profile-main span{overflow-wrap:anywhere}.notification-profile-row>.row-actions{grid-column:1/3;justify-content:flex-end;width:100%;padding:4px 0 0}.category-page-actions{flex-direction:column}.category-page-actions .ha-button{width:100%}.category-specific-picker{grid-template-columns:minmax(0,1fr)}.inventory-detail-stats{grid-template-columns:1fr 1fr}.section-heading{flex-direction:column}.list-scope-card .section-heading,.dashboard-usage-card .section-heading{display:grid;grid-template-columns:minmax(0,1fr) 42px;align-items:start;width:100%}.list-scope-card .section-heading>div,.dashboard-usage-card .section-heading>div{min-width:0;text-align:left}.list-scope-card .section-heading>.icon-button,.dashboard-usage-card .section-heading>.icon-button{grid-column:2;grid-row:1;justify-self:end;margin:0}.section-heading .ha-button{width:100%}.category-rule-quick{grid-template-columns:1fr}.category-rule-quick .ha-button{width:100%}.content-header.with-action{display:block}.content-header.with-action>.ha-button,.content-header.with-action>.header-actions{width:100%;margin-top:14px}.header-actions .ha-button{width:100%}.category-product-page-header{grid-template-columns:auto minmax(0,1fr)}.category-product-page-header>.ha-button{grid-column:1/3;width:100%}.category-product-page-row{grid-template-columns:48px minmax(0,1fr)}.category-product-page-row>.ha-button{grid-column:2;justify-self:start}.dialog{padding:20px}.dialog-actions .ha-button{flex:1}.field-grid,.scanner-default-grid,.scanner-route-fields,.product-grid,.color-field,.product-dialog-top,.dynamic-category-field,.product-filters,.inventory-group-fields,.simulation-grid,.notification-automatic-grid{grid-template-columns:1fr}.active-target{align-items:flex-start;flex-wrap:wrap}.active-target .ha-button{width:100%}.scanner-row{grid-template-columns:auto minmax(0,1fr) auto}.scanner-state{grid-column:2}.scanner-row>.row-actions{grid-column:3;grid-row:1/3}.history-row{grid-template-columns:auto minmax(0,1fr)}.history-row>code{grid-column:2}.product-preview{grid-row:1;width:100%;height:150px}.dynamic-category-field .ha-button{width:100%;margin-bottom:0}.list-open{padding-left:12px}.row-actions{padding-right:2px}.item-check{width:46px}.product-image{width:48px;height:48px;margin-left:8px}.product-open{padding-left:10px}.category-row{grid-template-columns:minmax(0,1fr) auto}.category-row>.color-swatch{display:none}.category-row>.row-actions{grid-column:2}.dynamic-category-row{align-items:flex-start;flex-direction:column}.dynamic-category-row .ha-button{width:100%}.inventory-toolbar{grid-template-columns:1fr}.inventory-row{grid-template-columns:auto minmax(0,1fr) auto}.inventory-stock{grid-column:2;justify-content:start}.inventory-row>.row-actions{grid-column:3;grid-row:1/3}.inventory-image{width:44px;height:44px;margin-left:8px}.inventory-open{padding-left:8px}.category-order-row{grid-template-columns:34px 48px minmax(0,1fr) 76px}.category-order-row .category-symbol{width:38px;height:38px}.category-position-field input{width:68px}.category-order-arrows{grid-column:3/5;justify-content:flex-end;padding:0 6px 6px}.category-order-actions .ha-button{flex:1}.todo-due-fields{grid-template-columns:minmax(130px,1fr) minmax(90px,.65fr)}.todo-recurrence-fields{grid-template-columns:minmax(90px,1fr) minmax(110px,1fr)}}

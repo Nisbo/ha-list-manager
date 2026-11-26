@@ -65,6 +65,7 @@ from .database import (
     ScopeChangeConfirmationRequired,
 )
 from .open_facts import OpenFactsLookupError, async_lookup_open_facts
+from .product_sources import product_source_settings, public_source_settings
 from .external_lists import ExternalListError
 from .entity_history_import import async_import_entity_history
 from .runtime import HaListManagerRuntime
@@ -309,6 +310,8 @@ def async_register_websocket_commands(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, websocket_get_settings)
     websocket_api.async_register_command(hass, websocket_update_settings)
     websocket_api.async_register_command(hass, websocket_test_tandoor)
+    websocket_api.async_register_command(hass, websocket_test_product_source)
+    websocket_api.async_register_command(hass, websocket_product_source_key)
     websocket_api.async_register_command(hass, websocket_list_tandoor_categories)
     websocket_api.async_register_command(hass, websocket_search_tandoor_recipes)
     websocket_api.async_register_command(hass, websocket_get_tandoor_recipe)
@@ -369,6 +372,9 @@ def async_register_websocket_commands(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, websocket_product_camera_scan)
     websocket_api.async_register_command(hass, websocket_product_scanner_target)
     websocket_api.async_register_command(hass, websocket_list_scanners)
+    websocket_api.async_register_command(hass, websocket_script_qr_list)
+    websocket_api.async_register_command(hass, websocket_script_qr_create)
+    websocket_api.async_register_command(hass, websocket_script_qr_delete)
     websocket_api.async_register_command(hass, websocket_create_scanner)
     websocket_api.async_register_command(hass, websocket_update_scanner)
     websocket_api.async_register_command(hass, websocket_delete_scanner)
@@ -2045,9 +2051,9 @@ async def websocket_lookup_product(
 
     try:
         lookup = await async_lookup_open_facts(hass, ean)
-    except OpenFactsLookupError:
+    except OpenFactsLookupError as error:
         _send_error(connection,
-            msg["id"], "lookup_unavailable", localized_text("errors.open_facts_unavailable")
+            msg["id"], "lookup_unavailable", getattr(error, "message", localized_text("errors.open_facts_unavailable"))
         )
         return
     if lookup is None:
@@ -2057,7 +2063,7 @@ async def websocket_lookup_product(
         return
 
     connection.send_result(
-        msg["id"], {"duplicate": None, "product": {"ean": ean, **lookup}}
+        msg["id"], {"duplicate": None, "product": {"ean": ean, **lookup}, "lookup_source": getattr(lookup, "lookup_source", "off")}
     )
 
 
@@ -2320,6 +2326,7 @@ async def websocket_get_settings(
             "scanner_default_action": options.get("scanner_default_action", "add"),
             "tandoor_url": options.get("tandoor_url"),
             "tandoor_token_configured": bool(options.get("tandoor_token")),
+            **public_source_settings(options),
         },
     )
 
@@ -2334,6 +2341,11 @@ async def websocket_get_settings(
         probatio.Optional("scanner_default_action"): probatio.In(SCANNER_ACTIONS),
         probatio.Optional("tandoor_url"): probatio.Any(str, None),
         probatio.Optional("tandoor_token"): probatio.Any(str, None),
+        probatio.Optional("product_data_source"): probatio.In(["off", "custom"]),
+        probatio.Optional("product_api_url"): probatio.Any(str, None),
+        probatio.Optional("product_api_key"): probatio.Any(str, None),
+        probatio.Optional("product_fallback_missing"): bool,
+        probatio.Optional("product_fallback_error"): bool,
     }
 )
 async def websocket_update_settings(
@@ -2343,7 +2355,11 @@ async def websocket_update_settings(
 ) -> None:
     """Update backend product-name defaults."""
     runtime = _runtime(hass)
-    options = dict(runtime.config_entry.options)
+    try:
+        options = product_source_settings(dict(runtime.config_entry.options), msg)
+    except ValueError as error:
+        _send_input_error(connection, msg, error)
+        return
     tandoor_url = (
         normalize_tandoor_url(msg.get("tandoor_url"))
         if "tandoor_url" in msg
@@ -2372,10 +2388,36 @@ async def websocket_update_settings(
     connection.send_result(
         msg["id"],
         {
-            **{key: value for key, value in options.items() if key != "tandoor_token"},
+            **{key: value for key, value in options.items() if key not in {"tandoor_token", "product_api_key"}},
             "tandoor_token_configured": bool(options.get("tandoor_token")),
+            **public_source_settings(options),
         },
     )
+
+
+@websocket_api.require_admin
+@localized_command({probatio.Required("type"): f"{DOMAIN}/product_source/key"})
+async def websocket_product_source_key(hass, connection, msg):
+    """Reveal a saved credential only on an explicit administrator request."""
+    connection.send_result(msg["id"], {"key": _runtime(hass).config_entry.options.get("product_api_key", "")})
+
+
+@websocket_api.require_admin
+@localized_command({
+    probatio.Required("type"): f"{DOMAIN}/product_source/test",
+    probatio.Optional("product_data_source"): probatio.In(["off", "custom"]),
+    probatio.Optional("product_api_url"): probatio.Any(str, None),
+    probatio.Optional("product_api_key"): probatio.Any(str, None),
+})
+async def websocket_test_product_source(hass, connection, msg):
+    """Probe only the selected source: no saving, fallback or product creation."""
+    try:
+        options = product_source_settings(_runtime(hass).config_entry.options, msg)
+        result = await async_lookup_open_facts(hass, "4062139025398", options=options, probe=True)
+    except (ValueError, OpenFactsLookupError) as error:
+        _send_error(connection, msg["id"], "lookup_unavailable", getattr(error, "message", str(error)))
+        return
+    connection.send_result(msg["id"], {"connected": True, "product_found": result is not None})
 
 
 def _tandoor_client(hass: HomeAssistant) -> TandoorClient:
@@ -3792,9 +3834,9 @@ async def websocket_inventory_lookup_product(
         return
     try:
         lookup = await async_lookup_open_facts(hass, ean)
-    except OpenFactsLookupError:
+    except OpenFactsLookupError as error:
         _send_error(connection,
-            msg["id"], "lookup_unavailable", localized_text("errors.open_facts_unavailable")
+            msg["id"], "lookup_unavailable", getattr(error, "message", localized_text("errors.open_facts_unavailable"))
         )
         return
     if lookup is None:
@@ -3806,6 +3848,7 @@ async def websocket_inventory_lookup_product(
         msg["id"],
         {
             "local": False,
+            "lookup_source": getattr(lookup, "lookup_source", "off"),
             "product": {
                 "ean": ean,
                 "name": _inventory_product_name(
@@ -3978,9 +4021,9 @@ async def websocket_add_inventory_product(
                 category_id=category_id,
                 category=category,
             )
-    except OpenFactsLookupError:
+    except OpenFactsLookupError as error:
         _send_error(connection,
-            msg["id"], "lookup_unavailable", localized_text("errors.open_facts_unavailable")
+            msg["id"], "lookup_unavailable", getattr(error, "message", localized_text("errors.open_facts_unavailable"))
         )
         return
     except (ListNotFoundError, InventoryListRequiredError, ProductNotFoundError, CategoryNotFoundError):
@@ -4552,6 +4595,62 @@ async def websocket_camera_scan(hass, connection, msg):
         _send_input_error(connection, msg, error)
         return
     connection.send_result(msg["id"], result)
+
+
+def _script_qr_result(options):
+    from .scanner import SCRIPT_QR_PREFIX
+    return {"codes": [
+        {"id": code_id, "code": SCRIPT_QR_PREFIX + code_id, **record}
+        for code_id, record in options.get("script_qr_codes", {}).items()
+    ]}
+
+
+@websocket_api.require_admin
+@localized_command({probatio.Required("type"): f"{DOMAIN}/script_qr/list"})
+async def websocket_script_qr_list(hass, connection, msg):
+    connection.send_result(msg["id"], _script_qr_result(_runtime(hass).config_entry.options))
+
+
+@websocket_api.require_admin
+@localized_command({
+    probatio.Required("type"): f"{DOMAIN}/script_qr/create",
+    probatio.Required("script_entity"): str,
+    probatio.Optional("identifier", default=""): str,
+})
+async def websocket_script_qr_create(hass, connection, msg):
+    from uuid import uuid4
+
+    script = msg["script_entity"].strip()
+    try:
+        if not script.startswith("script.") or hass.states.get(script) is None:
+            raise ValueError(localized_text("scripts.qr_unavailable"))
+        identifier = _clean_text(msg["identifier"], maximum=100, required=False)
+    except ValueError as error:
+        _send_input_error(connection, msg, error)
+        return
+    entry = _runtime(hass).config_entry
+    options = dict(entry.options)
+    codes = dict(options.get("script_qr_codes", {}))
+    code_id = uuid4().hex
+    codes[code_id] = {"script_entity": script, "identifier": identifier or ""}
+    options["script_qr_codes"] = codes
+    hass.config_entries.async_update_entry(entry, options=options)
+    connection.send_result(msg["id"], {**_script_qr_result(options), "created_id": code_id})
+
+
+@websocket_api.require_admin
+@localized_command({
+    probatio.Required("type"): f"{DOMAIN}/script_qr/delete",
+    probatio.Required("code_id"): str,
+})
+async def websocket_script_qr_delete(hass, connection, msg):
+    entry = _runtime(hass).config_entry
+    options = dict(entry.options)
+    codes = dict(options.get("script_qr_codes", {}))
+    codes.pop(msg["code_id"], None)
+    options["script_qr_codes"] = codes
+    hass.config_entries.async_update_entry(entry, options=options)
+    connection.send_result(msg["id"], _script_qr_result(options))
 
 
 @websocket_api.require_admin

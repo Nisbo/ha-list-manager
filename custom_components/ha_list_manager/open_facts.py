@@ -11,7 +11,9 @@ import aiohttp
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-from .const import VERSION
+from .const import DOMAIN, VERSION
+from .localization import text
+from .product_sources import normalize_product_api_url
 
 _API_URL = "https://world.openfoodfacts.org/api/v3/product/{ean}.json"
 _FIELDS = (
@@ -27,7 +29,22 @@ _FIELDS = (
 
 
 class OpenFactsLookupError(Exception):
-    """Raised when Open Food Facts cannot be reached or returns invalid data."""
+    """A safe, localized failure without URLs, credentials or response bodies."""
+
+    def __init__(self, reason="unavailable", *, custom=False):
+        self.message = text(f"lookup.{reason}") if custom else text("errors.open_facts_unavailable")
+        super().__init__(self.message)
+
+
+class ProductLookup(dict):
+    """Keep transport provenance separate from the persistent product fields."""
+
+    lookup_source = "off"
+
+
+def source_options(hass):
+    runtime = getattr(hass, "data", {}).get(DOMAIN)
+    return dict(getattr(getattr(runtime, "config_entry", None), "options", {}) or {})
 
 
 def _clean_text(value: Any) -> str | None:
@@ -90,37 +107,74 @@ def parse_open_facts_product(
     }
 
 
-async def async_lookup_open_facts(
-    hass: HomeAssistant, ean: str
-) -> dict[str, str | None] | None:
-    """Look up one EAN through the universal Open Food Facts product endpoint."""
+async def _request_product(hass, ean, options, *, probe=False):
     language = (hass.config.language or "en").split("-", 1)[0].lower()
-    fields = list(_FIELDS)
-    localized_name = f"product_name_{language}"
-    if localized_name not in fields:
-        fields.append(localized_name)
-
+    custom = options.get("product_data_source", "off") == "custom"
+    try:
+        base = normalize_product_api_url(options.get("product_api_url")) if custom else None
+    except ValueError as error:
+        raise OpenFactsLookupError("invalid_url", custom=True) from error
+    if custom and not base:
+        raise OpenFactsLookupError("invalid_url", custom=True)
+    url = f"{base}/api/v3/product/{ean}.json" if custom else _API_URL.format(ean=ean)
+    fields = list(dict.fromkeys((*_FIELDS, f"product_name_{language}")))
+    headers = {"Accept": "application/json", "User-Agent": f"ha-list-manager/{VERSION}"}
+    if custom and options.get("product_api_key"):
+        headers["Authorization"] = "Bearer " + options["product_api_key"]
     session = async_get_clientsession(hass)
     try:
         async with session.get(
-            _API_URL.format(ean=ean),
-            params={"product_type": "all", "fields": ",".join(fields)},
-            headers={
-                "Accept": "application/json",
-                "User-Agent": f"ha-list-manager/{VERSION}",
-            },
-            timeout=aiohttp.ClientTimeout(total=12),
+            url, params={"product_type": "all", "fields": ",".join(fields), "lc": language},
+            headers=headers, timeout=aiohttp.ClientTimeout(total=12),
+            allow_redirects=not custom,
         ) as response:
-            if response.status == 404:
+            if response.status in {401, 403}:
+                raise OpenFactsLookupError("auth_failed", custom=custom)
+            if 300 <= response.status < 400:
+                raise OpenFactsLookupError("invalid_response", custom=custom)
+            if response.status == 404 and not (custom or probe):
                 return None
-            response.raise_for_status()
+            if response.status != 404:
+                response.raise_for_status()
             payload = await response.json(content_type=None)
-    except (TimeoutError, aiohttp.ClientError, ValueError) as error:
-        raise OpenFactsLookupError from error
-
+    except OpenFactsLookupError:
+        raise
+    except (TimeoutError, aiohttp.ClientError) as error:
+        raise OpenFactsLookupError(custom=custom) from error
+    except ValueError as error:
+        raise OpenFactsLookupError("invalid_response", custom=custom) from error
     if not isinstance(payload, dict):
-        raise OpenFactsLookupError
+        raise OpenFactsLookupError("invalid_response", custom=custom)
+    result = payload.get("result")
+    if (payload.get("status") == "failure" and isinstance(result, dict)
+            and result.get("id") == "product_not_found"):
+        return None
+    if response.status == 404:
+        raise OpenFactsLookupError("invalid_response", custom=custom)
     product = payload.get("product")
     if not isinstance(product, dict):
+        if custom:
+            raise OpenFactsLookupError("invalid_response", custom=True)
         return None
-    return parse_open_facts_product(product, language)
+    parsed = parse_open_facts_product(product, language)
+    if parsed is None:
+        return None
+    result = ProductLookup(parsed)
+    result.lookup_source = "custom" if custom else "off"
+    return result
+
+
+async def async_lookup_open_facts(hass: HomeAssistant, ean: str, *, options=None, probe=False):
+    """Use one configured OFF-v3 source for every card and scanner lookup."""
+    selected = source_options(hass) if options is None else dict(options)
+    custom = selected.get("product_data_source", "off") == "custom"
+    try:
+        result = await _request_product(hass, ean, selected, probe=probe)
+    except OpenFactsLookupError:
+        if not custom or probe or not selected.get("product_fallback_error", False):
+            raise
+    else:
+        if result is not None or not custom or probe or not selected.get("product_fallback_missing", False):
+            return result
+    # Construct fresh headers for OFF. A private server's key never follows a fallback.
+    return await _request_product(hass, ean, {"product_data_source": "off"})

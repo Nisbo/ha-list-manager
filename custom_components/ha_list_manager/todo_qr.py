@@ -5,7 +5,8 @@ from zoneinfo import ZoneInfo
 
 from .localization import text
 
-PREFIX = "HA-LM:TODO:1:"
+NAMESPACE = "HA-LM:TODO:"
+PREFIX = NAMESPACE + "1:"
 ACTIONS = {"now", "next", "done", "checked"}
 
 

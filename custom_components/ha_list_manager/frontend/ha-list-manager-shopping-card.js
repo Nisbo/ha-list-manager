@@ -92,7 +92,7 @@ function haListManagerShoppingCardTextRequest(hass, message) {
 const HA_LM_API = "ha_list_manager";
 const HA_LM_ITEMS_EVENT = "ha_list_manager_items_changed";
 const HA_LM_LISTS_EVENT = "ha_list_manager_lists_changed";
-const CARD_VERSION = "1.1.0b5";
+const CARD_VERSION = "1.1.0b6";
 
 const esc = (value) => String(value ?? "").replace(/[&<>'"]/g, (char) => ({
   "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;",
@@ -231,7 +231,7 @@ class HaListManagerShoppingCard extends HTMLElement {
       show_labels: haListManagerShoppingCardText("ui.show_labels", {}, hass), show_share_button: haListManagerShoppingCardText("ui.show_share_button", {}, hass), show_pdf_export_button: haListManagerShoppingCardText("ui.show_pdf_export", {}, hass),
       show_clear_completed_button: haListManagerShoppingCardText("ui.bulk_delete_completed_items", {}, hass),
       show_label_filter_button: haListManagerShoppingCardText("filters.show", {}, hass),
-      sort_mode: haListManagerShoppingCardText("ui.sort_order", {}, hass), show_edit_shortcuts: haListManagerShoppingCardText("shopping.show_edit_shortcuts", {}, hass), save_dialog_on_enter: haListManagerShoppingCardText("ui.save_dialog_on_enter", {}, hass), focus_dialog_input: haListManagerShoppingCardText("ui.focus_dialog_input", {}, hass),
+      sort_mode: haListManagerShoppingCardText("ui.sort_order", {}, hass), show_edit_shortcuts: haListManagerShoppingCardText("shopping.show_edit_shortcuts", {}, hass), save_dialog_on_enter: haListManagerShoppingCardText("ui.save_dialog_on_enter", {}, hass), focus_dialog_input: haListManagerShoppingCardText("ui.focus_dialog_input", {}, hass), refocus_after_add: haListManagerShoppingCardText("ui.refocus_after_add", {}, hass),
       show_chips: haListManagerShoppingCardText("chips.show", {}, hass), listed_chip_display: haListManagerShoppingCardText("chips.listed_display", {}, hass), chip_font_size: haListManagerShoppingCardText("chips.font_size", {}, hass), filter_chips: haListManagerShoppingCardText("ui.filter_chips_typing", {}, hass),
       category_chip_layout: haListManagerShoppingCardText("chips.category_appearance", {}, hass),
       category_chip_colors: haListManagerShoppingCardText("ui.grouped_chips_category_color", {}, hass),
@@ -300,6 +300,7 @@ class HaListManagerShoppingCard extends HTMLElement {
           { name: "show_edit_shortcuts", selector: { boolean: {} }, default: true },
           { name: "save_dialog_on_enter", selector: { boolean: {} }, default: false },
           { name: "focus_dialog_input", selector: { boolean: {} }, default: false },
+          { name: "refocus_after_add", selector: { boolean: {} }, default: false },
           { name: "quantity_position", selector: { select: { mode: "dropdown", options: [
             { value: "beginning", label: haListManagerShoppingCardText("ui.before_item_name", {}, hass) }, { value: "end", label: haListManagerShoppingCardText("ui.after_item_name", {}, hass) },
             { value: "controls", label: haListManagerShoppingCardText("ui.between_plus_minus", {}, hass) },
@@ -422,6 +423,7 @@ class HaListManagerShoppingCard extends HTMLElement {
         if (schema.name === "show_edit_shortcuts") return haListManagerShoppingCardText("help.shopping_edit_shortcuts", {}, hass);
         if (schema.name === "save_dialog_on_enter") return haListManagerShoppingCardText("help.shopping_enter_actions", {}, hass);
         if (schema.name === "focus_dialog_input") return haListManagerShoppingCardText("help.shopping_dialog_focus", {}, hass);
+        if (schema.name === "refocus_after_add") return haListManagerShoppingCardText("help.refocus_after_add", {}, hass);
         if (schema.name === "show_category_count") return haListManagerShoppingCardText("help.shopping_category_counts", {}, hass);
         if (schema.name === "show_labels") return haListManagerShoppingCardText("help.item_label_visibility", {}, hass);
         if (schema.name === "category_sort") return haListManagerShoppingCardText("help.shopping_category_order", {}, hass);
@@ -460,7 +462,7 @@ class HaListManagerShoppingCard extends HTMLElement {
       quantity_position: "beginning", show_quantity_box: true, show_submit_button: true,
       show_plus_minus: true, show_item_dividers: true, item_divider_before_spacing: 10, item_divider_after_spacing: 10, item_font_size: 16, category_font_scale: 110, acknowledged: "show", show_quantity_one: false,
       allow_filter: true, auto_expand_search: true, allow_suggestions: true, show_done_hidden_items_in_search: true,
-      show_share_button: true, show_pdf_export_button: false, show_clear_completed_button: true, sort_mode: "alpha", show_edit_shortcuts: true, save_dialog_on_enter: false, focus_dialog_input: false,
+      show_share_button: true, show_pdf_export_button: false, show_clear_completed_button: true, sort_mode: "alpha", show_edit_shortcuts: true, save_dialog_on_enter: false, focus_dialog_input: false, refocus_after_add: false,
       show_images: false, show_brand: false, show_quantity: false, show_category_count: true, show_labels: true, category_sort: "alphabetical",
       show_chips: true, show_chip_popup_button: true, show_browser_chips: true, browser_chips_for_products: false, allow_save_browser_chips: true,
       filter_chips: true, category_chip_layout: "none", category_chip_colors: true, show_important_chips: true, chips_limit: 8, chips_position: "auto", chip_color_mode: "scope_fallback",
@@ -1441,6 +1443,8 @@ class HaListManagerShoppingCard extends HTMLElement {
   }
 
   async _updateExistingQuantity(item, increment) {
+    const refocus = globalThis.HaListManagerDialogSections.prepareAddFocus(this, "[data-product-input]");
+    let added = false;
     this._busy = true;
     try {
       const previous = Math.max(0, Number(item.quantity || 0));
@@ -1451,12 +1455,15 @@ class HaListManagerShoppingCard extends HTMLElement {
       this._suggestions = [];
       this._notificationStatus = haListManagerShoppingCardText("shopping.quantity_increased", {p0:(item.name), p1:(previous), p2:(next)}, this._hass);
       await this._load(true);
+      added = true;
     } catch (error) { this._error = error?.message || String(error); }
-    finally { this._busy = false; this._render(); }
+    finally { this._busy = false; this._render(); if (added) refocus?.(); }
   }
 
   async _createProductItem(product, rawName, quantity, forceGeneral = false) {
     const category = forceGeneral ? null : this._matchingProductCategory(product);
+    const refocus = globalThis.HaListManagerDialogSections.prepareAddFocus(this, "[data-product-input]");
+    let added = false;
     this._busy = true;
     try {
       let resolvedProduct = product;
@@ -1481,8 +1488,9 @@ class HaListManagerShoppingCard extends HTMLElement {
       this._suggestions = [];
       this._notificationStatus = haListManagerShoppingCardText("shopping.quantity_added", {p0:quantity, p1:String(resolvedProduct?.name || rawName).trim()}, this._hass);
       await this._load(true);
+      added = true;
     } catch (error) { this._error = error?.message || String(error); }
-    finally { this._busy = false; this._render(); }
+    finally { this._busy = false; this._render(); if (added) refocus?.(); }
   }
 
   async _handleProduct(product, rawName = "", quantity = this._requestedQuantity()) {
@@ -1945,7 +1953,7 @@ class HaListManagerShoppingCard extends HTMLElement {
       } else if (result.product) {
         const product = result.product;
         this._stageProductRefresh(draft, product);
-        draft.eanStatus = haListManagerShoppingCardText("products.off_refreshed_custom_kept", {}, this._hass);
+        draft.eanStatus = haListManagerShoppingCardText(result.lookup_source === "custom" ? "product_source.loaded_custom" : "product_source.loaded_off", {}, this._hass);
         draft.eanStatusTone = "success";
       }
     } catch (error) {
@@ -2073,6 +2081,8 @@ class HaListManagerShoppingCard extends HTMLElement {
     if (draft?.mode === "increment") { await this._saveIncrementDialog(); return; }
     if (draft?.mode === "product-transfer") { await this._saveProductTransfer(); return; }
     if (!draft || !draft.name.trim() || this._busy) return;
+    const refocus = !draft.item && !draft.camera_capture ? globalThis.HaListManagerDialogSections.prepareAddFocus(this, "[data-product-input]") : undefined;
+    let added = false;
     this._busy = true; draft.status = ""; this._render();
     try {
       let product = draft.product;
@@ -2102,8 +2112,9 @@ class HaListManagerShoppingCard extends HTMLElement {
       // The persisted draft no longer needs a discard confirmation.
       this._discardDialog();
       await this._load(true);
+      added = true;
     } catch (error) { draft.status = error?.message || String(error); draft.statusTone = "error"; }
-    finally { this._busy = false; this._render(); }
+    finally { this._busy = false; this._render(); if (added) refocus?.(); }
   }
 
   _itemDraftPayload(draft, product = null) {
@@ -2115,7 +2126,8 @@ class HaListManagerShoppingCard extends HTMLElement {
       : this._availableCategories().find((entry) => entry.name.toLocaleLowerCase() === categoryText.toLocaleLowerCase());
     return {
       offer_only: draft.offer_only === true,
-      name: draft.name.trim(), description: product ? null : draft.description.trim() || null,
+      name: draft.name.trim(),
+      description: product && this._list?.list_type !== "bring" ? null : draft.description.trim() || null,
       quantity: Math.max(1, Number.parseInt(draft.quantity, 10) || 1),
       category_id: matched && !matched.dynamic ? matched.id : null,
       category: matched?.dynamic ? matched.name : matched ? null : categoryText || null,
@@ -2132,6 +2144,8 @@ class HaListManagerShoppingCard extends HTMLElement {
     const draft = this._dialog;
     if (!draft?.item || this._busy) return;
     const increment = Math.max(1, Number.parseInt(draft.increment, 10) || 1);
+    const refocus = globalThis.HaListManagerDialogSections.prepareAddFocus(this, "[data-product-input]");
+    let added = false;
     this._busy = true; draft.status = ""; this._render();
     try {
       const quantity = Math.max(0, Number(draft.item.quantity || 0)) + increment;
@@ -2143,8 +2157,9 @@ class HaListManagerShoppingCard extends HTMLElement {
       this._dialog = null;
       this._unlockScroll();
       await this._load(true);
+      added = true;
     } catch (error) { draft.status = error?.message || String(error); draft.statusTone = "error"; }
-    finally { this._busy = false; this._render(); }
+    finally { this._busy = false; this._render(); if (added) refocus?.(); }
   }
 
   _itemPayload(item, quantity) {
@@ -2321,8 +2336,7 @@ class HaListManagerShoppingCard extends HTMLElement {
     return (Number(a.manual_position ?? a.position) || 0) - (Number(b.manual_position ?? b.position) || 0) || tieScope || nameResult;
   }
 
-  _displayName(item) {
-    const product = this._products.find((entry) => entry.id === item.product_id);
+  _displayName(item, product = this._products.find((entry) => entry.id === item.product_id)) {
     const generatedNames = product ? [
       this._formattedProductName(product, false, false), this._formattedProductName(product, true, false),
       this._formattedProductName(product, false, true), this._formattedProductName(product, true, true),
@@ -2860,10 +2874,7 @@ class HaListManagerShoppingCard extends HTMLElement {
     const value = this.shadowRoot?.querySelector("[data-bring-preview-value]");
     if (!name || !value || !this._dialog) return;
     name.textContent = this._dialog.name.trim() || haListManagerShoppingCardText("ui.item_name", {}, this._hass);
-    const preview = this._bringPreviewValue(
-      this._dialog.quantity,
-      this._dialog.product?.package_quantity || this._dialog.description,
-    );
+    const preview = this._bringPreviewValue(this._dialog.quantity, this._dialog.description);
     value.textContent = preview;
     value.hidden = !preview;
   }
@@ -3098,7 +3109,7 @@ class HaListManagerShoppingCard extends HTMLElement {
       ? `<div class="fixed-product-amount"><span>${haListManagerShoppingCardText("ui.package_quantity", {}, this._hass)}</span><strong>${esc(product.package_quantity)}</strong><small>${haListManagerShoppingCardText(createsProduct ? "scan.new_product_package" : "ui.fixed_database_value", {}, this._hass)}</small></div>`
       : `<label><span>${haListManagerShoppingCardText("ui.quantity_description_optional", {}, this._hass)}</span><input data-d-description value="${esc(draft.description)}" maxlength="2000" placeholder="${haListManagerShoppingCardText("ui.package_description_example", {}, this._hass)}"></label>`;
     const quantityFields = `<div class="item-quantity-fields"><div class="item-quantity-controls"><label class="quantity-edit-field"><span>${haListManagerShoppingCardText("ui.count", {}, this._hass)}</span><input data-d-quantity type="number" min="1" max="1000000" value="${esc(draft.quantity)}"></label><div class="dialog-quantity-actions"><button type="button" data-dialog-quantity="1" title="${haListManagerShoppingCardText("ui.increase_quantity", {}, this._hass)}">+</button><button type="button" data-dialog-quantity="-1" title="${haListManagerShoppingCardText("ui.decrease_count", {}, this._hass)}">−</button></div></div>${amountField}</div>`;
-    const previewDescription = product?.package_quantity || draft.description;
+    const bringPreview = isBring ? this._bringPreviewValue(draft.quantity, draft.description) : "";
     const image = product?.image_url && this._config.show_images
       ? `<button class="dialog-image-button" type="button" data-view-image="${esc(product.image_url)}" title="${haListManagerShoppingCardText("ui.enlarge_product_image", {}, this._hass)}"><img class="dialog-image" src="${esc(product.image_url)}" alt="${esc(draft.name)}"></button>`
       : "";
@@ -3118,7 +3129,7 @@ class HaListManagerShoppingCard extends HTMLElement {
       ${this._renderEditShortcuts()}${this._notice(draft.quick_action_status, "quick", "dialog-status success item-action-result", "check-circle-outline")}${image}<label class="offer-only-choice"><input type="checkbox" data-d-offer-only ${draft.offer_only ? "checked" : ""}>${haListManagerShoppingCardText("ui.buy_on_offer_only", {}, this._hass)}</label><label class="name-field"><span>${haListManagerShoppingCardText(createsProduct ? "scan.new_product_name" : "ui.item_name", {}, this._hass)}</span><input data-d-name value="${esc(draft.name)}" maxlength="200"></label>
       ${draft.item?.completed_delete_at ? `<p class="field-help">${haListManagerShoppingCardText("cleanup.scheduled",{time:esc(new Date(draft.item.completed_delete_at).toLocaleString(haListManagerShoppingCardTextLocale(this._hass)))},this._hass)}</p>` : ""}
       ${draft.camera_capture ? `<p class="field-help">${haListManagerShoppingCardText(createsProduct ? "scan.confirm_hint" : "scan.known_product_hint", {}, this._hass)}</p>` : ""}${product?.ean ? `<div class="meta product-meta">EAN ${esc(product.ean)}${product.brand ? ` · ${esc(product.brand)}` : ""}${product.package_quantity ? ` · ${esc(product.package_quantity)}` : ""}</div>` : ""}
-      ${isBring ? `${quantityFields}${amountHelp}${product?.package_quantity ? "" : `<p class="field-help bring-format-help">${haListManagerShoppingCardText("help.bring_quantity_examples", {}, this._hass)}</p>`}<div class="bring-live-preview"><span>${haListManagerShoppingCardText("bring.preview", {}, this._hass)}</span><strong data-bring-preview-name>${esc(draft.name.trim() || haListManagerShoppingCardText("ui.item_name", {}, this._hass))}</strong><small data-bring-preview-value ${this._bringPreviewValue(draft.quantity, previewDescription) ? "" : "hidden"}>${esc(this._bringPreviewValue(draft.quantity, previewDescription))}</small></div>${this._renderCategoryEditorSection()}` : `${quantityFields}${amountHelp}${this._renderCategoryEditorSection()}`}
+      ${isBring ? `${quantityFields}${amountHelp}${product?.package_quantity ? "" : `<p class="field-help bring-format-help">${haListManagerShoppingCardText("help.bring_quantity_examples", {}, this._hass)}</p>`}<div class="bring-live-preview"><span>${haListManagerShoppingCardText("bring.preview", {}, this._hass)}</span><strong data-bring-preview-name>${esc(draft.name.trim() || haListManagerShoppingCardText("ui.item_name", {}, this._hass))}</strong><small data-bring-preview-value ${bringPreview ? "" : "hidden"}>${esc(bringPreview)}</small></div>${this._renderCategoryEditorSection()}` : `${quantityFields}${amountHelp}${this._renderCategoryEditorSection()}`}
       ${this._renderLabelSelector(draft.label_ids)}
       ${this._notice(draft.status, "dialog", `dialog-status ${esc(draft.statusTone)}`, draft.statusTone === "warning" ? "alert-outline" : "alert-circle-outline")}
       <footer><button class="primary" data-save-dialog>${this._busy ? haListManagerShoppingCardText("ui.saving", {}, this._hass) : haListManagerShoppingCardText(createsProduct ? "scan.new_product_save" : draft.camera_capture ? "ui.add" : "ui.save", {}, this._hass)}</button><button data-close-dialog>${haListManagerShoppingCardText("ui.cancel", {}, this._hass)}</button>${draft.item ? `<button data-open-product-transfer><ha-icon icon="mdi:${draft.item.product_id ? "database-edit-outline" : "database-plus-outline"}"></ha-icon>${draft.item.product_id ? haListManagerShoppingCardText("products.edit", {}, this._hass) : haListManagerShoppingCardText("products.save_to_database", {}, this._hass)}</button><button class="danger" data-delete-item><ha-icon icon="mdi:delete-outline"></ha-icon>${haListManagerShoppingCardText("ui.delete_from_list", {}, this._hass)}</button>` : ""}</footer>
@@ -3841,7 +3852,11 @@ class HaListManagerShoppingCard extends HTMLElement {
       ? (product?.image_url ? `<button type="button" class="item-image" data-view-item-image="${esc(item.id)}"><img src="${esc(product.image_url)}" alt="${esc(item.name)}"></button>` : `<span class="item-image placeholder"><ha-icon icon="mdi:image-off-outline"></ha-icon></span>`)
       : "";
     const controlsQuantity = this._config.quantity_position === "controls" ? `<strong class="controls-quantity">${Math.max(0, Number(item.quantity || 0))}</strong>` : "";
-    return `<article class="item${manual ? " manual-sort" : ""} ${item.completed ? "completed" : ""} ${this._config.show_images ? "with-image" : "without-image"}" data-item-id="${esc(item.id)}">${grip}<button type="button" class="complete-button" data-complete title="${item.completed ? haListManagerShoppingCardText("ui.show_again", {}, this._hass) : haListManagerShoppingCardText("ui.mark_completed", {}, this._hass)}">${item.completed ? "✓" : "☐"}</button>${image}<button type="button" class="item-main" data-edit-item="${esc(item.id)}"><span class="item-name">${esc(this._displayName(item))}${item.offer_only ? ` <span class="offer-only-badge" title="${haListManagerShoppingCardText("ui.buy_on_offer_only", {}, this._hass)}"><ha-icon icon="mdi:tag-outline"></ha-icon>${haListManagerShoppingCardText("ui.special_offer", {}, this._hass)}</span>` : ""}</span>${item.description ? `<span class="meta">${esc(item.description)}</span>` : ""}${this._config.show_labels && item.labels?.length ? `<span class="labels">${this._renderLabels(item.labels)}</span>` : ""}</button>${this._config.show_plus_minus ? `<div class="quantity-actions"><button type="button" data-quantity-change="${esc(item.id)}:1" title="${haListManagerShoppingCardText("ui.increase_quantity", {}, this._hass)}">+</button>${controlsQuantity}<button type="button" data-quantity-change="${esc(item.id)}:-1" title="${haListManagerShoppingCardText("ui.decrease_count", {}, this._hass)}">−</button></div>` : ""}</article>`;
+    const name = this._displayName(item, product || null);
+    const packageQuantity = String(product?.package_quantity || "").trim();
+    const details = item.description || (packageQuantity && !name.toLocaleLowerCase().includes(packageQuantity.toLocaleLowerCase())
+      ? packageQuantity : "");
+    return `<article class="item${manual ? " manual-sort" : ""} ${item.completed ? "completed" : ""} ${this._config.show_images ? "with-image" : "without-image"}" data-item-id="${esc(item.id)}">${grip}<button type="button" class="complete-button" data-complete title="${item.completed ? haListManagerShoppingCardText("ui.show_again", {}, this._hass) : haListManagerShoppingCardText("ui.mark_completed", {}, this._hass)}">${item.completed ? "✓" : "☐"}</button>${image}<button type="button" class="item-main" data-edit-item="${esc(item.id)}"><span class="item-name">${esc(name)}${item.offer_only ? ` <span class="offer-only-badge" title="${haListManagerShoppingCardText("ui.buy_on_offer_only", {}, this._hass)}"><ha-icon icon="mdi:tag-outline"></ha-icon>${haListManagerShoppingCardText("ui.special_offer", {}, this._hass)}</span>` : ""}</span>${details ? `<span class="meta">${esc(details)}</span>` : ""}${this._config.show_labels && item.labels?.length ? `<span class="labels">${this._renderLabels(item.labels)}</span>` : ""}</button>${this._config.show_plus_minus ? `<div class="quantity-actions"><button type="button" data-quantity-change="${esc(item.id)}:1" title="${haListManagerShoppingCardText("ui.increase_quantity", {}, this._hass)}">+</button>${controlsQuantity}<button type="button" data-quantity-change="${esc(item.id)}:-1" title="${haListManagerShoppingCardText("ui.decrease_count", {}, this._hass)}">−</button></div>` : ""}</article>`;
   }
 
   _contentHtml() {

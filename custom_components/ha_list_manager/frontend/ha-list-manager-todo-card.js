@@ -88,7 +88,7 @@ function haListManagerTodoCardTextRequest(hass, message) {
 const HA_LM_API = "ha_list_manager";
 const HA_LM_ITEMS_EVENT = "ha_list_manager_items_changed";
 const HA_LM_LISTS_EVENT = "ha_list_manager_lists_changed";
-const CARD_VERSION = "1.1.0b5";
+const CARD_VERSION = "1.1.0b6";
 
 const esc = (value) => String(value ?? "").replace(/[&<>'"]/g, (char) => ({
   "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;",
@@ -179,7 +179,7 @@ class HaListManagerTodoCard extends HTMLElement {
       title: haListManagerTodoCardText("ui.tasks", {}, hass), title_icon: "mdi:checkbox-marked-outline", view_mode: "auto", content_display: "card_and_large", collapsible: true,
       input_row_position: "top", option_row_position: "bottom", show_category_toggle_button: true, show_input_mask: true,
       show_submit_button: true, show_clear_button: true, allow_filter: false, auto_expand_search: true,
-      show_share_button: true, show_pdf_export_button: false, show_edit_shortcuts: true, save_dialog_on_enter: false, focus_dialog_input: false,
+      show_share_button: true, show_pdf_export_button: false, show_edit_shortcuts: true, save_dialog_on_enter: false, focus_dialog_input: false, refocus_after_add: false,
       show_chips: true, show_chip_popup_button: true, filter_chips: true, show_important_chips: true,
       category_chip_layout: "none", category_chip_colors: true, important_chip_color_rgb: [244, 67, 54], chips_position: "auto",
       show_descriptions: true, show_labels: true, show_item_dividers: true, item_divider_before_spacing: 10, item_divider_after_spacing: 10, item_font_size: 16, category_font_scale: 110,
@@ -205,7 +205,7 @@ class HaListManagerTodoCard extends HTMLElement {
       input_row_position: haListManagerTodoCardText("ui.input_row", {}, hass), option_row_position: haListManagerTodoCardText("ui.button_bar", {}, hass), show_category_toggle_button: haListManagerTodoCardText("ui.show_category_toggle", {}, hass),
       show_edit_shortcuts: haListManagerTodoCardText("shopping.show_edit_shortcuts", {}, hass),
       save_dialog_on_enter: haListManagerTodoCardText("ui.save_dialog_on_enter", {}, hass),
-      focus_dialog_input: haListManagerTodoCardText("ui.focus_dialog_input", {}, hass),
+      focus_dialog_input: haListManagerTodoCardText("ui.focus_dialog_input", {}, hass), refocus_after_add: haListManagerTodoCardText("ui.refocus_after_add", {}, hass),
       show_input_mask: haListManagerTodoCardText("ui.show_input_row", {}, hass), show_submit_button: haListManagerTodoCardText("ui.show_add_button", {}, hass),
       allow_filter: haListManagerTodoCardText("ui.filter_tasks_while_typing", {}, hass),
       auto_expand_search: haListManagerTodoCardText("ui.auto_expand_search", {}, hass),
@@ -259,6 +259,7 @@ class HaListManagerTodoCard extends HTMLElement {
           { name: "show_edit_shortcuts", selector: { boolean: {} }, default: true },
           { name: "save_dialog_on_enter", selector: { boolean: {} }, default: false },
           { name: "focus_dialog_input", selector: { boolean: {} }, default: false },
+          { name: "refocus_after_add", selector: { boolean: {} }, default: false },
           { name: "show_input_mask", selector: { boolean: {} }, default: true },
           { name: "show_submit_button", selector: { boolean: {} }, default: true },
           { name: "show_clear_button", selector: { boolean: {} }, default: true },
@@ -352,6 +353,7 @@ class HaListManagerTodoCard extends HTMLElement {
         show_edit_shortcuts: haListManagerTodoCardText("help.todo_edit_shortcuts", {}, hass),
         save_dialog_on_enter: haListManagerTodoCardText("help.todo_enter_actions", {}, hass),
         focus_dialog_input: haListManagerTodoCardText("help.todo_dialog_focus", {}, hass),
+        refocus_after_add: haListManagerTodoCardText("help.refocus_after_add", {}, hass),
         show_input_mask: haListManagerTodoCardText("help.task_input_visibility", {}, hass),
         show_submit_button: haListManagerTodoCardText("help.todo_add_button", {}, hass),
         show_clear_button: haListManagerTodoCardText("help.delete_completed_tasks_button", {}, hass),
@@ -1112,6 +1114,8 @@ class HaListManagerTodoCard extends HTMLElement {
   async _saveEditor() {
     const d = this._dialog; if (!d?.name.trim() || this._busy) return;
     this._rememberExpandedScroll(d.item?.id);
+    const refocus = !d.item ? globalThis.HaListManagerDialogSections.prepareAddFocus(this, "[data-new-task]") : undefined;
+    let added = false;
     this._busy = true; this._render();
     try {
       const due = d.due_date ? `${d.due_date}${d.due_time ? `T${d.due_time}:00` : ""}` : null;
@@ -1123,7 +1127,8 @@ class HaListManagerTodoCard extends HTMLElement {
       if (d.item) await haListManagerTodoCardTextRequest(this._hass, { type: `${HA_LM_API}/items/update`, item_id: d.item.id, completed: d.item.completed, product_id: null, ...values });
       else await haListManagerTodoCardTextRequest(this._hass, { type: `${HA_LM_API}/items/create`, list_id: this._listId(), ...values });
       this._input = ""; this._closeDialogs(true); await this._load(true);
-    } catch (error) { this._error = error?.message || String(error); } finally { this._busy = false; this._render(); }
+      added = true;
+    } catch (error) { this._error = error?.message || String(error); } finally { this._busy = false; this._render(); if (added) refocus?.(); }
   }
   async _setCompleted(item, completed, sourceRow = null) { if (this._busy) return false; this._rememberExpandedScroll(item.id, sourceRow); try { await haListManagerTodoCardTextRequest(this._hass, { type: `${HA_LM_API}/items/set_completed`, item_id: item.id, completed }); await this._load(true); return true; } catch (error) { this._error = error?.message || String(error); this._render(); return false; } }
   _advanceDue(item, fromNow) {
@@ -1354,13 +1359,16 @@ class HaListManagerTodoCard extends HTMLElement {
   async _useTemplateChip(chip) {
     if (!chip || this._busy) return;
     if ((chip.template_data?.add_mode || "edit") === "edit") { this._openTemplateEditor(chip); return; }
+    const refocus = globalThis.HaListManagerDialogSections.prepareAddFocus(this, "[data-new-task]");
+    let added = false;
     this._busy = true; this._error = ""; this._render();
     try {
       await haListManagerTodoCardTextRequest(this._hass, { type: `${HA_LM_API}/items/create`, list_id: this._listId(), ...this._templateValues(chip) });
       this._notificationStatus = haListManagerTodoCardText("ui.named_item_added", {p0:(chip.name)}, this._hass);
       await this._load(true);
+      added = true;
     } catch (error) { this._error = error?.message || String(error); }
-    finally { this._busy = false; this._render(); }
+    finally { this._busy = false; this._render(); if (added) refocus?.(); }
   }
 
   _configuredChipColor(value, fallback) {
