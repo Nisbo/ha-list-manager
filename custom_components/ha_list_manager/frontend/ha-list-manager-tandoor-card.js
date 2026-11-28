@@ -102,10 +102,13 @@ class HaListManagerTandoorCard extends HTMLElement {
     const t=key=>haListManagerTandoorCardText(`library.${key}`,{},hass);
     return {schema:[{name:"title",selector:{text:{}}},{name:"list_id",selector:{select:{options:[{value:"",label:t("choose_later")},...lists.map(list=>({value:list.id,label:list.name}))],mode:"dropdown"}}},
       {name:"layout",selector:{select:{mode:"dropdown",options:[{value:"auto",label:t("layout_auto")},{value:"card",label:t("layout_card")},{value:"panel",label:t("layout_panel")}]}}},
-      {name:"welcome_heading",selector:{text:{}}},{name:"welcome_title",selector:{text:{}}},{name:"welcome_description",selector:{text:{multiline:true}}},
       {name:"height",selector:{number:{min:400,max:1400,step:20,mode:"box",unit_of_measurement:"px"}}},
-      {name:"icon_expand",selector:{boolean:{}}},{name:"collapsible",selector:{boolean:{}}},{name:"remember_position",selector:{boolean:{}}},{name:"show_expand",selector:{boolean:{}}},{name:"card_id",selector:{text:{}}}],
-      computeLabel:schema=>t(`option_${schema.name}`),computeHelper:schema=>t(`help_${schema.name}`)};
+      {name:"icon_expand",selector:{boolean:{}}},{name:"show_expand",selector:{boolean:{}}},{name:"collapsible",selector:{boolean:{}}},
+      {name:"remember_position",selector:{boolean:{}}},{name:"card_id",selector:{text:{}}},
+      {name:"welcome_texts",type:"expandable",flatten:true,icon:"mdi:text-box-outline",schema:[
+        {name:"welcome_heading",selector:{text:{}}},{name:"welcome_title",selector:{text:{}}},{name:"welcome_description",selector:{text:{multiline:true}}},
+      ]}],
+      computeLabel:schema=>t(`option_${schema.name}`),computeHelper:schema=>schema.type==="expandable"?undefined:t(`help_${schema.name}`)};
   }
   setConfig(config){
     if(!config||typeof config!=="object")throw new Error("Invalid card configuration");
@@ -144,6 +147,7 @@ class HaListManagerTandoorCard extends HTMLElement {
   }
   getCardSize(){return this._isCollapsed()?1:10;}
   getGridOptions(){return {columns:12,rows:"auto",min_columns:6,min_rows:1};}
+  set preview(active){this.toggleAttribute("data-edit-preview",Boolean(active));this._queueLayout();}
   _text(key,values={}){return haListManagerTandoorCardText(`library.${key}`,values,this._hass);}
   _api(command,data={}){return haListManagerTandoorCardTextRequest(this._hass,{type:`ha_list_manager/${command}`,...data});}
   _storageKey(){return `ha-list-manager:tandoor:v1:${encodeURIComponent(this._hass?.user?.id||"user")}:${encodeURIComponent(this._config.card_id||`${window.location.pathname}:${this._config.title||"tandoor"}`)}`;}
@@ -212,7 +216,8 @@ class HaListManagerTandoorCard extends HTMLElement {
     if(!this.isConnected||this._layoutFrame!=null)return;
     this._layoutFrame=requestAnimationFrame(()=>{this._layoutFrame=null;if(!this.isConnected)return;if(this._large){this._updateLargeBounds();return;}if(!this._panelLayout||this._expanded)return;
       const viewport=window.visualViewport?.height||window.innerHeight;const top=this.getBoundingClientRect().top;
-      this.style.setProperty("--library-panel-height",`${Math.max(320,viewport-Math.max(0,top)-12)}px`);
+      const minimum=this.hasAttribute("data-edit-preview")?76:320;
+      this.style.setProperty("--library-panel-height",`${Math.max(minimum,viewport-Math.max(0,top)-12)}px`);
     });
   }
   _ownsFullscreen(){return document.fullscreenElement===this||this.getRootNode?.().fullscreenElement===this;}
@@ -383,6 +388,8 @@ class HaListManagerTandoorCard extends HTMLElement {
 :host{display:block;min-width:0;font-family:var(--paper-font-body1_-_font-family,inherit);--cook-accent:#dba777;--cook-soft:color-mix(in srgb,var(--cook-accent) 12%,transparent);--cook-border:color-mix(in srgb,var(--primary-text-color) 11%,transparent)}
 *{box-sizing:border-box}ha-card{height:var(--library-height,740px);max-height:90dvh;overflow:hidden;background:var(--ha-card-background,var(--card-background-color,#1e1f21));color:var(--primary-text-color);box-shadow:var(--ha-card-box-shadow,none)}
 :host([data-panel]) ha-card{height:var(--library-panel-height,calc(100dvh - var(--header-height,56px) - 28px));max-height:none}
+/* Home Assistant places its card actions below the dashboard preview. */
+:host([data-panel][data-edit-preview]:not([data-collapsed],[data-large],[data-expanded])) ha-card{height:max(76px,calc(var(--library-panel-height,100dvh - var(--header-height,56px) - 28px) - 64px))}
 :host([data-large]){position:fixed!important;top:var(--library-large-top,56px)!important;left:var(--library-large-left,0)!important;right:var(--library-large-right,0)!important;bottom:var(--library-large-bottom,0)!important;z-index:9998;max-width:none!important;min-width:0!important;padding:16px;background:var(--primary-background-color,#111)}:host([data-large]) ha-card{height:100%;max-height:none;box-shadow:0 16px 48px #0007}:host([data-collapsed]) ha-card{height:76px!important;max-height:none}:host([data-collapsed]) .toolbar{height:74px;min-height:74px;max-height:74px;padding:12px 14px;border-bottom:0}:host([data-expanded]){position:fixed!important;inset:0!important;z-index:9999;width:100vw;height:100dvh;padding:0;background:var(--primary-background-color,#111)}
 :host([data-expanded]) ha-card{height:100dvh;max-height:none;border:0;border-radius:0}.frame{height:100%;display:flex;flex-direction:column;min-height:0}
 button,input,select{font:inherit}button{cursor:pointer;color:inherit;border:1px solid var(--cook-border);background:transparent;border-radius:12px;min-height:42px}button:disabled{opacity:.4;cursor:default}button:hover:not(:disabled){background:var(--cook-soft)}button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--cook-accent);outline-offset:3px}

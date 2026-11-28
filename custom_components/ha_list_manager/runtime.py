@@ -18,6 +18,7 @@ if TYPE_CHECKING:
     from .scanner import ScannerManager
     from .scripts import ListScriptManager
     from .tandoor import TandoorClient
+    from .watchlist_sync import WatchlistSync
 
 
 @dataclass(slots=True)
@@ -34,6 +35,7 @@ class HaListManagerRuntime:
     external_lists: "ExternalListManager | None" = None
     legacy_import: "LegacyImportManager | None" = None
     entity_history: "EntityHistoryManager | None" = None
+    watchlist_sync: "WatchlistSync | None" = None
     tandoor: "TandoorClient | None" = None
     tandoor_config: tuple[str, str] | None = None
     tandoor_image_token: str = field(default_factory=lambda: secrets.token_urlsafe(32))

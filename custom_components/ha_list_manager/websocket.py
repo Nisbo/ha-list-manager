@@ -3,16 +3,17 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Mapping
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from functools import wraps
 from typing import Any
 
 import probatio
 
-from homeassistant.auth.permissions.const import POLICY_READ
+from homeassistant.auth.permissions.const import POLICY_CONTROL, POLICY_READ
 from homeassistant.components import websocket_api
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.core import Context, HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import entity_registry as er
 from homeassistant.util import dt as dt_util
@@ -72,7 +73,15 @@ from .runtime import HaListManagerRuntime
 from .frontend_assets import assets_for
 from .panel import async_register_panel
 from .scanner import normalize_scanner_address
+from . import watchlist
+from .tmdb import Tmdb
+from .watchlist_cache import availability_key, streaming_region, valid_region, watchlist_cache
+from .watchlist_subscriptions import watchlist_subscriptions
+from .localization import current_language
+from .const import EVENT_WATCHLIST_CHANGED
 from .tandoor import TandoorClient, TandoorError, normalize_tandoor_url
+
+_LOGGER = logging.getLogger(__name__)
 
 NOTIFICATION_PROVIDERS = {"notify_entity", "notify_service", "ntfy", "persistent"}
 NOTIFICATION_FORMATS = {"plain", "markdown", "html"}
@@ -315,6 +324,18 @@ def async_register_websocket_commands(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, websocket_list_tandoor_categories)
     websocket_api.async_register_command(hass, websocket_search_tandoor_recipes)
     websocket_api.async_register_command(hass, websocket_get_tandoor_recipe)
+    for handler in (websocket_watchlist_state, websocket_watchlist_search,
+                    websocket_watchlist_title, websocket_watchlist_season,
+                    websocket_watchlist_cast, websocket_watchlist_preview, websocket_watchlist_filmography,
+                    websocket_watchlist_regions, websocket_watchlist_availability, websocket_watchlist_appearances,
+                    websocket_watchlist_subscriptions_get, websocket_watchlist_subscriptions_save,
+                    websocket_watchlist_progress, websocket_watchlist_label,
+                    websocket_watchlist_label_settings, websocket_watchlist_favorite,
+                    websocket_watchlist_progress_mode, websocket_watchlist_continue,
+                    websocket_watchlist_management, websocket_watchlist_management_save,
+                    websocket_watchlist_sync, websocket_watchlist_play,
+                    websocket_watchlist_orders, websocket_watchlist_order_save):
+        websocket_api.async_register_command(hass, handler)
     websocket_api.async_register_command(hass, websocket_tandoor_library_info)
     websocket_api.async_register_command(hass, websocket_tandoor_library_browse)
     websocket_api.async_register_command(hass, websocket_tandoor_library_recipe)
@@ -501,6 +522,7 @@ async def websocket_legacy_import_apply(hass, connection, msg):
         EVENT_ITEMS_CHANGED,
         EVENT_LISTS_CHANGED,
         EVENT_INVENTORY_CHANGED,
+        EVENT_WATCHLIST_CHANGED,
         EVENT_SCANNER_TARGET_CHANGED,
         EVENT_SCAN_PROCESSED,
     }),
@@ -514,7 +536,7 @@ async def websocket_subscribe(
     @callback
     def forward_event(event) -> None:
         data = event.as_dict().get("data", {})
-        if data.get("label_filters") and data.get("user_id") != connection.user.id:
+        if (data.get("label_filters") or data.get("watchlist_private")) and data.get("user_id") != connection.user.id:
             return
         connection.send_message(websocket_api.event_message(msg["id"], event.as_dict()))
 
@@ -898,7 +920,7 @@ async def websocket_set_favorite(
     """Add or remove one navigation favorite for the authenticated user."""
     allowed_sections = {
         "lists", "products", "categories", "labels", "chips", "dishes", "inventory",
-        "entity_history", "history", "notifications", "alexa", "settings", "backup", "statistics",
+        "entity_history", "history", "notifications", "alexa", "watchlist", "settings", "backup", "statistics",
     }
     section = msg["section"].strip()
     if section not in allowed_sections:
@@ -1506,6 +1528,35 @@ async def websocket_list_items(
     connection.send_result(msg["id"], result)
 
 
+_SHOPPING_PRODUCT_DETAILS_SCHEMA = {
+    probatio.Required("name"): str,
+    probatio.Optional("ean"): probatio.Any(str, None),
+    probatio.Optional("original_name"): probatio.Any(str, None),
+    probatio.Optional("brand"): probatio.Any(str, None),
+    probatio.Optional("package_quantity"): probatio.Any(str, None),
+    probatio.Optional("image_url"): probatio.Any(str, None),
+    probatio.Optional("category_id"): probatio.Any(str, None),
+    probatio.Optional("label_ids"): [str],
+    probatio.Optional("allow_duplicate_name"): bool,
+}
+
+
+def _shopping_product_details(data: dict | None) -> dict | None:
+    if data is None:
+        return None
+    return {
+        "name": _clean_text(data.get("name"), maximum=200, required=True),
+        "ean": _clean_ean(data.get("ean")),
+        "original_name": _clean_text(data.get("original_name"), maximum=200, required=False),
+        "brand": _clean_text(data.get("brand"), maximum=200, required=False),
+        "package_quantity": _clean_text(data.get("package_quantity"), maximum=100, required=False),
+        "image_url": _clean_text(data.get("image_url"), maximum=1000, required=False),
+        "category_id": _clean_text(data.get("category_id"), maximum=64, required=False),
+        "label_ids": _clean_label_ids(data.get("label_ids")),
+        "allow_duplicate_name": data.get("allow_duplicate_name") is True,
+    }
+
+
 @localized_command(
     {
         probatio.Required("type"): f"{DOMAIN}/items/create",
@@ -1526,6 +1577,10 @@ async def websocket_list_items(
         probatio.Optional("offer_only"): bool,
         probatio.Optional("remember_product_category"): bool,
         probatio.Optional("remember_product_labels"): bool,
+        probatio.Optional("create_product"): bool,
+        probatio.Optional("product_details"): _SHOPPING_PRODUCT_DETAILS_SCHEMA,
+        probatio.Optional("create_list_chip"): bool,
+        probatio.Optional("extras_request_id"): str,
     }
 )
 async def websocket_create_item(
@@ -1534,6 +1589,8 @@ async def websocket_create_item(
     msg: dict[str, Any],
 ) -> None:
     """Create an entry in a backend list."""
+    create_product = msg.get("create_product", False) or "product_details" in msg
+    create_list_chip = msg.get("create_list_chip", False)
     try:
         list_record = await _runtime(hass).database.async_get_list(msg["list_id"])
         values = {
@@ -1553,7 +1610,24 @@ async def websocket_create_item(
         )
         if list_record.list_type != "todo" and recurrence_interval is not None:
             raise ValueError(localized_text("errors.recurrence_todo_only"))
-        if list_record.provider == "bring":
+        if create_product or create_list_chip or "extras_request_id" in msg:
+            request_id = None
+            if "extras_request_id" in msg:
+                from uuid import UUID
+
+                try:
+                    request_id = str(UUID(msg["extras_request_id"]))
+                except ValueError:
+                    raise ValueError(localized_text("errors.request_id_invalid")) from None
+            record = await _runtime(hass).database.async_save_shopping_item_with_extras(
+                msg["list_id"], {
+                    **values, "due_at": _clean_text(msg.get("due_at"), maximum=40, required=False),
+                    "remember_product_category": msg.get("remember_product_category", False),
+                    "remember_product_labels": msg.get("remember_product_labels", False),
+                }, create_product=create_product, create_list_chip=create_list_chip, request_id=request_id,
+                product_details=_shopping_product_details(msg.get("product_details")),
+            )
+        elif list_record.provider == "bring":
             if msg.get("remember_product_category", False) or msg.get("remember_product_labels", False):
                 raise ValueError(localized_text("backend.local_shopping_target_required"))
             record = await _runtime(hass).external_lists.async_create_item(
@@ -1579,6 +1653,9 @@ async def websocket_create_item(
             msg["id"], websocket_api.ERR_NOT_FOUND, localized_text("errors.list_not_found")
         )
         return
+    except DuplicateEANError:
+        _send_error(connection, msg["id"], "ean_already_exists", localized_text("errors.ean_assigned"))
+        return
     except ExternalListError as error:
         _send_error(connection, msg["id"], "external_list_error", error)
         return
@@ -1589,9 +1666,9 @@ async def websocket_create_item(
         return
     if list_record.provider != "bring":
         _fire_items_changed(hass, record.list_id)
-        if msg.get("remember_product_labels", False):
+        if create_product or msg.get("remember_product_labels", False):
             _fire_lists_changed(hass)
-        elif msg.get("remember_product_category", False):
+        elif create_list_chip or msg.get("remember_product_category", False):
             _fire_lists_changed(hass, record.list_id)
     connection.send_result(msg["id"], {"item": record.as_dict()})
 
@@ -1697,6 +1774,8 @@ async def websocket_item_action_send(hass, connection, msg) -> None:
         probatio.Optional("offer_only"): bool,
         probatio.Optional("remember_product_category"): bool,
         probatio.Optional("remember_product_labels"): bool,
+        probatio.Optional("create_product"): bool,
+        probatio.Optional("product_details"): _SHOPPING_PRODUCT_DETAILS_SCHEMA,
     }
 )
 async def websocket_update_item(
@@ -1705,6 +1784,7 @@ async def websocket_update_item(
     msg: dict[str, Any],
 ) -> None:
     """Update an entry in a backend list."""
+    create_product = msg.get("create_product", False) or "product_details" in msg
     try:
         updates = {
             "name": _clean_text(msg["name"], maximum=200, required=True),
@@ -1744,7 +1824,12 @@ async def websocket_update_item(
             raise ValueError(localized_text("errors.recurrence_todo_only"))
         updates["recurrence_interval"] = recurrence_interval
         updates["recurrence_unit"] = recurrence_unit
-        if list_record.provider == "bring":
+        if create_product:
+            record = await _runtime(hass).database.async_save_shopping_item_with_extras(
+                existing.list_id, updates, create_product=True, item_id=existing.id,
+                product_details=_shopping_product_details(msg.get("product_details")),
+            )
+        elif list_record.provider == "bring":
             if msg.get("remember_product_category", False) or msg.get("remember_product_labels", False):
                 raise ValueError(localized_text("backend.local_shopping_target_required"))
             record = await _runtime(hass).external_lists.async_update_item(
@@ -1764,6 +1849,9 @@ async def websocket_update_item(
             msg["id"], websocket_api.ERR_NOT_FOUND, localized_text("errors.item_not_found")
         )
         return
+    except DuplicateEANError:
+        _send_error(connection, msg["id"], "ean_already_exists", localized_text("errors.ean_assigned"))
+        return
     except ExternalListError as error:
         _send_error(connection, msg["id"], "external_list_error", error)
         return
@@ -1774,7 +1862,7 @@ async def websocket_update_item(
         return
     if list_record.provider != "bring":
         _fire_items_changed(hass, record.list_id)
-        if msg.get("remember_product_labels", False):
+        if create_product or msg.get("remember_product_labels", False):
             _fire_lists_changed(hass)
         elif msg.get("remember_product_category", False):
             _fire_lists_changed(hass, record.list_id)
@@ -2312,10 +2400,13 @@ async def websocket_get_settings(
     msg: dict[str, Any],
 ) -> None:
     """Return backend product-name defaults."""
-    options = _runtime(hass).config_entry.options
+    runtime = _runtime(hass)
+    options = runtime.config_entry.options
+    database = runtime.database
     connection.send_result(
         msg["id"],
         {
+            "watchlist_preferences": await database._async_run(watchlist.preferences, database),
             "append_brand_to_product_name": bool(
                 options.get("append_brand_to_product_name", False)
             ),
@@ -2326,6 +2417,10 @@ async def websocket_get_settings(
             "scanner_default_action": options.get("scanner_default_action", "add"),
             "tandoor_url": options.get("tandoor_url"),
             "tandoor_token_configured": bool(options.get("tandoor_token")),
+            "tmdb_token_configured": bool(options.get("tmdb_token")),
+            "watchlist_region": options.get("watchlist_region"),
+            "watchlist_share_subscriptions": bool(options.get("watchlist_share_subscriptions", False)),
+            "watchlist_home_region": streaming_region(hass, {}),
             **public_source_settings(options),
         },
     )
@@ -2341,6 +2436,14 @@ async def websocket_get_settings(
         probatio.Optional("scanner_default_action"): probatio.In(SCANNER_ACTIONS),
         probatio.Optional("tandoor_url"): probatio.Any(str, None),
         probatio.Optional("tandoor_token"): probatio.Any(str, None),
+        probatio.Optional("tmdb_token"): probatio.Any(str, None),
+        probatio.Optional("watchlist_region"): probatio.Any(str, None),
+        probatio.Optional("watchlist_share_subscriptions"): bool,
+        probatio.Optional("watchlist_preferences"): {
+            probatio.Required("default_mode"): probatio.In({"shared", "personal"}),
+            probatio.Required("allow_override"): bool,
+            probatio.Required("show_all_favorites"): bool,
+        },
         probatio.Optional("product_data_source"): probatio.In(["off", "custom"]),
         probatio.Optional("product_api_url"): probatio.Any(str, None),
         probatio.Optional("product_api_key"): probatio.Any(str, None),
@@ -2384,11 +2487,41 @@ async def websocket_update_settings(
             ),
         }
     )
+    if "tmdb_token" in msg:
+        token = (msg["tmdb_token"] or "").strip()
+        if len(token) > 2048 or token and not all(char.isascii() and char.isprintable() and not char.isspace() for char in token):
+            _send_error(connection, msg["id"], "invalid_input", localized_text("watchlist.credentials"))
+            return
+        if token:
+            options["tmdb_token"] = token
+        else:
+            options.pop("tmdb_token", None)
+    if "watchlist_region" in msg:
+        region = msg["watchlist_region"]
+        if region is not None and not valid_region(region):
+            _send_error(connection, msg["id"], "invalid_input", localized_text("watchlist.invalid_region"))
+            return
+        options["watchlist_region"] = region
+    if "watchlist_share_subscriptions" in msg:
+        options["watchlist_share_subscriptions"] = msg["watchlist_share_subscriptions"]
+    database = runtime.database
+    if prefs := msg.get("watchlist_preferences"):
+        preferences = await database._async_run(
+            watchlist.set_preferences, database, prefs["default_mode"], prefs["allow_override"], prefs["show_all_favorites"],
+        )
+    else:
+        preferences = await database._async_run(watchlist.preferences, database)
     hass.config_entries.async_update_entry(runtime.config_entry, options=options)
+    if {"tmdb_token", "watchlist_region", "watchlist_share_subscriptions"}.intersection(msg) or prefs:
+        hass.bus.async_fire(EVENT_WATCHLIST_CHANGED, {})
     connection.send_result(
         msg["id"],
         {
-            **{key: value for key, value in options.items() if key not in {"tandoor_token", "product_api_key"}},
+            "watchlist_preferences": preferences,
+            **{key: value for key, value in options.items() if key not in {"tandoor_token", "product_api_key", "tmdb_token"}},
+            "tmdb_token_configured": bool(options.get("tmdb_token")),
+            "watchlist_home_region": streaming_region(hass, {}),
+            "watchlist_share_subscriptions": bool(options.get("watchlist_share_subscriptions", False)),
             "tandoor_token_configured": bool(options.get("tandoor_token")),
             **public_source_settings(options),
         },
@@ -5125,3 +5258,738 @@ async def websocket_set_list_script_settings(hass, connection, msg):
         _send_input_error(connection, msg, error)
         return
     connection.send_result(msg["id"], result)
+
+
+_WATCHLIST_KIND = probatio.In({"movie", "tv"})
+_WATCHLIST_ID = probatio.All(int, probatio.Range(min=1, max=2147483647))
+_WATCHLIST_SEASON = probatio.All(int, probatio.Range(min=0, max=9999))
+_WATCHLIST_MEDIA = {
+    probatio.Required("kind"): _WATCHLIST_KIND,
+    probatio.Required("media_id"): _WATCHLIST_ID,
+}
+
+
+def _watchlist_client(hass):
+    token = _runtime(hass).config_entry.options.get("tmdb_token")
+    return Tmdb(hass, token, current_language())
+
+
+_WATCHLIST_ITEM = {
+    probatio.Required("kind"): probatio.In({"movie", "tv", "collection"}),
+    probatio.Required("media_id"): _WATCHLIST_ID,
+}
+
+
+async def _watchlist_state(hass, user_id=None):
+    runtime = _runtime(hass)
+    database = runtime.database
+    result = await database._async_run(watchlist.state, database, user_id)
+    options = runtime.config_entry.options
+    region = streaming_region(hass, options)
+    playback = watchlist.playback_settings(options)
+    return {**result, "configured": bool(options.get("tmdb_token")), "region": region,
+            "players": playback["players"] if playback["script"] else [],
+            "local_sources": playback["local_sources"] if playback["script"] else [],
+            "availability": await watchlist_cache(hass).availability(region, result["titles"]) if region and result["titles"] else {},
+            "subscriptions": await _watchlist_subscription_view(hass, options, region, user_id)}
+
+
+async def _watchlist_subscription_view(hass, options, region, user_id):
+    if not region or user_id is None:
+        return {"own": [], "household": []}
+    peers = ()
+    if options.get("watchlist_share_subscriptions", False):
+        peers = [user.id for user in await hass.auth.async_get_users() if user.is_active and not user.system_generated]
+    return await watchlist_subscriptions(hass).view(region, user_id, peers)
+
+
+async def _watchlist_episodes(hass, title, number, refresh=False):
+    summary = watchlist.season_summary(title, number)
+    database = _runtime(hass).database
+    media_id = title["id"]
+    generation = title.get("season_cache_generation")
+    episodes = await database._async_run(watchlist.stored_season, database, media_id, number)
+    fresh = generation is None or number in title.get("season_cache_fresh", [])
+    if (episodes is not None and not refresh and fresh
+            and len(episodes) == summary["count"]):
+        return episodes
+    try:
+        episodes = await _watchlist_client(hass).season(media_id, number)
+    except watchlist.WatchlistError:
+        if episodes is not None and not refresh:
+            return episodes
+        raise
+    await database._async_run(watchlist.save_season, database, media_id, number, episodes, generation)
+    return episodes
+
+
+@localized_command({probatio.Required("type"): f"{DOMAIN}/watchlist/state"})
+async def websocket_watchlist_state(hass, connection, msg):
+    connection.send_result(msg["id"], await _watchlist_state(hass, connection.user.id))
+
+
+@localized_command({
+    probatio.Required("type"): f"{DOMAIN}/watchlist/search",
+    probatio.Required("kind"): _WATCHLIST_KIND,
+    probatio.Required("query"): probatio.All(str, probatio.Length(min=1, max=200)),
+    probatio.Optional("page", default=1): probatio.All(int, probatio.Range(min=1, max=500)),
+})
+async def websocket_watchlist_search(hass, connection, msg):
+    try:
+        query = _clean_text(msg["query"], maximum=200, required=True)
+        result = await _watchlist_client(hass).search(msg["kind"], query, msg["page"])
+    except (watchlist.WatchlistError, KeyError, TypeError, ValueError) as error:
+        _send_error(connection, msg["id"], "watchlist_error", _watchlist_message(error))
+        return
+    connection.send_result(msg["id"], result)
+
+
+@localized_command({
+    probatio.Required("type"): f"{DOMAIN}/watchlist/title",
+    **_WATCHLIST_ITEM,
+    probatio.Required("action"): probatio.In({"add", "remove", "refresh", "add_collection"}),
+})
+async def websocket_watchlist_title(hass, connection, msg):
+    database = _runtime(hass).database
+    kind, media_id, action = msg["kind"], msg["media_id"], msg["action"]
+    try:
+        if kind == "collection" and action != "add_collection":
+            raise watchlist.watchlist_error("missing_title")
+        if action == "remove":
+            await database._async_run(watchlist.remove_title, database, kind, media_id)
+        elif action == "add_collection":
+            if kind == "collection":
+                collection = await database._async_run(watchlist.stored_collection, database, media_id)
+            else:
+                title = await database._async_run(watchlist.stored_title, database, kind, media_id)
+                collection = title.get("collection")
+            if not collection:
+                raise watchlist.watchlist_error("missing_collection")
+            state = await _watchlist_state(hass)
+            existing = {row["id"] for row in state["titles"] if row["kind"] == "movie"}
+            client = _watchlist_client(hass)
+            titles = [
+                await client.title("movie", part["id"], collection=collection)
+                for part in collection["parts"] if part["id"] not in existing
+            ]
+            await database._async_run(watchlist.save_titles, database, titles)
+        else:
+            client = _watchlist_client(hass)
+            if action == "refresh":
+                saved = await database._async_run(watchlist.stored_title, database, kind, media_id)
+                title = await client.title(kind, media_id, full_cast=True) if "full_cast" in saved else await client.title(kind, media_id)
+            else:
+                title = await client.title(kind, media_id)
+            await database._async_run(watchlist.save_titles, database, [title], action == "refresh")
+    except (watchlist.WatchlistError, KeyError, TypeError, ValueError) as error:
+        _send_error(connection, msg["id"], "watchlist_error", _watchlist_message(error))
+        return
+    await _watchlist_changed(hass, connection, msg["id"])
+
+
+def _watchlist_message(error):
+    return error if isinstance(error, watchlist.WatchlistError) else localized_text("watchlist.remote")
+
+
+async def _watchlist_changed(hass, connection, msg_id, private=False):
+    event = {"watchlist_private": True, "user_id": connection.user.id} if private else {}
+    hass.bus.async_fire(EVENT_WATCHLIST_CHANGED, event)
+    connection.send_result(msg_id, await _watchlist_state(hass, connection.user.id))
+
+
+@localized_command({probatio.Required("type"): f"{DOMAIN}/watchlist/cast", **_WATCHLIST_MEDIA,
+                    probatio.Optional("full", default=True): bool})
+async def websocket_watchlist_cast(hass, connection, msg):
+    database = _runtime(hass).database
+    kind, media_id, full = msg["kind"], msg["media_id"], msg.get("full", True)
+    try:
+        saved = await database._async_run(watchlist.stored_title, database, kind, media_id, True)
+        cached = saved.get("full_cast") if saved is not None else None
+        if cached is not None and (kind != "tv" or not full
+                                   or saved.get("full_cast_revision") == watchlist.TV_FULL_CAST_REVISION):
+            cast = cached if full else saved["cast"]
+        else:
+            client = _watchlist_client(hass)
+            try:
+                cast = await client.cast(kind, media_id, full)
+            except watchlist.WatchlistError:
+                if cached is None:
+                    raise
+                cast = cached
+            else:
+                if saved is not None:
+                    await database._async_run(watchlist.save_cast, database, kind, media_id, cast,
+                                              cast[:watchlist.CAST_LIMIT], full)
+    except (watchlist.WatchlistError, KeyError, TypeError, ValueError) as error:
+        _send_error(connection, msg["id"], "watchlist_error", _watchlist_message(error))
+        return
+    connection.send_result(msg["id"], cast)
+
+
+@localized_command({probatio.Required("type"): f"{DOMAIN}/watchlist/preview", **_WATCHLIST_MEDIA})
+async def websocket_watchlist_preview(hass, connection, msg):
+    try:
+        result = await _watchlist_client(hass).title(msg["kind"], msg["media_id"], preview=True)
+    except (watchlist.WatchlistError, KeyError, TypeError, ValueError) as error:
+        _send_error(connection, msg["id"], "watchlist_error", _watchlist_message(error))
+        return
+    connection.send_result(msg["id"], result)
+
+
+@localized_command({probatio.Required("type"): f"{DOMAIN}/watchlist/filmography",
+                    probatio.Required("person_id"): _WATCHLIST_ID})
+async def websocket_watchlist_filmography(hass, connection, msg):
+    try:
+        result = await _watchlist_client(hass).filmography(msg["person_id"])
+    except (watchlist.WatchlistError, KeyError, TypeError, ValueError) as error:
+        _send_error(connection, msg["id"], "watchlist_error", _watchlist_message(error))
+        return
+    connection.send_result(msg["id"], result)
+
+
+@websocket_api.require_admin
+@localized_command({probatio.Required("type"): f"{DOMAIN}/watchlist/regions"})
+async def websocket_watchlist_regions(hass, connection, msg):
+    cache = watchlist_cache(hass)
+    cached = await cache.read("regions", 168)
+    if not cached or cached["stale"]:
+        try:
+            values = await _watchlist_client(hass).streaming_regions()
+            cached = await cache.write("regions", sorted({value for value in values if valid_region(value)}))
+        except (watchlist.WatchlistError, KeyError, TypeError, ValueError) as error:
+            if not cached:
+                _send_error(connection, msg["id"], "watchlist_error", _watchlist_message(error))
+                return
+    connection.send_result(msg["id"], cached["data"])
+
+
+async def _watchlist_provider_catalog(hass, region):
+    key = f"providers:{region}"
+    cache = watchlist_cache(hass)
+    record = await cache.read(key, 168)
+    if not record or record["stale"]:
+        try:
+            record = await cache.write(key, await _watchlist_client(hass).streaming_providers(region))
+        except (watchlist.WatchlistError, KeyError, TypeError, ValueError):
+            if not record:
+                raise
+    return record["data"]
+
+
+@localized_command({probatio.Required("type"): f"{DOMAIN}/watchlist/subscriptions/get"})
+async def websocket_watchlist_subscriptions_get(hass, connection, msg):
+    options = _runtime(hass).config_entry.options
+    region = streaming_region(hass, options)
+    try:
+        providers = await _watchlist_provider_catalog(hass, region) if region else []
+        selection = await _watchlist_subscription_view(hass, options, region, connection.user.id)
+    except (watchlist.WatchlistError, KeyError, TypeError, ValueError) as error:
+        _send_error(connection, msg["id"], "watchlist_error", _watchlist_message(error))
+        return
+    connection.send_result(msg["id"], {"region": region, "providers": providers, **selection})
+
+
+@localized_command({probatio.Required("type"): f"{DOMAIN}/watchlist/subscriptions/save",
+                    probatio.Required("region"): str,
+                    probatio.Required("provider_ids"): probatio.All([_WATCHLIST_ID], probatio.Length(max=500))})
+async def websocket_watchlist_subscriptions_save(hass, connection, msg):
+    runtime = _runtime(hass)
+    options = runtime.config_entry.options
+    region = streaming_region(hass, options)
+    user_id = connection.user.id
+    ids = set(msg["provider_ids"])
+    try:
+        if not region or region != msg["region"]:
+            raise watchlist.watchlist_error("subscriptions_region_changed")
+        store = watchlist_subscriptions(hass)
+        if ids:
+            previous = await store.view(region, user_id)
+            added = ids.difference(previous["own"])
+            if added and not added.issubset({item["id"] for item in await _watchlist_provider_catalog(hass, region)}):
+                raise watchlist.watchlist_error("subscriptions_invalid")
+        options = runtime.config_entry.options
+        if streaming_region(hass, options) != region:
+            raise watchlist.watchlist_error("subscriptions_region_changed")
+        await store.save(region, user_id, ids)
+        selection = await _watchlist_subscription_view(hass, options, region, user_id)
+    except (watchlist.WatchlistError, KeyError, TypeError, ValueError) as error:
+        _send_error(connection, msg["id"], "watchlist_error", _watchlist_message(error))
+        return
+    shared = options.get("watchlist_share_subscriptions", False)
+    hass.bus.async_fire(EVENT_WATCHLIST_CHANGED, {} if shared else {"watchlist_private": True, "user_id": user_id})
+    connection.send_result(msg["id"], {"region": region, **selection})
+
+
+@localized_command({probatio.Required("type"): f"{DOMAIN}/watchlist/availability", **_WATCHLIST_MEDIA,
+                    probatio.Optional("cached_only", default=False): bool,
+                    probatio.Optional("refresh", default=False): bool,
+                    probatio.Optional("playback", default=False): bool})
+async def websocket_watchlist_availability(hass, connection, msg):
+    options = _runtime(hass).config_entry.options
+    region = streaming_region(hass, options)
+    kind, media_id = msg["kind"], msg["media_id"]
+    extras = {}
+    if msg.get("playback"):
+        extras["last_source"] = await watchlist_subscriptions(hass).playback_source(
+            connection.user.id, kind, media_id,
+        )
+    if region is None:
+        connection.send_result(msg["id"], {"region": None, "record": None, **extras})
+        return
+    database = _runtime(hass).database
+    saved = await database._async_run(watchlist.stored_title, database, kind, media_id, True)
+    key = availability_key(region, kind, media_id)
+    ttl = 24 * watchlist.sync_interval(watchlist.sync_settings(options), saved) if saved else 24
+    cache = watchlist_cache(hass)
+    cached = await cache.read(key, ttl)
+    if not msg.get("cached_only") and (msg.get("refresh") or not cached or cached["stale"]):
+        try:
+            values = await _watchlist_client(hass).availability(kind, media_id, region)
+            cached = await cache.write(key, values, persistent=saved is not None)
+            if saved:
+                hass.bus.async_fire(EVENT_WATCHLIST_CHANGED, {})
+        except (watchlist.WatchlistError, KeyError, TypeError, ValueError) as error:
+            _send_error(connection, msg["id"], "watchlist_error", _watchlist_message(error))
+            return
+    connection.send_result(msg["id"], {"region": region, "record": cached, **extras})
+
+
+@localized_command({probatio.Required("type"): f"{DOMAIN}/watchlist/appearances",
+                    probatio.Required("media_id"): _WATCHLIST_ID, probatio.Required("person_id"): _WATCHLIST_ID,
+                    probatio.Optional("credit_ids"): probatio.All([str], probatio.Length(max=12))})
+async def websocket_watchlist_appearances(hass, connection, msg):
+    media_id, person_id = msg["media_id"], msg["person_id"]
+    client = _watchlist_client(hass)
+    key = f"appearances:v3:{client.language}:{media_id}:{person_id}"
+    cache = watchlist_cache(hass)
+    cached = await cache.read(key, 168)
+    if not cached or cached["stale"]:
+        try:
+            values = await client.appearances(media_id, person_id, msg.get("credit_ids", []))
+            cached = await cache.write(key, values)
+        except (watchlist.WatchlistError, KeyError, TypeError, ValueError) as error:
+            if not cached:
+                _send_error(connection, msg["id"], "watchlist_error", _watchlist_message(error))
+                return
+    connection.send_result(msg["id"], cached["data"])
+
+
+@localized_command({
+    probatio.Required("type"): f"{DOMAIN}/watchlist/season",
+    probatio.Required("media_id"): _WATCHLIST_ID,
+    probatio.Required("season"): _WATCHLIST_SEASON,
+    probatio.Optional("refresh", default=False): bool,
+})
+async def websocket_watchlist_season(hass, connection, msg):
+    database = _runtime(hass).database
+    try:
+        title = await database._async_run(watchlist.stored_title, database, "tv", msg["media_id"])
+        episodes = await _watchlist_episodes(hass, title, msg["season"], msg["refresh"])
+    except (watchlist.WatchlistError, KeyError, TypeError, ValueError) as error:
+        _send_error(connection, msg["id"], "watchlist_error", _watchlist_message(error))
+        return
+    connection.send_result(msg["id"], episodes)
+
+
+@localized_command({
+    probatio.Required("type"): f"{DOMAIN}/watchlist/progress",
+    **_WATCHLIST_MEDIA,
+    probatio.Required("seen"): bool,
+    probatio.Optional("mode"): probatio.In({"shared", "personal"}),
+    probatio.Optional("season"): _WATCHLIST_SEASON,
+    probatio.Optional("episode"): _WATCHLIST_ID,
+})
+async def websocket_watchlist_progress(hass, connection, msg):
+    database = _runtime(hass).database
+    kind, media_id, seen = msg["kind"], msg["media_id"], msg["seen"]
+    number, episode = msg.get("season"), msg.get("episode")
+    try:
+        title = await database._async_run(watchlist.stored_title, database, kind, media_id)
+        points = []
+        if kind == "movie":
+            if number is not None or episode is not None:
+                raise watchlist.watchlist_error("missing_season")
+            number, episode = -1, -1
+            points = [(number, episode)]
+        else:
+            if number is not None:
+                seasons = [watchlist.season_summary(title, number)]
+            else:
+                if episode is not None:
+                    raise watchlist.watchlist_error("missing_season")
+                seasons = title["seasons"]
+            if seen:
+                today = date.today().isoformat()
+                for season in seasons:
+                    if (season["date"] and season["date"] > today) or not season["count"]:
+                        continue
+                    episodes = await _watchlist_episodes(hass, title, season["number"])
+                    points.extend(watchlist.released_points(episodes, season["number"], episode))
+                if episode is not None and not points:
+                    raise watchlist.watchlist_error("missing_episode")
+        mode = await database._async_run(
+            watchlist.set_seen, database, kind, media_id, seen, points, number, episode,
+            connection.user.id, msg.get("mode"),
+        )
+    except (watchlist.WatchlistError, KeyError, TypeError, ValueError) as error:
+        _send_error(connection, msg["id"], "watchlist_error", _watchlist_message(error))
+        return
+    await _watchlist_changed(hass, connection, msg["id"], private=mode == "personal")
+
+
+@localized_command({
+    probatio.Required("type"): f"{DOMAIN}/watchlist/continue",
+    probatio.Required("kind"): "tv",
+    probatio.Required("media_id"): _WATCHLIST_ID,
+    probatio.Required("mode"): probatio.In({"shared", "personal"}),
+    probatio.Required("previous"): probatio.Any(None, probatio.All([int], probatio.Length(min=2, max=2))),
+    probatio.Optional("season"): _WATCHLIST_SEASON,
+    probatio.Optional("episode"): _WATCHLIST_ID,
+})
+async def websocket_watchlist_continue(hass, connection, msg):
+    database = _runtime(hass).database
+    media_id, number, episode = msg["media_id"], msg.get("season"), msg.get("episode")
+    target = None
+    try:
+        if number is not None or episode is not None:
+            if number is None or episode is None:
+                raise watchlist.watchlist_error("missing_episode")
+            title = await database._async_run(watchlist.stored_title, database, "tv", media_id)
+            summary = watchlist.season_summary(title, number)
+            if (summary.get("date") or "") > date.today().isoformat():
+                raise watchlist.watchlist_error("missing_episode")
+            episodes = await _watchlist_episodes(hass, title, number)
+            if not watchlist.released_points(episodes, number, episode):
+                raise watchlist.watchlist_error("missing_episode")
+            target = (number, episode)
+        mode = await database._async_run(
+            watchlist.set_continue, database, media_id, target, msg["previous"], connection.user.id, msg["mode"],
+        )
+    except (watchlist.WatchlistError, KeyError, TypeError, ValueError) as error:
+        _send_error(connection, msg["id"], "watchlist_error", _watchlist_message(error))
+        return
+    await _watchlist_changed(hass, connection, msg["id"], private=mode == "personal")
+
+
+@localized_command({
+    probatio.Required("type"): f"{DOMAIN}/watchlist/progress_mode",
+    **_WATCHLIST_MEDIA,
+    probatio.Required("mode"): probatio.In({"shared", "personal"}),
+})
+async def websocket_watchlist_progress_mode(hass, connection, msg):
+    database = _runtime(hass).database
+    try:
+        await database._async_run(watchlist.set_progress_mode, database, msg["kind"], msg["media_id"], msg["mode"])
+    except watchlist.WatchlistError as error:
+        _send_error(connection, msg["id"], "watchlist_error", error)
+        return
+    await _watchlist_changed(hass, connection, msg["id"])
+
+
+@localized_command({
+    probatio.Required("type"): f"{DOMAIN}/watchlist/label",
+    **_WATCHLIST_ITEM,
+    probatio.Required("added"): [probatio.All(str, probatio.Length(min=1, max=64))],
+    probatio.Required("removed"): [probatio.All(str, probatio.Length(min=1, max=64))],
+})
+async def websocket_watchlist_label(hass, connection, msg):
+    database = _runtime(hass).database
+    try:
+        await database._async_run(watchlist.update_labels, database, msg["kind"], msg["media_id"],
+                                  msg["added"], msg["removed"])
+    except watchlist.WatchlistError as error:
+        _send_error(connection, msg["id"], "watchlist_error", error)
+        return
+    await _watchlist_changed(hass, connection, msg["id"])
+
+
+@websocket_api.require_admin
+@localized_command({
+    probatio.Required("type"): f"{DOMAIN}/watchlist/label_settings",
+    probatio.Optional("action", default="get"): probatio.In({"get", "save", "delete", "share"}),
+    probatio.Optional("label_id"): probatio.All(str, probatio.Length(min=1, max=64)),
+    probatio.Optional("name"): str,
+    probatio.Optional("icon"): probatio.Any(str, None),
+    probatio.Optional("color"): probatio.Any(str, None),
+    probatio.Optional("enabled"): bool,
+})
+async def websocket_watchlist_label_settings(hass, connection, msg):
+    """Manage labels available to the Watchlist dashboard card."""
+    database = _runtime(hass).database
+    action, label_id = msg["action"], msg.get("label_id")
+    try:
+        if action == "save":
+            await database._async_run(
+                watchlist.save_custom_label, database, label_id,
+                _clean_text(msg.get("name"), maximum=100, required=True),
+                _clean_text(msg.get("icon"), maximum=100, required=False),
+                _clean_color(msg.get("color")),
+            )
+        elif action == "delete":
+            if not label_id:
+                raise ValueError(localized_text("errors.value_required"))
+            await database._async_run(watchlist.delete_custom_label, database, label_id)
+        elif action == "share":
+            if "enabled" not in msg:
+                raise ValueError(localized_text("errors.value_required"))
+            await database._async_run(watchlist.set_use_global_labels, database, msg["enabled"])
+    except ValueError as error:
+        _send_input_error(connection, msg, error)
+        return
+    except watchlist.WatchlistError as error:
+        _send_error(connection, msg["id"], "watchlist_error", error)
+        return
+    if action != "get":
+        hass.bus.async_fire(EVENT_WATCHLIST_CHANGED, {})
+    connection.send_result(msg["id"], await database._async_run(watchlist.label_settings, database))
+
+@localized_command({
+    probatio.Required("type"): f"{DOMAIN}/watchlist/favorite",
+    **_WATCHLIST_ITEM,
+    probatio.Required("favorite"): bool,
+})
+async def websocket_watchlist_favorite(hass, connection, msg):
+    """Change a favorite for the authenticated user only."""
+    database = _runtime(hass).database
+    user_id = connection.user.id
+    try:
+        update, share = await database._async_run(watchlist.set_favorite, database, user_id,
+                                           msg["kind"], msg["media_id"], msg["favorite"])
+    except watchlist.WatchlistError as error:
+        _send_error(connection, msg["id"], "watchlist_error", error)
+        return
+    connection.send_result(msg["id"], update)
+    hass.bus.async_fire(EVENT_WATCHLIST_CHANGED, {
+        "watchlist_private": True, "user_id": user_id, "favorite_update": update,
+    })
+    if share:
+        hass.bus.async_fire(EVENT_WATCHLIST_CHANGED, {"favorite_update": {
+            key: value for key, value in update.items() if key != "favorite"
+        }})
+
+
+def _watchlist_management(runtime):
+    options = runtime.config_entry.options
+    return {"settings": watchlist.sync_settings(options), "playback": watchlist.playback_settings(options),
+            **runtime.watchlist_sync.status()}
+
+
+@websocket_api.require_admin
+@localized_command({probatio.Required("type"): f"{DOMAIN}/watchlist/manage"})
+async def websocket_watchlist_management(hass, connection, msg):
+    connection.send_result(msg["id"], _watchlist_management(_runtime(hass)))
+
+
+@websocket_api.require_admin
+@localized_command({
+    probatio.Required("type"): f"{DOMAIN}/watchlist/manage/save",
+    probatio.Optional("tmdb_token"): probatio.Any(str, None),
+    probatio.Required("region"): probatio.Any(str, None),
+    probatio.Required("share_subscriptions"): bool,
+    probatio.Required("preferences"): {
+        probatio.Required("default_mode"): probatio.In({"shared", "personal"}),
+        probatio.Required("allow_override"): bool,
+        probatio.Required("show_all_favorites"): bool,
+    },
+    probatio.Required("settings"): {
+        probatio.Required("enabled"): bool,
+        probatio.Required("time"): str,
+        probatio.Required("active_days"): probatio.All(int, probatio.Range(min=1, max=365)),
+        probatio.Required("catalog_days"): probatio.All(int, probatio.Range(min=1, max=365)),
+    },
+    probatio.Required("script"): str,
+    probatio.Required("players"): probatio.All(str, probatio.Length(max=4000)),
+    probatio.Optional("local_sources"): probatio.All(str, probatio.Length(max=4000)),
+})
+async def websocket_watchlist_management_save(hass, connection, msg):
+    import re
+
+    runtime = _runtime(hass)
+    token = (msg.get("tmdb_token") or "").strip()
+    region = msg["region"]
+    script = msg["script"].strip()
+    players = list(dict.fromkeys(line.strip() for line in msg["players"].splitlines() if line.strip()))
+    local_sources = watchlist.playback_settings(runtime.config_entry.options)["local_sources"]
+    if "local_sources" in msg:
+        local_sources = list(dict.fromkeys(line.strip() for line in msg["local_sources"].splitlines() if line.strip()))
+    error = None
+    if region is not None and not valid_region(region):
+        error = "invalid_region"
+    elif len(token) > 2048 or token and not all(char.isascii() and char.isprintable() and not char.isspace() for char in token):
+        error = "credentials"
+    elif not re.fullmatch(r"(?:[01][0-9]|2[0-3]):[0-5][0-9]", msg["settings"]["time"]):
+        error = "sync_invalid_time"
+    elif script and (not re.fullmatch(r"script\.[a-z0-9_]+", script) or hass.states.get(script) is None):
+        error = "play_script_missing"
+    elif len(players) > 50 or any(len(player) > 100 for player in players):
+        error = "play_invalid_players"
+    elif len(local_sources) > 50 or any(len(source) > 100 for source in local_sources):
+        error = "play_invalid_local_sources"
+    if error:
+        _send_error(connection, msg["id"], "invalid_input", watchlist.watchlist_error(error))
+        return
+    database = runtime.database
+    preferences = msg["preferences"]
+    await database._async_run(
+        watchlist.set_preferences, database, preferences["default_mode"],
+        preferences["allow_override"], preferences["show_all_favorites"],
+    )
+    options = {**runtime.config_entry.options, "watchlist_sync": msg["settings"],
+               "watchlist_region": region, "watchlist_share_subscriptions": msg["share_subscriptions"],
+               "watchlist_playback": {"script": script, "players": players, "local_sources": local_sources}}
+    if "tmdb_token" in msg:
+        if token:
+            options["tmdb_token"] = token
+        else:
+            options.pop("tmdb_token", None)
+    hass.config_entries.async_update_entry(runtime.config_entry, options=options)
+    runtime.watchlist_sync.reschedule()
+    hass.bus.async_fire(EVENT_WATCHLIST_CHANGED, {})
+    connection.send_result(msg["id"], {**_watchlist_management(runtime), "configured": bool(options.get("tmdb_token"))})
+
+
+@websocket_api.require_admin
+@localized_command({probatio.Required("type"): f"{DOMAIN}/watchlist/sync",
+                    probatio.Optional("force", default=False): bool})
+async def websocket_watchlist_sync(hass, connection, msg):
+    runtime = _runtime(hass)
+    if msg["force"]:
+        if not runtime.config_entry.options.get("tmdb_token"):
+            _send_error(connection, msg["id"], "watchlist_error", watchlist.watchlist_error("setup_required"))
+            return
+        runtime.watchlist_sync.force()
+    connection.send_result(msg["id"], runtime.watchlist_sync.status())
+
+
+@localized_command({
+    probatio.Required("type"): f"{DOMAIN}/watchlist/play", **_WATCHLIST_MEDIA,
+    probatio.Required("player"): probatio.All(str, probatio.Length(min=1, max=100)),
+    probatio.Optional("season"): _WATCHLIST_SEASON,
+    probatio.Optional("episode"): _WATCHLIST_ID,
+    probatio.Optional("provider_id"): _WATCHLIST_ID,
+    probatio.Optional("local_source"): probatio.All(str, probatio.Length(min=1, max=100)),
+})
+async def websocket_watchlist_play(hass, connection, msg):
+    runtime = _runtime(hass)
+    options = runtime.config_entry.options
+    settings = watchlist.playback_settings(options)
+    script = settings["script"]
+    kind, media_id = msg["kind"], msg["media_id"]
+    season, episode = msg.get("season"), msg.get("episode")
+    database = runtime.database
+    try:
+        if (not script or msg["player"] not in settings["players"] or not hass.states.get(script)
+                or not connection.user.permissions.check_entity(script, POLICY_CONTROL)):
+            raise watchlist.watchlist_error("play_script_missing")
+        title = await database._async_run(watchlist.stored_title, database, kind, media_id)
+        episode_title = None
+        if season is not None or episode is not None:
+            if kind != "tv" or season is None or episode is None:
+                raise watchlist.watchlist_error("missing_episode")
+            episodes = await _watchlist_episodes(hass, title, season)
+            selected = next((row for row in episodes if row["number"] == episode), None)
+            if not selected or not watchlist.released_points(episodes, season, episode):
+                raise watchlist.watchlist_error("missing_episode")
+            episode_title = selected["title"]
+        region = streaming_region(hass, options)
+        provider_id, local_source = msg.get("provider_id"), msg.get("local_source")
+        if local_source and (provider_id or local_source not in settings["local_sources"]):
+            raise watchlist.watchlist_error("play_provider_missing")
+        record = await watchlist_cache(hass).read(availability_key(region, kind, media_id), 24) if region and not local_source else None
+        provider = None
+        if provider_id:
+            provider = next((item for items in (record or {}).get("data", {}).get("groups", {}).values()
+                             for item in items if item["id"] == provider_id), None)
+            if provider is None:
+                raise watchlist.watchlist_error("play_provider_missing")
+        client = _watchlist_client(hass)
+        imdb = title.get("imdb_id")
+        episode_imdb = None
+        try:
+            if "imdb_id" not in title:
+                imdb = await client.imdb_id(kind, media_id)
+            if episode is not None:
+                episode_imdb = await client.imdb_id(kind, media_id, season, episode)
+        except watchlist.WatchlistError:
+            pass  # The configured script can still choose a device and app.
+        variables = {"player": msg["player"], "title": title["title"], "media_type": kind,
+                     "tmdb_id": media_id, "season": season, "episode": episode, "episode_title": episode_title,
+                     "imdb_id": imdb, "episode_imdb_id": episode_imdb, "region": region,
+                     "provider": provider["name"] if provider else local_source, "provider_id": provider_id,
+                     "source_type": "local" if local_source else "streaming" if provider else None,
+                     "local_source": local_source,
+                     "provider_url": provider.get("url") if provider else None,
+                     "availability_url": (record or {}).get("data", {}).get("link")}
+        if watchlist.playback_settings(runtime.config_entry.options) != settings:
+            raise watchlist.watchlist_error("play_script_missing")
+        await hass.services.async_call("script", "turn_on", {"entity_id": script, "variables": variables},
+                                       blocking=True, context=Context(user_id=connection.user.id))
+    except HomeAssistantError:
+        _send_error(connection, msg["id"], "watchlist_error", watchlist.watchlist_error("play_failed"))
+        return
+    except (watchlist.WatchlistError, KeyError, TypeError, ValueError) as error:
+        _send_error(connection, msg["id"], "watchlist_error", _watchlist_message(error))
+        return
+    try:
+        source = {"local_source": local_source} if local_source else {"provider_id": provider_id} if provider_id else None
+        await watchlist_subscriptions(hass).remember_playback_source(connection.user.id, kind, media_id, source)
+    except (HomeAssistantError, OSError):
+        # Playback already started. A preference write failure must not invite a second start.
+        _LOGGER.warning("Could not save the Watchlist playback source", exc_info=True)
+    connection.send_result(msg["id"], {})
+
+
+async def _watchlist_orders(hass, title):
+    client = _watchlist_client(hass)
+    cache = watchlist_cache(hass)
+    key = f"orders:v1:{client.language}:{title['id']}"
+    record = await cache.read(key, 168)
+    if not record or record["stale"]:
+        options = []
+        signatures = set()
+        for order in await client.episode_orders(title["id"]):
+            groups = await client.episode_order(order["id"])
+            mapping = tuple(tuple((ep["season"], ep["number"]) for ep in group["episodes"]) for group in groups)
+            canonical = tuple(tuple(sorted(group)) for group in mapping)
+            flat = tuple(point for group in mapping for point in group)
+            if (not flat or len(set(flat)) != len(flat) or mapping in signatures
+                    or mapping == canonical and flat == tuple(sorted(flat))
+                    and all(len({point[0] for point in group}) == 1 for group in mapping)
+                    and len({group[0][0] for group in mapping}) == len(mapping)):
+                continue
+            signatures.add(mapping)
+            options.append({**order, "groups": groups})
+        record = await cache.write(key, options)
+    return record["data"]
+
+
+@localized_command({probatio.Required("type"): f"{DOMAIN}/watchlist/orders",
+                    probatio.Required("media_id"): _WATCHLIST_ID})
+async def websocket_watchlist_orders(hass, connection, msg):
+    database = _runtime(hass).database
+    try:
+        title = await database._async_run(watchlist.stored_title, database, "tv", msg["media_id"])
+        result = await _watchlist_orders(hass, title)
+    except (watchlist.WatchlistError, KeyError, TypeError, ValueError) as error:
+        _send_error(connection, msg["id"], "watchlist_error", _watchlist_message(error))
+        return
+    connection.send_result(msg["id"], [{key: order[key] for key in ("id", "name", "type")} for order in result])
+
+
+@localized_command({probatio.Required("type"): f"{DOMAIN}/watchlist/order",
+                    probatio.Required("media_id"): _WATCHLIST_ID,
+                    probatio.Required("order"): probatio.All(str, probatio.Length(max=24))})
+async def websocket_watchlist_order_save(hass, connection, msg):
+    database = _runtime(hass).database
+    try:
+        title = await database._async_run(watchlist.stored_title, database, "tv", msg["media_id"])
+        order = None
+        if msg["order"]:
+            order = next((item for item in await _watchlist_orders(hass, title) if item["id"] == msg["order"]), None)
+            if order is None:
+                raise watchlist.watchlist_error("order_unavailable")
+        await database._async_run(watchlist.set_episode_order, database, title["id"], order)
+    except (watchlist.WatchlistError, KeyError, TypeError, ValueError) as error:
+        _send_error(connection, msg["id"], "watchlist_error", _watchlist_message(error))
+        return
+    await _watchlist_changed(hass, connection, msg["id"])

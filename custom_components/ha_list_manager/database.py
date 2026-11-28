@@ -18,8 +18,9 @@ import time
 from dataclasses import replace
 from typing import TYPE_CHECKING, Any, TypeVar
 import unicodedata
-from uuid import uuid4
+from uuid import NAMESPACE_URL, uuid4, uuid5
 
+from . import watchlist
 from .localization import async_use_language, text as localized_text
 from .const import (
     DATABASE_SCHEMA_VERSION,
@@ -700,6 +701,87 @@ class HaListManagerDatabase:
         self._fire_item_mutated(None, record)
         return record
 
+    async def async_save_shopping_item_with_extras(
+        self, list_id: str, values: dict, *, create_product: bool,
+        create_list_chip: bool = False, item_id: str | None = None,
+        request_id: str | None = None, product_details: dict | None = None,
+    ) -> ListItemRecord:
+        """Save a shopping entry and its optional product and chip together."""
+        record, before, changed = await self._async_run(
+            self._save_shopping_item_with_extras, list_id, values,
+            create_product, create_list_chip, item_id, request_id, product_details,
+        )
+        if changed:
+            self._fire_item_mutated(before, record)
+        return record
+
+    def _save_shopping_item_with_extras(
+        self, list_id, values, create_product, create_list_chip, item_id, request_id, product_details,
+    ):
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            target = connection.execute("SELECT list_type, provider FROM lists WHERE id = ?", (list_id,)).fetchone()
+            if target is None:
+                raise ListNotFoundError(list_id)
+            if target["list_type"] != "shopping" or target["provider"] != "local":
+                raise ValueError(localized_text("backend.local_shopping_target_required"))
+            previous = None
+            if item_id:
+                previous = connection.execute("SELECT * FROM list_items WHERE id = ? AND list_id = ?", (item_id, list_id)).fetchone()
+                if previous is None:
+                    raise ListItemNotFoundError(item_id)
+                if create_product and previous["product_id"]:
+                    raise ValueError(localized_text("backend.shopping_product_already_linked"))
+            new_id = str(uuid5(NAMESPACE_URL, f"ha-list-manager:shopping-add:{list_id}:{request_id}")) if request_id else None
+            if new_id:
+                saved = connection.execute("SELECT * FROM list_items WHERE id = ? AND list_id = ?", (new_id, list_id)).fetchone()
+                if saved:
+                    labels = self._labels_for(connection, "list_item_labels", "item_id", new_id, list_id)
+                    return self._item_record_from_row(saved, labels), None, False
+
+            values = dict(values)
+            if create_product:
+                if values.get("product_id"):
+                    raise ValueError(localized_text("backend.shopping_product_already_linked"))
+                details = product_details or {}
+                name = details.get("name", values["name"])
+                matching_name = self._normalize_priority_name(name)
+                if not details.get("allow_duplicate_name") and any(
+                    self._normalize_priority_name(row["name"]) == matching_name
+                    for row in connection.execute("SELECT name FROM products")
+                ):
+                    raise ValueError(localized_text("backend.shopping_product_name_exists"))
+                product = self._create_product(
+                    ean=details.get("ean"), name=name, original_name=details.get("original_name"),
+                    brand=details.get("brand"), package_quantity=details.get("package_quantity"),
+                    category=None, image_url=details.get("image_url"),
+                    source="open_food_facts" if details.get("original_name") else "manual",
+                    label_ids=[], connection=connection,
+                )
+                values["product_id"] = product.id
+                if product_details is None:
+                    values.update(remember_product_labels=True,
+                                  remember_product_category=values["category_id"] is not None)
+                else:
+                    self._remember_item_product_labels(connection, list_id, product.id, details["label_ids"], item_id)
+                    if details.get("category_id"):
+                        self._remember_item_product_category(connection, list_id, product.id, details["category_id"])
+            if item_id:
+                before = self._item_record_from_row(
+                    previous, self._labels_for(connection, "list_item_labels", "item_id", item_id, list_id),
+                )
+                record = self._update_item(item_id, external_uid=_UNSET, connection=connection, **values)
+            else:
+                before = None
+                record = self._create_item(list_id, external_uid=None, connection=connection, item_id=new_id, **values)
+            if create_list_chip:
+                chip, _created = self._create_item_action_chip(
+                    list_id, record.name, record.product_id, connection=connection,
+                )
+                if chip.product_id != record.product_id:
+                    raise ValueError(localized_text("backend.shopping_list_chip_name_exists"))
+        return record, before, True
+
     async def async_create_item_action_chip(
         self, list_id: str, name: str, product_id: str | None = None,
     ) -> tuple[ChipRecord, bool]:
@@ -735,13 +817,16 @@ class HaListManagerDatabase:
 
     def _create_item_action_chip(
         self, list_id: str, name: str, product_id: str | None,
+        *, connection: sqlite3.Connection | None = None,
     ) -> tuple[ChipRecord, bool]:
         name = " ".join(name.strip().split())
         if not name or len(name) > 100:
             raise ValueError(localized_text("actions.chip_name_length"))
         key = self._normalize_priority_name(name)
-        with self._connect() as connection:
-            connection.execute("BEGIN IMMEDIATE")
+        owns_connection = connection is None
+        with (self._connect() if owns_connection else nullcontext(connection)) as connection:
+            if owns_connection:
+                connection.execute("BEGIN IMMEDIATE")
             self._item_action_list(connection, list_id)
             if product_id is not None:
                 self._require_product(connection, product_id)
@@ -2149,7 +2234,7 @@ class HaListManagerDatabase:
                         "The existing database has no supported schema metadata"
                     )
                 version = self._read_schema_version(connection)
-                if version not in (1, 2, 3, 4, 5, 6, 7, 8, 9, DATABASE_SCHEMA_VERSION):
+                if version not in range(1, DATABASE_SCHEMA_VERSION + 1):
                     raise UnsupportedSchemaVersionError(
                         f"Database schema {version} is not supported; "
                         f"expected {DATABASE_SCHEMA_VERSION}"
@@ -2199,6 +2284,21 @@ class HaListManagerDatabase:
                                        "INTEGER NOT NULL DEFAULT 0 CHECK(monitoring_paused IN (0,1))")
                 if version < 10:
                     self._create_entity_scanner_schema(connection)
+                if version < 11:
+                    watchlist.create_schema(connection)
+                if version < 12:
+                    watchlist.create_label_schema(connection)
+                if version == 12:
+                    connection.execute("DROP TABLE watchlist_shared_labels")
+                    watchlist.create_global_label_setting(connection)
+                if version < 14:
+                    watchlist.create_favorites_schema(connection)
+                if version < 15:
+                    watchlist.create_preferences_schema(connection)
+                if version < 16:
+                    watchlist.add_watch_timestamps(connection)
+                if version < 17:
+                    watchlist.create_continue_schema(connection)
                 connection.execute(
                     "UPDATE schema_metadata SET value = ? WHERE key = 'schema_version'",
                     (str(DATABASE_SCHEMA_VERSION),),
@@ -2819,6 +2919,12 @@ CREATE UNIQUE INDEX chips_list_name_unique ON chips(list_id, priority_name) WHER
         self._create_completed_cleanup_schema(connection)
         self._create_mqtt_scanner_schema(connection)
         self._create_entity_scanner_schema(connection)
+        watchlist.create_schema(connection)
+        watchlist.create_label_schema(connection)
+        watchlist.create_favorites_schema(connection)
+        watchlist.create_preferences_schema(connection)
+        watchlist.add_watch_timestamps(connection)
+        watchlist.create_continue_schema(connection)
 
     @staticmethod
     def _create_label_filters_schema(connection: sqlite3.Connection) -> None:
@@ -5089,13 +5195,17 @@ WHERE registry_entry_id IS NOT NULL;
         remember_product_category: bool = False,
         remember_product_labels: bool = False,
         monitoring_paused: bool = False,
+        *,
+        connection: sqlite3.Connection | None = None,
+        item_id: str | None = None,
     ) -> ListItemRecord:
         now = self._now()
         recurrence_interval, recurrence_unit = self._validate_recurrence(
             recurrence_interval, recurrence_unit
         )
-        with self._connect() as connection:
-            if remember_product_category or remember_product_labels:
+        owns_connection = connection is None
+        with (self._connect() if owns_connection else nullcontext(connection)) as connection:
+            if owns_connection and (remember_product_category or remember_product_labels):
                 connection.execute("BEGIN IMMEDIATE")
             self._require_list(connection, list_id)
             name = self._format_list_item_name(connection, list_id, name, product_id, external_uid)
@@ -5131,7 +5241,7 @@ WHERE registry_entry_id IS NOT NULL;
                 (list_id,),
             ).fetchone()
             record = ListItemRecord(
-                id=str(uuid4()),
+                id=item_id or str(uuid4()),
                 list_id=list_id,
                 product_id=product_id,
                 external_uid=external_uid,
@@ -5229,12 +5339,15 @@ WHERE registry_entry_id IS NOT NULL;
         remember_product_labels: bool = False,
         monitoring_paused: bool | object = _UNSET,
         mark_checked: bool = False,
+        *,
+        connection: sqlite3.Connection | None = None,
     ) -> ListItemRecord:
         recurrence_interval, recurrence_unit = self._validate_recurrence(
             recurrence_interval, recurrence_unit
         )
-        with self._connect() as connection:
-            if remember_product_category or remember_product_labels:
+        owns_connection = connection is None
+        with (self._connect() if owns_connection else nullcontext(connection)) as connection:
+            if owns_connection and (remember_product_category or remember_product_labels):
                 connection.execute("BEGIN IMMEDIATE")
             existing = connection.execute(
                 "SELECT * FROM list_items WHERE id = ?", (item_id,)

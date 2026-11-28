@@ -80,6 +80,17 @@ monitoring stays paused. Repeated readings are suppressed across devices for
 three seconds; retries of the same request remain ignored after a HA restart.
 A later intentional new scan remains possible.
 
+### Custom product data source
+
+Under **Backend → Settings → Product data source**, choose Open Food Facts
+(the default) or a custom **Open Food Facts v3 compatible** server, such as
+[OFF Proxy Server](https://github.com/Nisbo/off-proxy-server). Enter its base URL
+and optionally an API key. An empty key sends no authorization header.
+Local products are checked first; the source is shared by cards and scanners.
+The two optional Open Food Facts fallbacks for missing products and server errors are
+disabled by default. Connection testing uses only the selected source and
+does not save products. Original image URLs are retained.
+
 ## Alexa shopping
 
 Say “Alexa, add cucumbers to the shopping list” and have the entry arrive in
@@ -131,6 +142,14 @@ checkboxes below the search field. These choices are remembered with your search
 
 The card uses the existing Tandoor connection and also supports browsing without
 a shopping list. Private API credentials remain in the backend.
+
+## Watchlist
+
+Add **HA List Manager · Watchlist** in the dashboard card picker. Enter your [TMDB API Read Access Token](https://www.themoviedb.org/settings/api) under **HA List Manager → Watchlist → Settings** to enable online search.
+
+Add films, film collections and series directly in the card. Mark films, seasons or individual episodes as watched and use genres or labels to filter your watchlist. Create labels or enable all global labels under **Labels → Watchlist**. Choose shared or personal watch progress. Find your next unseen episode in **Continue watching**. Favorites belong to your Home Assistant account. The optional **Show all** switch lists titles favorited by any user once. Each browser remembers where you left off.
+
+[Watchlist guide with screenshots and a demo TV script](https://github.com/Nisbo/ha-list-manager/wiki/Watchlist)
 
 ## Categories and labels across all three list types
 

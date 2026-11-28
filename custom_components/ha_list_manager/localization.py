@@ -62,6 +62,11 @@ async def configure(hass) -> None:
     await async_prepare(hass)
 
 
+def current_language() -> str:
+    """Return the active request language or the HA default."""
+    return _LANGUAGE.get() or system_language()
+
+
 def system_language() -> str:
     """Read the current HA setting, including later language changes."""
     return normalize_language(getattr(getattr(_hass, "config", None), "language", "de"))

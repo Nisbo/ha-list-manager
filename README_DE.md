@@ -82,6 +82,18 @@ Pausierte Überwachung bleibt pausiert. Doppellesungen werden drei Sekunden lang
 geräteübergreifend unterdrückt; wiederholte Anfragen bleiben auch nach einem
 HA-Neustart ohne weitere Wirkung. Ein späterer neuer Scan ist wieder möglich.
 
+### Eigene Produktdatenquelle
+
+Unter **Backend → Einstellungen → Produktdatenquelle** stehen Open Food Facts
+(Standard) und ein eigener **mit Open Food Facts v3 kompatibler** Server zur Auswahl, zum Beispiel
+[OFF Proxy Server](https://github.com/Nisbo/off-proxy-server). Trage die
+Basisadresse und optional einen API-Schlüssel ein. Ein leerer Schlüssel sendet
+keinen Anmeldungsheader. Lokale Produkte werden zuerst geprüft; Karten und
+Scanner nutzen dieselbe Quelle. Die beiden optionalen Rückfälle auf Open Food Facts bei
+fehlenden Produkten und Serverfehlern sind standardmäßig ausgeschaltet. Der
+Verbindungstest verwendet nur die ausgewählte Quelle und speichert keine
+Produkte. Ursprüngliche Bildadressen bleiben erhalten.
+
 ## Einkaufen mit Alexa
 
 „Alexa, setze Gurken auf die Einkaufsliste“ — und der Eintrag landet in
@@ -136,6 +148,14 @@ Rezeptnamen durchsuchen. Diese Auswahl wird zusammen mit der Suche gemerkt.
 Die Karte nutzt die vorhandene Tandoor-
 Verbindung und erlaubt das Stöbern auch ohne Einkaufsliste. Private API-Zugangsdaten
 bleiben im Backend.
+
+## Watchlist
+
+Füge **HA List Manager · Watchlist** über die Kartenauswahl im Dashboard hinzu. Hinterlege unter **HA List Manager → Watchlist → Einstellungen** deinen [TMDB-Zugriffstoken mit Leserechten](https://www.themoviedb.org/settings/api), um die Online-Suche freizuschalten.
+
+Füge Filme, Filmreihen und Serien direkt in der Karte hinzu. Markiere Filme, Staffeln oder einzelne Folgen als gesehen und filtere nach Genres oder Labels. Unter **Labels → Watchlist** legst du eigene Labels an oder schaltest die globalen Labels gemeinsam ein. Den Gesehen-Status kannst du gemeinsam oder einzeln führen. Unter **Weiterschauen** findest du die nächste ungesehene Folge. Favoriten gehören zu deinem Home-Assistant-Konto. Mit **Alle anzeigen** siehst du die Favoriten aller Nutzer, jeden Titel einmal. Jeder Browser merkt sich die zuletzt geöffnete Ansicht.
+
+[Watchlist-Anleitung mit Screenshots und TV-Demo-Skript](https://github.com/Nisbo/ha-list-manager/wiki/Watchlist-DE)
 
 ## Kategorien und Labels in allen drei Listenarten
 

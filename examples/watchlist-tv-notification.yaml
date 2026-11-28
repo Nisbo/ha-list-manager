@@ -1,0 +1,24 @@
+alias: "HA List Manager · Watchlist TV Demo"
+description: "Shows the Watchlist payload in a persistent notification."
+icon: mdi:cast
+mode: queued
+sequence:
+  - action: persistent_notification.create
+    data:
+      notification_id: ha_list_manager_watchlist_tv_demo
+      title: "Watchlist TV · {{ title | default('Demo', true) }}"
+      message: |-
+        **Title:** {{ title | default('–', true) }}
+        **Destination:** {{ player | default('–', true) }}
+        **Type:** {{ media_type | default('–', true) }}
+        **TMDB:** {{ tmdb_id | default('–', true) }}
+        **IMDb (title):** {{ imdb_id | default('–', true) }}
+        **Season / episode:** {{ season | default('–') if season is defined and season is not none else '–' }} / {{ episode | default('–', true) }}
+        **Episode title:** {{ episode_title | default('–', true) }}
+        **IMDb (episode):** {{ episode_imdb_id | default('–', true) }}
+        **Region:** {{ region | default('–', true) }}
+        **Source type:** {{ source_type | default('–', true) }}
+        **Local source:** {{ local_source | default('–', true) }}
+        **Provider:** {{ provider | default('–', true) }} ({{ provider_id | default('–', true) }})
+        **Provider URL:** {{ provider_url | default('–', true) }}
+        **Availability URL:** {{ availability_url | default('–', true) }}

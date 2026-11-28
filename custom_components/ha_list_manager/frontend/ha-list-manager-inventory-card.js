@@ -158,7 +158,7 @@ function inventoryState(entry) {
   return "stock-normal";
 }
 
-const CARD_VERSION = "1.1.0b6";
+const CARD_VERSION = "1.1.0b7";
 const PICKER_RESULT_LIMIT = 100;
 const MODES = (hass = null) => ({
   add: { label: haListManagerInventoryCardText("ui.stock_in", {}, hass), icon: "mdi:package-variant-plus", color: "var(--success-color,#2e7d32)", help: haListManagerInventoryCardText("inventory.stock_in_activated", {}, hass) },
@@ -394,6 +394,7 @@ class HaListManagerInventoryCard extends HTMLElement {
       },
       computeHelper: (schema, localize) => {
         if (typeof localize === "function") return HaListManagerInventoryCard.getConfigForm({ ...(hass || {}), localize }).computeHelper(schema);
+        if (schema.name === "show_hidden_labels") return haListManagerInventoryCardText("labels.show_hidden_help", {}, hass);
         if (schema.name === "entity") return haListManagerInventoryCardText("help.inventory_backend_list", {}, hass);
         if (schema.name === "title") return haListManagerInventoryCardText("help.inventory_card_title", {}, hass);
         if (schema.name === "title_icon") return haListManagerInventoryCardText("help.title_icon", {}, hass);

@@ -14,6 +14,7 @@ import re
 from datetime import UTC, datetime
 
 from .const import DATABASE_SCHEMA_VERSION, DOMAIN
+from .watchlist import LABEL_TABLES, PREFERENCE_TABLES, TABLES as WATCHLIST_TABLES
 from .database import HaListManagerDatabase, HaListManagerDatabaseError
 from .localization import async_use_language, text
 
@@ -94,8 +95,31 @@ def validate(path: Path) -> dict:
                     if connection.execute('PRAGMA integrity_check').fetchone()[0] != 'ok':
                         raise BackupError(text('backup.invalid'))
                     version = int(connection.execute("SELECT value FROM schema_metadata WHERE key='schema_version'").fetchone()[0])
-                    if version not in {1, 2, 3, 4, 5, 6, 7, 8, 9, DATABASE_SCHEMA_VERSION}:
+                    if version not in range(1, DATABASE_SCHEMA_VERSION + 1):
                         raise BackupError(text('backup.version'))
+                    if version < 17:
+                        expected.execute("DROP TABLE watchlist_continue_positions")
+                    if 11 <= version < 16:
+                        expected.execute("ALTER TABLE watchlist_progress DROP COLUMN watched_at")
+                    if version == 15:
+                        expected.execute("ALTER TABLE watchlist_personal_progress DROP COLUMN watched_at")
+                    if version < 15:
+                        for table in PREFERENCE_TABLES:
+                            expected.execute(f"DROP TABLE {table}")
+                    if version < 14:
+                        expected.execute("DROP TABLE watchlist_favorites")
+                    if version == 12:
+                        expected.execute("DROP TABLE watchlist_settings")
+                        expected.execute(
+                            "CREATE TABLE watchlist_shared_labels "
+                            "(label_id TEXT PRIMARY KEY REFERENCES labels(id) ON DELETE CASCADE)"
+                        )
+                    if version < 12:
+                        for table in LABEL_TABLES:
+                            expected.execute(f"DROP TABLE {table}")
+                    if version < 11:
+                        for table in WATCHLIST_TABLES:
+                            expected.execute(f"DROP TABLE {table}")
                     if version < 10:
                         expected.execute("ALTER TABLE scanners DROP COLUMN entity_json")
                     if version < 9:

@@ -88,7 +88,7 @@ function haListManagerTodoCardTextRequest(hass, message) {
 const HA_LM_API = "ha_list_manager";
 const HA_LM_ITEMS_EVENT = "ha_list_manager_items_changed";
 const HA_LM_LISTS_EVENT = "ha_list_manager_lists_changed";
-const CARD_VERSION = "1.1.0b6";
+const CARD_VERSION = "1.1.0b7";
 
 const esc = (value) => String(value ?? "").replace(/[&<>'"]/g, (char) => ({
   "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;",
@@ -340,6 +340,7 @@ class HaListManagerTodoCard extends HTMLElement {
       },
       computeHelper: (schema, localize) => {
         if (typeof localize === "function") return HaListManagerTodoCard.getConfigForm({ ...(hass || {}), localize }).computeHelper(schema);
+        if (schema.name === "show_hidden_labels") return haListManagerTodoCardText("labels.show_hidden_help", {}, hass);
         return ({
         entity: haListManagerTodoCardText("help.available_todo_lists", {}, hass),
         title: haListManagerTodoCardText("help.card_heading", {}, hass), title_icon: haListManagerTodoCardText("help.title_icon", {}, hass), title_icon_color_rgb: haListManagerTodoCardText("help.title_icon_color", {}, hass),

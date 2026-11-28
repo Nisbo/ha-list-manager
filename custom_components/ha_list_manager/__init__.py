@@ -23,6 +23,7 @@ from .runtime import HaListManagerRuntime
 from .scanner import ScannerManager
 from .scripts import ListScriptManager
 from .tandoor_image import TandoorRecipeImageView
+from .watchlist_sync import WatchlistSync
 from .websocket import async_register_websocket_commands
 
 type HaListManagerConfigEntry = ConfigEntry[HaListManagerRuntime]
@@ -74,6 +75,8 @@ async def async_setup_entry(
         await async_register_panel(hass)
         forward_attempted = True
         await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+        runtime.watchlist_sync = WatchlistSync(hass, runtime)
+        await runtime.watchlist_sync.async_start()
     except BaseException:
         await _async_cleanup_failed_setup(hass, entry, runtime, forward_attempted)
         raise
@@ -95,7 +98,7 @@ async def _async_cleanup_failed_setup(
             await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
         except BaseException:
             _LOGGER.exception("Could not unload platforms after setup failure")
-    for name in ("cleanup", "alexa", "scripts", "scanner", "notifications", "external_lists", "entity_history"):
+    for name in ("watchlist_sync", "cleanup", "alexa", "scripts", "scanner", "notifications", "external_lists", "entity_history"):
         manager = getattr(runtime, name)
         if manager is not None:
             try:
@@ -121,6 +124,8 @@ async def async_unload_entry(
     if not unloaded:
         return False
     runtime = hass.data.get(DOMAIN)
+    if runtime and runtime.watchlist_sync:
+        await runtime.watchlist_sync.async_stop()
     if runtime and runtime.cleanup:
         await runtime.cleanup.async_stop()
     if runtime and runtime.alexa:

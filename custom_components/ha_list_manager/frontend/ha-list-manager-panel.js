@@ -76,7 +76,7 @@ function haListManagerPanelTextRequest(hass, message) {
   return hass.callWS(message.type?.startsWith("ha_list_manager/") ? { ...message, language: haListManagerPanelTextLanguage(hass) } : message);
 }
 
-const PANEL_VERSION = "1.1.0b6";
+const PANEL_VERSION = "1.1.0b7";
 const GROUP_PICKER_RESULT_LIMIT = 100;
 const API = "ha_list_manager";
 const ITEMS_EVENT = "ha_list_manager_items_changed";
@@ -94,6 +94,7 @@ const SECTIONS = (hass = null) => ([
   ["history", haListManagerPanelText("ui.scanner", {}, hass), "mdi:barcode-scan"],
   ["notifications", haListManagerPanelText("ui.notifications", {}, hass), "mdi:bell-outline"],
   ["alexa", haListManagerPanelText("alexa.title", {}, hass), "mdi:microphone-message"],
+  ["watchlist", haListManagerPanelText("watchlist.title", {}, hass), "mdi:filmstrip-box-multiple"],
   ["settings", haListManagerPanelText("ui.settings", {}, hass), "mdi:cog-outline"],
   ["backup", haListManagerPanelText("backup.title", {}, hass), "mdi:database-export-outline"],
   ["statistics", haListManagerPanelText("ui.statistics", {}, hass), "mdi:chart-box-outline"],
@@ -178,6 +179,8 @@ class HaListManagerPanel extends HTMLElement {
     this._favorites = [];
     this._favoriteBusy = false;
     this._labels = [];
+    this._watchlistLabels = null;
+    this._watchlistAdminTab = "settings";
     this._labelsLoaded = false;
     this._labelsLoading = false;
     this._labelSearch = "";
@@ -282,6 +285,8 @@ class HaListManagerPanel extends HTMLElement {
       delete this._settings.product_api_key;
     }
     this._hass = value;
+    this.toggleAttribute("data-sidebar-hidden", value?.dockedSidebar === "always_hidden");
+    this.toggleAttribute("data-sidebar-managed", Boolean(value?.kioskMode || value?.auth?.external?.config?.hasSidebar));
     globalThis.HaListManagerFrontendRefresh.attach(this);
     const translationsChanged = haListManagerPanelTextUpdateTranslations(this, this._hass);
     if (this.isConnected) {
@@ -301,6 +306,7 @@ class HaListManagerPanel extends HTMLElement {
     if (changed && this.isConnected) {
       if (this._activeSection === "products" && !this._productsLoaded) this._loadProducts();
       else if (this._activeSection === "alexa") this._loadAlexa();
+      else if (this._activeSection === "watchlist" && this._loaded) void this._loadWatchlistManagement();
       else this._render();
     }
   }
@@ -331,6 +337,9 @@ class HaListManagerPanel extends HTMLElement {
   }
 
   disconnectedCallback() {
+    clearTimeout(this._watchlistStatusTimer);
+    this._watchlistStatusTimer = null;
+    this._watchlistStatusRequest = null;
     this._productSourceRequest = null;
     this._productKeyVisible = false;
     globalThis.HaListManagerFrontendRefresh.detach(this);
@@ -784,6 +793,7 @@ class HaListManagerPanel extends HTMLElement {
       if (this._loaded && this._activeSection === "history") this._loadScannerSection();
       if (this._loaded && this._activeSection === "backup") this._loadDataBackupInfo();
       if (this._loaded && this._activeSection === "alexa") this._loadAlexa();
+      if (this._loaded && this._activeSection === "watchlist") void this._loadWatchlistManagement();
     }
   }
 
@@ -1010,6 +1020,16 @@ class HaListManagerPanel extends HTMLElement {
       this._labelsLoading = false;
       this._render();
     }
+  }
+
+  async _manageWatchlistLabels(payload = {}) {
+    this._watchlistLabels = await haListManagerPanelTextRequest(this._hass, {
+      type: `${API}/watchlist/label_settings`, ...payload,
+    });
+  }
+
+  _loadWatchlistLabels() {
+    return this._runDialogAction(() => this._manageWatchlistLabels());
   }
 
   async _loadChips() {
@@ -1260,7 +1280,10 @@ class HaListManagerPanel extends HTMLElement {
       <style>${this._styles()}</style>
       <div class="page">
         <header class="page-header">
-          <div class="title-wrap"><ha-icon icon="mdi:cart-variant"></ha-icon><div><h1>HA List Manager</h1><p>${haListManagerPanelText("ui.backend_management", {}, this._hass)} <span class="version">v${PANEL_VERSION}</span></p></div></div>
+          <div class="page-brand">
+            <button class="icon-button sidebar-menu" type="button" data-sidebar-menu title="${haListManagerPanelText("ui.open_sidebar", {}, this._hass)}" aria-label="${haListManagerPanelText("ui.open_sidebar", {}, this._hass)}"><ha-icon icon="mdi:menu" aria-hidden="true"></ha-icon></button>
+            <div class="title-wrap"><ha-icon icon="mdi:cart-variant"></ha-icon><div><h1>HA List Manager</h1><p>${haListManagerPanelText("ui.backend_management", {}, this._hass)} <span class="version">v${PANEL_VERSION}</span></p></div></div>
+          </div>
           <span class="release-stage">${haListManagerPanelText("ui.release_beta", {}, this._hass)}</span>
         </header>
         <div class="layout"><nav aria-label="${haListManagerPanelText("ui.administration", {}, this._hass)}">${navigation}</nav><main>${this._renderPageFavorite()}${content}</main></div>
@@ -1304,6 +1327,7 @@ class HaListManagerPanel extends HTMLElement {
     if (this._activeSection === "history") return this._renderScanHistory();
     if (this._activeSection === "notifications") return this._renderNotifications();
     if (this._activeSection === "alexa") return this._renderAlexa();
+    if (this._activeSection === "watchlist") return this._renderWatchlistManagement();
     if (this._activeSection === "settings") return this._renderSettings();
     if (this._activeSection === "backup") return this._renderDataManagement();
     if (this._activeSection === "statistics") return this._renderStatistics();
@@ -1358,7 +1382,7 @@ class HaListManagerPanel extends HTMLElement {
     }
     const tabNames = { global: haListManagerPanelText("ui.global", {}, this._hass), shopping: haListManagerPanelText("ui.shopping_list", {}, this._hass), inventory: haListManagerPanelText("ui.inventory", {}, this._hass), todo: haListManagerPanelText("ui.todo", {}, this._hass), specific: haListManagerPanelText("ui.specific", {}, this._hass), dynamic: haListManagerPanelText("ui.dynamic", {}, this._hass), queue: haListManagerPanelText("ui.scan_queue", {}, this._hass), history: haListManagerPanelText("ui.history", {}, this._hass), devices: haListManagerPanelText("ui.devices", {}, this._hass), simulation: haListManagerPanelText("scanner.simulation", {}, this._hass), "script-qr": haListManagerPanelText("script_qr.title", {}, this._hass), profiles: haListManagerPanelText("ui.delivery_targets", {}, this._hass), assignments: haListManagerPanelText("ui.assign_lists", {}, this._hass) };
     const sections = {
-      lists: [haListManagerPanelText("ui.lists", {}, this._hass), "mdi:format-list-bulleted"], products: [haListManagerPanelText("ui.products", {}, this._hass), "mdi:barcode-scan"], categories: [haListManagerPanelText("ui.categories", {}, this._hass), "mdi:shape-outline"], labels: [haListManagerPanelText("ui.labels", {}, this._hass), "mdi:label-multiple-outline"], chips: [haListManagerPanelText("ui.chips_and_templates", {}, this._hass), "mdi:gesture-tap-button"], dishes: [haListManagerPanelText("recipes.dishes", {}, this._hass), "mdi:food-variant"], inventory: [haListManagerPanelText("ui.inventory", {}, this._hass), "mdi:package-variant-closed"], entity_history: [haListManagerPanelText("ui.entity_inventory", {}, this._hass), "mdi:database-clock-outline"], history: [haListManagerPanelText("ui.scanner", {}, this._hass), "mdi:barcode-scan"], notifications: [haListManagerPanelText("ui.notifications", {}, this._hass), "mdi:bell-outline"], alexa: [haListManagerPanelText("alexa.title", {}, this._hass), "mdi:microphone-message"], settings: [haListManagerPanelText("ui.settings", {}, this._hass), "mdi:cog-outline"], backup: [haListManagerPanelText("backup.title", {}, this._hass), "mdi:database-export-outline"], statistics: [haListManagerPanelText("ui.statistics", {}, this._hass), "mdi:chart-box-outline"],
+      lists: [haListManagerPanelText("ui.lists", {}, this._hass), "mdi:format-list-bulleted"], products: [haListManagerPanelText("ui.products", {}, this._hass), "mdi:barcode-scan"], categories: [haListManagerPanelText("ui.categories", {}, this._hass), "mdi:shape-outline"], labels: [haListManagerPanelText("ui.labels", {}, this._hass), "mdi:label-multiple-outline"], chips: [haListManagerPanelText("ui.chips_and_templates", {}, this._hass), "mdi:gesture-tap-button"], dishes: [haListManagerPanelText("recipes.dishes", {}, this._hass), "mdi:food-variant"], inventory: [haListManagerPanelText("ui.inventory", {}, this._hass), "mdi:package-variant-closed"], entity_history: [haListManagerPanelText("ui.entity_inventory", {}, this._hass), "mdi:database-clock-outline"], history: [haListManagerPanelText("ui.scanner", {}, this._hass), "mdi:barcode-scan"], notifications: [haListManagerPanelText("ui.notifications", {}, this._hass), "mdi:bell-outline"], alexa: [haListManagerPanelText("alexa.title", {}, this._hass), "mdi:microphone-message"], watchlist: [haListManagerPanelText("watchlist.title", {}, this._hass), "mdi:filmstrip-box-multiple"], settings: [haListManagerPanelText("ui.settings", {}, this._hass), "mdi:cog-outline"], backup: [haListManagerPanelText("backup.title", {}, this._hass), "mdi:database-export-outline"], statistics: [haListManagerPanelText("ui.statistics", {}, this._hass), "mdi:chart-box-outline"],
     };
     const [title, icon] = sections[section] || [section, "mdi:bookmark-outline"];
     return { title, subtitle: favorite.tab ? tabNames[favorite.tab] || favorite.tab : haListManagerPanelText("ui.backend_page", {}, this._hass), icon };
@@ -1450,6 +1474,7 @@ class HaListManagerPanel extends HTMLElement {
       if (this._categorySpecificListId) this._loadListAssignments(this._categorySpecificListId, true);
     }
     if (favorite.section === "alexa") this._loadAlexa();
+    if (favorite.section === "watchlist") void this._loadWatchlistManagement();
     if (favorite.section === "products" && !this._productsLoaded) this._loadProducts();
     if (favorite.section === "history") this._loadScannerSection();
     if (favorite.section === "backup") this._loadDataBackupInfo();
@@ -2322,9 +2347,10 @@ class HaListManagerPanel extends HTMLElement {
   _renderLabels() {
     if (this._labelsLoading && !this._labelsLoaded) return this._loadingCard(haListManagerPanelText("ui.loading_labels", {}, this._hass));
     const search = this._labelSearch.trim().toLocaleLowerCase();
+    const labels = [...this._labels, ...(this._watchlistLabels?.custom || [])];
     const searchedLabels = search
-      ? this._labels.filter((label) => label.name.toLocaleLowerCase().includes(search))
-      : this._labels;
+      ? labels.filter((label) => label.name.toLocaleLowerCase().includes(search))
+      : labels;
     const row = (label) => {
       const color = label.color
         ? `<span class="color-swatch" style="--category-color:${this._escape(label.color)}" title="${this._escape(label.color)}"></span>`
@@ -2341,6 +2367,7 @@ class HaListManagerPanel extends HTMLElement {
       ["shopping", haListManagerPanelText("ui.shopping_list", {}, this._hass), (label) => label.scope === "list_type" && label.list_type === "shopping"],
       ["inventory", haListManagerPanelText("ui.inventory", {}, this._hass), (label) => label.scope === "list_type" && label.list_type === "inventory"],
       ["todo", haListManagerPanelText("ui.todo", {}, this._hass), (label) => label.scope === "list_type" && label.list_type === "todo"],
+      ["watchlist", haListManagerPanelText("watchlist.title", {}, this._hass), (label) => label.scope === "watchlist"],
       ["specific", haListManagerPanelText("ui.specific", {}, this._hass), (label) => label.scope === "list"],
     ];
     const activeTab = tabs.find(([id]) => id === this._labelTab) || tabs[0];
@@ -2350,9 +2377,10 @@ class HaListManagerPanel extends HTMLElement {
       inventory: haListManagerPanelText("help.inventory_type_labels", {}, this._hass),
       todo: haListManagerPanelText("help.todo_type_labels", {}, this._hass),
       specific: haListManagerPanelText("ui.select_list_manage_labels", {}, this._hass),
+      watchlist: haListManagerPanelText("watchlist.label_scope", {}, this._hass),
     };
     const filteredLabels = searchedLabels.filter(activeTab[2]);
-    const tabBar = `<div class="scan-history-tabs label-tabs" role="tablist">${tabs.map(([id, title, test]) => `<button type="button" class="${activeTab[0] === id ? "active" : ""}" data-label-tab="${id}" role="tab" aria-selected="${activeTab[0] === id}">${this._escape(title)}<span>${this._labels.filter(test).length}</span></button>`).join("")}</div>`;
+    const tabBar = `<div class="scan-history-tabs label-tabs" role="tablist">${tabs.map(([id, title, test]) => `<button type="button" class="${activeTab[0] === id ? "active" : ""}" data-label-tab="${id}" role="tab" aria-selected="${activeTab[0] === id}">${this._escape(title)}<span>${labels.filter(test).length}</span></button>`).join("")}</div>`;
     const selectedList = this._findList(this._labelSpecificListId) || this._lists[0] || null;
     const selectedListId = selectedList?.id || "";
     const specificPicker = activeTab[0] === "specific" && selectedList
@@ -2373,15 +2401,23 @@ class HaListManagerPanel extends HTMLElement {
         ? `<ha-card class="empty-state"><ha-icon icon="mdi:magnify-close"></ha-icon><h3>${haListManagerPanelText("labels.no_matches", {}, this._hass)}</h3><p>${haListManagerPanelText("labels.change_search_for_more", {}, this._hass)}</p></ha-card>`
         : activeTab[0] === "specific"
           ? `<ha-card class="empty-state compact"><ha-icon icon="mdi:label-multiple-outline"></ha-icon><h3>${haListManagerPanelText("ui.no_custom_labels", {}, this._hass)}</h3><p>${haListManagerPanelText("labels.no_own_list_labels", {}, this._hass)}</p></ha-card>`
-          : this._labels.length
+          : this._labels.length || activeTab[0] === "watchlist"
             ? `<ha-card class="empty-state"><ha-icon icon="mdi:label-off-outline"></ha-icon><h3>${haListManagerPanelText("ui.no_labels_scope_yet", {}, this._hass)}</h3><p>${haListManagerPanelText("ui.create_matching_label", {}, this._hass)}</p></ha-card>`
         : `<ha-card class="empty-state"><ha-icon icon="mdi:label-multiple-outline"></ha-icon><h3>${haListManagerPanelText("ui.no_labels", {}, this._hass)}</h3><p>${haListManagerPanelText("help.label_purpose", {}, this._hass)}</p><button class="ha-button primary" type="button" data-add-label><ha-icon icon="mdi:plus"></ha-icon>${haListManagerPanelText("ui.create_first_label", {}, this._hass)}</button></ha-card>`;
-    const addDefaults = activeTab[0] === "global"
-      ? `data-label-scope="global"`
+    const addDefaults = activeTab[0] === "watchlist" ? 'data-label-scope="watchlist"'
+      : activeTab[0] === "global" ? 'data-label-scope="global"'
       : activeTab[0] === "specific"
         ? `data-label-scope="list" data-label-list-id="${this._escape(selectedListId)}"`
         : `data-label-scope="list_type" data-label-list-type="${activeTab[0]}"`;
-    return `<section class="content-header with-action"><div class="heading-wrap"><ha-icon icon="mdi:label-multiple-outline"></ha-icon><div><h2>${haListManagerPanelText("ui.labels", {}, this._hass)}</h2><p>${this._escape(descriptions[activeTab[0]])}</p></div></div><button class="ha-button primary" type="button" data-add-label ${addDefaults}><ha-icon icon="mdi:plus"></ha-icon>${haListManagerPanelText("labels.create", {}, this._hass)}</button></section>${tabBar}${specificPicker}<div class="search-field"><ha-icon icon="mdi:magnify"></ha-icon><input type="search" data-label-search value="${this._escape(this._labelSearch)}" placeholder="${haListManagerPanelText("ui.search_label", {}, this._hass)}"></div>${this._inlineError()}${content}`;
+    return `<section class="content-header with-action"><div class="heading-wrap"><ha-icon icon="mdi:label-multiple-outline"></ha-icon><div><h2>${haListManagerPanelText("ui.labels", {}, this._hass)}</h2><p>${this._escape(descriptions[activeTab[0]])}</p></div></div><button class="ha-button primary" type="button" data-add-label ${addDefaults}><ha-icon icon="mdi:plus"></ha-icon>${haListManagerPanelText("labels.create", {}, this._hass)}</button></section>${tabBar}${specificPicker}${activeTab[0] === "watchlist" ? this._renderSharedWatchlistLabels() : ""}<div class="search-field"><ha-icon icon="mdi:magnify"></ha-icon><input type="search" data-label-search value="${this._escape(this._labelSearch)}" placeholder="${haListManagerPanelText("ui.search_label", {}, this._hass)}"></div>${this._inlineError()}${content}`;
+  }
+
+  _renderSharedWatchlistLabels() {
+    const t = key => haListManagerPanelText(`watchlist.${key}`, {}, this._hass);
+    return `<ha-card class="settings-card"><div class="setting-row">
+      <div><strong>${t("shared_labels")}</strong><p class="field-help">${t("shared_labels_help")}</p></div>
+      <ha-switch data-watchlist-global-labels aria-label="${t("shared_labels")}"></ha-switch>
+    </div></ha-card>`;
   }
 
   _renderChips() {
@@ -3577,7 +3613,306 @@ class HaListManagerPanel extends HTMLElement {
       <ha-card class="settings-card scanner-defaults"><h3>${haListManagerPanelText("ui.default_scanner_target", {}, this._hass)}</h3><p class="field-help">${haListManagerPanelText("help.default_inventory_target", {}, this._hass)}</p><div class="field-grid scanner-default-grid"><ha-select data-setting-scanner-list></ha-select><ha-select data-setting-scanner-action></ha-select></div></ha-card>
       <ha-card class="settings-card"><h3>${haListManagerPanelText("ui.tandoor_recipe_source", {}, this._hass)}</h3><p class="field-help">${haListManagerPanelText("help.tandoor_credentials", {}, this._hass)}</p><label class="field"><span>${haListManagerPanelText("recipes.tandoor_url", {}, this._hass)}</span><input type="url" data-setting-tandoor-url value="${this._escape(this._settings.tandoor_url || "")}" placeholder="https://rezepte.example.local" autocomplete="url"></label><label class="field"><span>${haListManagerPanelText("ui.api_token", {}, this._hass)}</span><input type="password" data-setting-tandoor-token value="" placeholder="${this._settings.tandoor_token_configured ? haListManagerPanelText("ui.token_saved_placeholder", {}, this._hass) : haListManagerPanelText("ui.tandoor_api_token", {}, this._hass)}" autocomplete="new-password"></label><div class="settings-inline-actions"><button class="ha-button" type="button" data-test-tandoor ${this._busy ? "disabled" : ""}><ha-icon icon="mdi:connection"></ha-icon>${haListManagerPanelText("ui.test_connection", {}, this._hass)}</button><a class="ha-button" href="https://github.com/TandoorRecipes/recipes" target="_blank" rel="noopener noreferrer"><ha-icon icon="mdi:open-in-new"></ha-icon>${haListManagerPanelText("ui.tandoor_recipe_source", {}, this._hass)}</a>${this._tandoorTestStatus ? `<span class="field-help settings-test-status">${this._escape(this._tandoorTestStatus)}</span>` : ""}</div></ha-card>
       <div class="settings-actions"><button class="ha-button primary" type="button" data-save-settings ${this._busy ? "disabled" : ""}>${this._busy ? haListManagerPanelText("ui.save_pending", {}, this._hass) : haListManagerPanelText("ui.save_settings", {}, this._hass)}</button></div>
-      <ha-card class="settings-card frontend-refresh-card"><h3>${haListManagerPanelText("frontend_update.title", {}, this._hass)}</h3><p class="field-help">${haListManagerPanelText("frontend_update.help", {}, this._hass)}</p><button class="ha-button primary" type="button" data-reload-frontend><ha-icon icon="mdi:reload"></ha-icon>${haListManagerPanelText("frontend_update.reload_ui", {}, this._hass)}</button></ha-card>`;
+      <ha-card class="settings-card frontend-refresh-card"><h3>${haListManagerPanelText("frontend_update.title", {}, this._hass)}</h3><p class="field-help">${haListManagerPanelText("frontend_update.help", {}, this._hass)}</p><button class="ha-button primary" type="button" data-reload-frontend><ha-icon icon="mdi:reload"></ha-icon>${haListManagerPanelText("frontend_update.reload_ui", {}, this._hass)}</button></ha-card>
+      ${this._settings.tmdb_token_configured ? this._renderTmdbCredits() : ""}`;
+  }
+
+  _renderTmdbCredits() {
+    const t = key => haListManagerPanelText(`watchlist.${key}`, {}, this._hass);
+    return `<ha-card class="settings-card frontend-refresh-card">
+      <section class="field-help" aria-label="${t("credits")}"><h3>${t("credits")}</h3>
+        <a href="https://www.themoviedb.org/" target="_blank" rel="noopener noreferrer"><img width="38" alt="TMDB" loading="lazy" referrerpolicy="no-referrer"
+          src="https://www.themoviedb.org/assets/2/v4/logos/v2/blue_square_2-d537fb228cf3ded904ef09b136fe3fec72548ebc1fea3fbbd1ad9e36364db38b.svg"></a>
+        <p>${t("credit")}</p></section>
+    </ha-card>`;
+  }
+
+  _renderWatchlistManagement() {
+    const t = key => haListManagerPanelText(`watchlist.${key}`, {}, this._hass);
+    const headline = this._heading("mdi:filmstrip-box-multiple", t("title"), t("admin_help")) + this._inlineError();
+    if (!this._watchlistManagement) return headline;
+    const active = this._watchlistAdminTab;
+    const tabs = [
+      ["settings", "mdi:cog-outline", haListManagerPanelText("ui.settings", {}, this._hass)],
+      ["updates", "mdi:update", t("updates_tab")],
+      ["log", "mdi:clipboard-text-clock-outline", t("sync_log")],
+    ];
+    const tabBar = `<div class="scan-history-tabs label-tabs" role="tablist" aria-label="${t("title")}">
+      ${tabs.map(([tab, glyph, label]) => `<button type="button" id="watchlist-admin-${tab}" data-watchlist-admin-tab="${tab}"
+        class="${active === tab ? "active" : ""}" role="tab" aria-selected="${active === tab}" aria-controls="watchlist-admin-content">
+        <ha-icon icon="${glyph}"></ha-icon>${label}</button>`).join("")}</div>`;
+    return `${headline}${tabBar}<section id="watchlist-admin-content" role="tabpanel" aria-labelledby="watchlist-admin-${active}">
+      ${active === "log" ? this._renderWatchlistLog() : `<form data-watchlist-management>
+        ${active === "updates" ? this._renderWatchlistSchedule() : this._renderWatchlistSettings()}
+        <div class="settings-actions"><button class="ha-button primary" type="submit" ${this._busy ? "disabled" : ""}>
+          ${haListManagerPanelText("ui.save_settings", {}, this._hass)}</button></div>
+      </form>${active === "updates" ? this._renderWatchlistRun() : ""}`}</section>`;
+  }
+
+  _renderWatchlistSchedule() {
+    const t = key => haListManagerPanelText(`watchlist.${key}`, {}, this._hass);
+    const { settings } = this._watchlistManagement;
+    return `<ha-card class="settings-card"><h3>${t("sync_title")}</h3>
+      <label class="setting-row"><input type="checkbox" name="enabled" ${settings.enabled ? "checked" : ""}> ${t("sync_enabled")}</label>
+      <label class="field"><span>${t("sync_time")}</span>
+        <input required type="time" name="time" value="${this._escape(settings.time)}"></label>
+      ${[["active_days", "sync_active_days"], ["catalog_days", "sync_catalog_days"]].map(([key, label]) =>
+        `<label class="field"><span>${t(label)}</span>
+          <input required type="number" min="1" max="365" step="1" name="${key}" value="${this._escape(settings[key] ?? "")}"></label>`).join("")}
+    </ha-card>`;
+  }
+
+  _renderWatchlistRun() {
+    const t = key => haListManagerPanelText(`watchlist.${key}`, {}, this._hass);
+    return `<ha-card class="settings-card frontend-refresh-card"><h3>${t("sync_manual_title")}</h3>
+      <button class="ha-button" type="button" data-watchlist-force ${this._settings.tmdb_token_configured && !this._watchlistManagement.running ? "" : "disabled"}>${t("sync_now")}</button>
+      <p class="field-help">${t("sync_now_help")}</p>
+      <p role="status" data-watchlist-run-status></p>
+      <progress class="watchlist-run-progress" data-watchlist-run-progress aria-label="${t("sync_progress_label")}" hidden></progress>
+      <p class="field-help" data-watchlist-current-title hidden></p>
+      <p class="field-help" data-watchlist-last-run hidden></p>
+    </ha-card>`;
+  }
+
+  _renderWatchlistLog() {
+    return `<ha-card class="settings-card"><div data-watchlist-runs></div></ha-card>`;
+  }
+
+  async _loadWatchlistManagement() {
+    if (!this._hass) return;
+    this._render();
+    try {
+      this._watchlistManagement = await haListManagerPanelTextRequest(this._hass, { type: `${API}/watchlist/manage` });
+      if (this.isConnected && this._activeSection === "watchlist") this._render();
+    } catch (error) {
+      if (this.isConnected && this._activeSection === "watchlist") {
+        this._error = this._formatError(error);
+        this._render();
+      }
+    }
+  }
+
+  _paintWatchlistStatus() {
+    const { running, progress, retry_at, next, runs = [] } = this._watchlistManagement;
+    const format = iso => new Intl.DateTimeFormat(haListManagerPanelTextLocale(this._hass), {
+      dateStyle: "medium", timeStyle: "short", timeZone: this._hass.config?.time_zone,
+    }).format(new Date(iso));
+    const t = (key, details = {}) => haListManagerPanelText(`watchlist.${key}`, details, this._hass);
+    const status = this.shadowRoot.querySelector("[data-watchlist-run-status]");
+    if (status) {
+      const text = retry_at ? t("sync_retry_at", { time: format(retry_at) })
+        : running ? (progress?.total > 0 ? t("sync_progress", progress) : t("sync_running"))
+        : next ? t("sync_next", { time: format(next) }) : t("sync_no_next");
+      if (status.textContent !== text) status.textContent = text;
+      const bar = this.shadowRoot.querySelector("[data-watchlist-run-progress]");
+      bar.hidden = !running || !(progress?.total > 0);
+      if (!bar.hidden) {
+        bar.max = progress.total;
+        bar.value = progress.processed;
+      }
+      const title = this.shadowRoot.querySelector("[data-watchlist-current-title]");
+      title.hidden = !running || !progress?.title || progress.processed >= progress.total;
+      title.textContent = title.hidden ? "" : t("sync_current_title", { title: progress.title });
+      const lastRun = this.shadowRoot.querySelector("[data-watchlist-last-run]");
+      lastRun.hidden = running || !runs.length;
+      if (!lastRun.hidden) {
+        lastRun.textContent = t("sync_last_run", { time: format(runs[0].time), summary: t("sync_summary", runs[0]) });
+      }
+      this.shadowRoot.querySelector("[data-watchlist-force]").disabled = running || !this._settings.tmdb_token_configured;
+    }
+    const target = this.shadowRoot.querySelector("[data-watchlist-runs]");
+    if (!target) return;
+    const markup = runs.map(run => `<details class="watchlist-log-run">
+      <summary>${this._escape(format(run.time))} · ${t(run.force ? "sync_manual" : "sync_scheduled")} · ${t("sync_summary", run)}</summary>
+      ${run.details.length ? `<ul>${run.details.map(detail => `<li>${this._escape(detail.title)} · ${this._escape(t(detail.error ? detail.key : `sync_${detail.key}`, {
+        ...detail, offer: detail.offer ? t(`provider_${detail.offer}`) : "",
+      }))}</li>`).join("")}</ul>` : ""}
+      ${run.truncated ? `<p>${t("sync_truncated", { count: run.truncated })}</p>` : ""}</details>`).join("") || `<p>${t("sync_empty")}</p>`;
+    if (target.watchlistMarkup !== markup) {
+      target.innerHTML = markup;
+      target.watchlistMarkup = markup;
+    }
+  }
+
+  async _watchlistStatus(force = false) {
+    clearTimeout(this._watchlistStatusTimer);
+    this._watchlistStatusTimer = null;
+    if (!this.isConnected || this._activeSection !== "watchlist" || this._watchlistAdminTab === "settings") return;
+    const request = this._watchlistStatusRequest = {};
+    try {
+      const result = await haListManagerPanelTextRequest(this._hass, { type: `${API}/watchlist/sync`, force });
+      if (this._watchlistStatusRequest !== request || this._activeSection !== "watchlist" || this._watchlistAdminTab === "settings" || !this.isConnected) return;
+      Object.assign(this._watchlistManagement, result);
+      this._paintWatchlistStatus();
+    } catch (error) {
+      if (this._watchlistStatusRequest !== request || this._activeSection !== "watchlist" || this._watchlistAdminTab === "settings" || !this.isConnected) return;
+      const status = this.shadowRoot.querySelector("[data-watchlist-run-status]");
+      if (status) {
+        status.textContent = this._formatError(error);
+        this.shadowRoot.querySelector("[data-watchlist-force]").disabled =
+          this._watchlistManagement.running || !this._settings.tmdb_token_configured;
+      }
+    } finally {
+      if (this._watchlistStatusRequest === request) this._watchlistStatusRequest = null;
+    }
+    this._watchlistStatusTimer = setTimeout(() => void this._watchlistStatus(), this._watchlistManagement.running && !this._watchlistManagement.retry_at ? 1500 : 20000);
+  }
+
+  _bindWatchlistManagement(configureSelect) {
+    for (const tab of this.shadowRoot.querySelectorAll("[data-watchlist-admin-tab]")) {
+      tab.addEventListener("click", () => {
+        const next = tab.dataset.watchlistAdminTab;
+        if (this._busy || this._watchlistAdminTab === next) return;
+        this._watchlistAdminTab = next;
+        clearTimeout(this._watchlistStatusTimer);
+        this._watchlistStatusTimer = null;
+        this._watchlistStatusRequest = null;
+        this._render();
+        this.shadowRoot.querySelector(`[data-watchlist-admin-tab="${next}"]`)?.focus({ preventScroll: true });
+      });
+    }
+    if (this._watchlistAdminTab !== "settings") {
+      this._paintWatchlistStatus();
+      if (!this._watchlistStatusTimer && !this._watchlistStatusRequest) {
+        this._watchlistStatusTimer = setTimeout(() => void this._watchlistStatus(), 1000);
+      }
+    }
+    const form = this.shadowRoot.querySelector("[data-watchlist-management]");
+    if (!form) return;
+    form.addEventListener("submit", event => { event.preventDefault(); void this._saveWatchlistManagement(); });
+    if (this._watchlistAdminTab === "updates") {
+      for (const input of form.querySelectorAll("input[name]")) input.addEventListener("input", () => {
+        this._watchlistManagement.settings[input.name] = input.type === "checkbox" ? input.checked
+          : input.type === "number" ? input.valueAsNumber : input.value;
+      });
+      this.shadowRoot.querySelector("[data-watchlist-force]").addEventListener("click", event => {
+        event.currentTarget.disabled = true;
+        void this._watchlistStatus(true);
+      });
+      return;
+    }
+    const t = key => haListManagerPanelText(`watchlist.${key}`, {}, this._hass);
+    const playback = this._watchlistManagement.playback;
+    const scripts = Object.values(this._hass.states || {}).filter(state => state.entity_id.startsWith("script."))
+      .map(state => ({ value: state.entity_id, label: state.attributes.friendly_name || state.entity_id }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+    if (playback.script && !scripts.some(item => item.value === playback.script)) {
+      scripts.push({ value: playback.script, label: playback.script });
+    }
+    configureSelect("[data-watchlist-script]", t("play_script"), scripts, playback.script, value => { playback.script = value || ""; }, true);
+    for (const field of ["players", "local_sources"]) {
+      const input = form.elements.namedItem(field);
+      input.addEventListener("input", () => { playback[field] = input.value.split("\n"); });
+    }
+    this._bindWatchlistRegions(this.shadowRoot.querySelector("[data-watchlist-region]"));
+    const shareSubscriptions = this.shadowRoot.querySelector("[data-watchlist-share-subscriptions]");
+    if (shareSubscriptions) {
+      shareSubscriptions.checked = Boolean(this._settings.watchlist_share_subscriptions);
+      shareSubscriptions.addEventListener("change", () => { this._settings.watchlist_share_subscriptions = shareSubscriptions.checked; });
+    }
+    const defaultMode = this.shadowRoot.querySelector("[data-watchlist-default-mode]");
+    defaultMode?.addEventListener("change", () => {
+      this._settings.watchlist_preferences = { ...this._settings.watchlist_preferences, default_mode: defaultMode.value };
+    });
+    for (const preference of this.shadowRoot.querySelectorAll("[data-watchlist-preference]")) {
+      const key = preference.dataset.watchlistPreference;
+      preference.checked = this._settings.watchlist_preferences?.[key] !== false;
+      preference.addEventListener("change", () => {
+        this._settings.watchlist_preferences = { ...this._settings.watchlist_preferences, [key]: preference.checked };
+      });
+    }
+    const tmdbToken = this.shadowRoot.querySelector("[data-setting-tmdb-token]");
+    const tmdbRemove = this.shadowRoot.querySelector("[data-setting-tmdb-remove]");
+    tmdbToken?.addEventListener("input", () => {
+      this._settings.tmdbTokenDraft = tmdbToken.value;
+      if (tmdbRemove?.checked) tmdbRemove.checked = this._settings.tmdbTokenRemove = false;
+    });
+    tmdbRemove?.addEventListener("change", () => {
+      this._settings.tmdbTokenRemove = tmdbRemove.checked;
+      if (tmdbRemove.checked) this._settings.tmdbTokenDraft = tmdbToken.value = "";
+    });
+  }
+
+  async _saveWatchlistManagement() {
+    if (this._busy) return;
+    await this._runDialogAction(async () => {
+      const { settings, playback } = this._watchlistManagement;
+      const data = await haListManagerPanelTextRequest(this._hass, {
+        type: `${API}/watchlist/manage/save`,
+        settings, script: playback.script, players: playback.players.join("\n"),
+        local_sources: (playback.local_sources || []).join("\n"),
+        preferences: { default_mode: "shared", allow_override: true, show_all_favorites: true,
+          ...this._settings.watchlist_preferences },
+        share_subscriptions: Boolean(this._settings.watchlist_share_subscriptions),
+        region: this._settings.watchlist_region || null,
+        ...(this._settings.tmdbTokenRemove ? { tmdb_token: null }
+          : this._settings.tmdbTokenDraft?.trim() ? { tmdb_token: this._settings.tmdbTokenDraft.trim() } : {}),
+      });
+      this._watchlistManagement = data;
+      this._settings.tmdb_token_configured = data.configured;
+      this._settings.tmdbTokenDraft = "";
+      this._settings.tmdbTokenRemove = false;
+    });
+  }
+
+  _renderWatchlistSettings() {
+    const t = key => haListManagerPanelText(`watchlist.${key}`, {}, this._hass);
+    const saved = this._settings.tmdb_token_configured && !this._settings.tmdbTokenRemove;
+    const { playback } = this._watchlistManagement;
+    return `<ha-card class="settings-card"><h3>TMDB</h3>
+      <p class="field-help">${t("credit_short")}</p>
+      <p class="field-help"><a href="https://www.themoviedb.org/settings/api" target="_blank" rel="noopener noreferrer">${t("get_token")}</a></p>
+      <label class="field"><span>${t("api_token")}</span><input type="password" maxlength="2048" data-setting-tmdb-token
+        value="${this._escape(this._settings.tmdbTokenDraft || "")}" placeholder="${saved ? t("token_saved") : ""}" autocomplete="new-password"></label>
+      ${this._settings.tmdb_token_configured ? `<label class="setting-row"><input type="checkbox" data-setting-tmdb-remove
+        ${this._settings.tmdbTokenRemove ? "checked" : ""}> ${t("remove_token")}</label>` : ""}
+      <label class="field"><span>${t("streaming_region")}</span><select data-watchlist-region></select>
+        <small class="field-help" data-watchlist-region-status>${t("region_help")}</small></label>
+      <div class="setting-row"><div><strong>${t("share_subscriptions")}</strong><p class="field-help">${t("share_subscriptions_help")}</p></div>
+        <ha-switch data-watchlist-share-subscriptions aria-label="${t("share_subscriptions")}"></ha-switch></div>
+      <label class="field"><span>${t("default_progress")}</span><select data-watchlist-default-mode>
+        <option value="shared" ${this._settings.watchlist_preferences?.default_mode !== "personal" ? "selected" : ""}>${t("mode_shared")}</option>
+        <option value="personal" ${this._settings.watchlist_preferences?.default_mode === "personal" ? "selected" : ""}>${t("mode_personal")}</option>
+      </select></label>
+      <div class="setting-row"><div><strong>${t("allow_progress_override")}</strong><p class="field-help">${t("allow_progress_override_help")}</p></div>
+        <ha-switch data-watchlist-preference="allow_override" aria-label="${t("allow_progress_override")}"></ha-switch></div>
+      <div class="setting-row"><div><strong>${t("allow_all_favorites")}</strong><p class="field-help">${t("allow_all_favorites_help")}</p></div>
+        <ha-switch data-watchlist-preference="show_all_favorites" aria-label="${t("allow_all_favorites")}"></ha-switch></div>
+    </ha-card><ha-card class="settings-card"><h3>${t("play_title")}</h3>
+      <ha-select data-watchlist-script></ha-select>
+      <label class="field"><span>${t("play_players")}</span><textarea name="players" rows="4" maxlength="4000">${this._escape(playback.players.join("\n"))}</textarea>
+        <small>${t("play_players_help")}</small></label>
+      <label class="field"><span>${t("play_local_sources")}</span><textarea name="local_sources" rows="4" maxlength="4000">${this._escape((playback.local_sources || []).join("\n"))}</textarea>
+        <small>${t("play_local_sources_help")}</small></label></ha-card>`;
+  }
+
+  _bindWatchlistRegions(select) {
+    if (!select) return;
+    const t = key => haListManagerPanelText(`watchlist.${key}`, {}, this._hass);
+    const language = this._hass.locale?.language || this._hass.language || "en";
+    const names = new Intl.DisplayNames([language], { type: "region" });
+    const status = this.shadowRoot.querySelector("[data-watchlist-region-status]");
+    const populate = (regions) => {
+      const selected = this._settings.watchlist_region || "";
+      const home = this._settings.watchlist_home_region;
+      const automatic = `${t("region_home")}${home ? ` (${names.of(home)})` : ""}`;
+      const entries = [...new Set([...regions, selected, home].filter(code => /^[A-Z]{2}$/.test(code || "")))]
+        .map(code => [code, names.of(code)]).sort((a, b) => a[1].localeCompare(b[1], language));
+      select.replaceChildren(...[["", automatic], ...entries].map(([code, name]) => new Option(name, code)));
+      select.value = selected;
+    };
+    populate(this._watchlistRegions || []);
+    select.addEventListener("change", () => { this._settings.watchlist_region = select.value || null; });
+    if (!this._watchlistRegions && this._settings.tmdb_token_configured) {
+      this._watchlistRegionLoad ??= haListManagerPanelTextRequest(this._hass, { type: `${API}/watchlist/regions` })
+        .then(regions => { this._watchlistRegions = regions; return regions; })
+        .finally(() => { this._watchlistRegionLoad = null; });
+      void this._watchlistRegionLoad.then(regions => {
+        if (select.isConnected) populate(regions);
+      }).catch(() => {
+        if (status?.isConnected) status.textContent = t("region_list_failed");
+      });
+    }
   }
 
   _renderProductSourceSettings() {
@@ -4074,13 +4409,13 @@ class HaListManagerPanel extends HTMLElement {
     return `<div class="dialog-backdrop" data-close-dialog><section class="dialog category-dialog" role="dialog" aria-modal="true" data-dialog-panel>
       ${this._dialogHeader(this._dialog.record ? haListManagerPanelText("ui.edit_label", {}, this._hass) : haListManagerPanelText("labels.create", {}, this._hass))}
       <label class="field"><span>${haListManagerPanelText("ui.name", {}, this._hass)}</span><input type="text" maxlength="100" data-label-name value="${this._escape(draft.name)}" autocomplete="off"></label>
-      <ha-select class="selector-field" data-label-scope-select></ha-select>
+      ${draft.scope === "watchlist" ? "" : `<ha-select class="selector-field" data-label-scope-select></ha-select>`}
       ${draft.scope === "list_type" ? `<ha-select class="selector-field" data-label-list-type-select></ha-select>` : ""}
       ${draft.scope === "list" ? `<ha-select class="selector-field" data-label-list-select></ha-select>` : ""}
       <ha-selector class="selector-field" data-label-icon-selector></ha-selector>
       <div class="color-field"><ha-input class="selector-field" type="color" data-label-color-selector></ha-input><button class="ha-button" type="button" data-clear-label-color ${draft.color ? "" : "disabled"}><ha-icon icon="mdi:palette-remove-outline"></ha-icon>${haListManagerPanelText("ui.use_default_color", {}, this._hass)}</button></div>
-      <p class="field-help">${haListManagerPanelText("help.label_scope", {}, this._hass)}</p>
-      <div class="checkbox-row"><input type="checkbox" data-label-hide-in-items ${draft.hide_in_items ? "checked" : ""}><div><span>${haListManagerPanelText("labels.hide_in_items", {}, this._hass)}</span><p class="field-help">${haListManagerPanelText("labels.hide_in_items_help", {}, this._hass)}</p></div></div>
+      <p class="field-help">${haListManagerPanelText(draft.scope === "watchlist" ? "watchlist.label_scope" : "help.label_scope", {}, this._hass)}</p>
+      ${draft.scope === "watchlist" ? "" : `<div class="checkbox-row"><input type="checkbox" data-label-hide-in-items ${draft.hide_in_items ? "checked" : ""}><div><span>${haListManagerPanelText("labels.hide_in_items", {}, this._hass)}</span><p class="field-help">${haListManagerPanelText("labels.hide_in_items_help", {}, this._hass)}</p></div></div>`}
       ${this._dialogError()}
       <div class="dialog-actions"><button class="ha-button primary" data-save-label ${this._busy ? "disabled" : ""}>${this._busy ? haListManagerPanelText("ui.save_pending", {}, this._hass) : haListManagerPanelText("ui.save", {}, this._hass)}</button><button class="ha-button" data-cancel-dialog>${haListManagerPanelText("ui.cancel", {}, this._hass)}</button></div>
     </section></div>`;
@@ -4608,6 +4943,9 @@ class HaListManagerPanel extends HTMLElement {
   }
 
   _bindEvents() {
+    this.shadowRoot.querySelector("[data-sidebar-menu]")?.addEventListener("click", () => {
+      this.dispatchEvent(new CustomEvent("hass-toggle-menu", { bubbles: true, composed: true }));
+    });
     this.shadowRoot.querySelector("[data-product-camera]")?.addEventListener("click",()=>this._startProductCamera());
     this.shadowRoot.querySelector("[data-product-scanner-target]")?.addEventListener("click",()=>this._toggleProductScannerTarget());
     this.shadowRoot.querySelector("[data-product-scan-queue]")?.addEventListener("click",()=>{this._dialog={kind:"product-scan-queue"};this._render();});
@@ -4689,6 +5027,7 @@ class HaListManagerPanel extends HTMLElement {
         if (!this._settingsLoaded) this._loadSettings();
         else this._render();
       }
+      else if (this._activeSection === "watchlist") void this._loadWatchlistManagement();
       else if (this._activeSection === "alexa") this._loadAlexa();
       else if (this._activeSection === "backup") this._loadDataBackupInfo();
       else this._render();
@@ -5003,10 +5342,24 @@ class HaListManagerPanel extends HTMLElement {
     this.shadowRoot.querySelectorAll("[data-edit-category]").forEach((button) => button.addEventListener("click", () => this._openCategoryDialog(this._findCategory(button.dataset.editCategory))));
     this.shadowRoot.querySelectorAll("[data-delete-category]").forEach((button) => button.addEventListener("click", () => this._openDeleteDialog("delete-category", this._findCategory(button.dataset.deleteCategory))));
     this.shadowRoot.querySelectorAll("[data-promote-category]").forEach((button) => button.addEventListener("click", () => this._openCategoryDialog(null, { name: button.dataset.name, scope: "list", list_id: button.dataset.listId, source_category: button.dataset.name, source_list_id: button.dataset.listId })));
-    this.shadowRoot.querySelectorAll("[data-label-tab]").forEach((button) => button.addEventListener("click", () => { this._labelTab = button.dataset.labelTab; this._render(); }));
+    this.shadowRoot.querySelectorAll("[data-label-tab]").forEach(button => button.addEventListener("click", () => {
+      this._labelTab = button.dataset.labelTab;
+      this._render();
+      if (this._labelTab === "watchlist" && !this._busy) void this._loadWatchlistLabels();
+    }));
+    const watchlistGlobals = this.shadowRoot.querySelector("[data-watchlist-global-labels]");
+    if (watchlistGlobals) {
+      watchlistGlobals.checked = this._watchlistLabels?.use_global_labels === true;
+      watchlistGlobals.disabled = !this._watchlistLabels || this._busy;
+      watchlistGlobals.addEventListener("change", () => {
+        if (this._busy) return;
+        watchlistGlobals.disabled = true;
+        this._runDialogAction(() => this._manageWatchlistLabels({ action: "share", enabled: watchlistGlobals.checked }));
+      });
+    }
     this.shadowRoot.querySelectorAll("[data-add-label]").forEach((button) => button.addEventListener("click", () => this._openLabelDialog(null, { scope: button.dataset.labelScope, list_type: button.dataset.labelListType, list_id: button.dataset.labelListId })));
-    this.shadowRoot.querySelectorAll("[data-edit-label]").forEach((button) => button.addEventListener("click", () => this._openLabelDialog(this._findLabel(button.dataset.editLabel))));
-    this.shadowRoot.querySelectorAll("[data-delete-label]").forEach((button) => button.addEventListener("click", () => this._openDeleteDialog("delete-label", this._findLabel(button.dataset.deleteLabel))));
+    this.shadowRoot.querySelectorAll("[data-edit-label]").forEach((button) => button.addEventListener("click", () => this._openLabelDialog(this._findLabel(button.dataset.editLabel) || this._watchlistLabels?.custom.find(label => label.id === button.dataset.editLabel))));
+    this.shadowRoot.querySelectorAll("[data-delete-label]").forEach((button) => button.addEventListener("click", () => this._openDeleteDialog("delete-label", this._findLabel(button.dataset.deleteLabel) || this._watchlistLabels?.custom.find(label => label.id === button.dataset.deleteLabel))));
     this.shadowRoot.querySelectorAll("[data-chip-tab]").forEach((button) => button.addEventListener("click", () => { this._chipTab = button.dataset.chipTab; this._render(); }));
     this.shadowRoot.querySelectorAll("[data-add-chip]").forEach((button) => button.addEventListener("click", () => this._openChipDialog(null, { scope: button.dataset.chipScope, list_type: button.dataset.chipListType, list_id: button.dataset.chipListId, chip_kind: button.dataset.chipKind })));
     this.shadowRoot.querySelectorAll("[data-edit-chip]").forEach((button) => button.addEventListener("click", () => this._openChipDialog(this._findChip(button.dataset.editChip))));
@@ -5635,6 +5988,7 @@ class HaListManagerPanel extends HTMLElement {
       this._configureInventoryGroupCategoryPicker();
       return;
     }
+    if (this._activeSection === "watchlist" && !this._dialog) this._bindWatchlistManagement(configureSelect);
     if (this._activeSection === "settings" && !this._dialog) {
       const brand = this.shadowRoot.querySelector("[data-setting-brand]");
       const quantity = this.shadowRoot.querySelector("[data-setting-quantity]");
@@ -8029,6 +8383,14 @@ class HaListManagerPanel extends HTMLElement {
     if (!draft.name) return this._showDialogError(haListManagerPanelText("ui.label_name_required", {}, this._hass));
     if (draft.scope === "list" && !draft.list_id) return this._showDialogError(haListManagerPanelText("errors.list_required", {}, this._hass));
     await this._runDialogAction(async () => {
+      if (draft.scope === "watchlist") {
+        await this._manageWatchlistLabels({
+          action: "save", ...(record ? { label_id: record.id } : {}),
+          name: draft.name, icon: draft.icon || null, color: draft.color || null,
+        });
+        this._dialog = null;
+        return;
+      }
       const payload = {
         type: `${API}/labels/${record ? "update" : "create"}`,
         name: draft.name,
@@ -8611,6 +8973,9 @@ class HaListManagerPanel extends HTMLElement {
         this._categoriesLoaded = false;
         await Promise.all([this._loadCategories(), this._refreshInfo()]);
         if (this._selectedListId) await this._loadListAssignments(this._selectedListId, true);
+      } else if (kind === "delete-label" && record.scope === "watchlist") {
+        await this._manageWatchlistLabels({ action: "delete", label_id: record.id });
+        this._dialog = null;
       } else if (kind === "delete-label") {
         await haListManagerPanelTextRequest(this._hass, { type: `${API}/labels/delete`, label_id: record.id });
         this._dialog = null;
@@ -8735,12 +9100,14 @@ class HaListManagerPanel extends HTMLElement {
     return `<span class="label-chips">${labels.map((label) => `<span class="label-chip" style="${label.color ? `--label-color:${this._escape(label.color)}` : ""}"><ha-icon icon="${this._escape(label.icon || "mdi:label-outline")}"></ha-icon>${this._escape(label.name)}${globalThis.HaListManagerDialogSections.labelMarker(label, haListManagerPanelText("labels.filter_only", {}, this._hass))}</span>`).join("")}</span>`;
   }
   _labelUsageText(label) {
+    if (label.scope === "watchlist") return haListManagerPanelText("watchlist.label_usage", { count: label.title_count }, this._hass);
     const products = Number(label.product_count || 0);
     const items = Number(label.item_count || 0);
     if (!products && !items) return haListManagerPanelText("ui.not_used_yet", {}, this._hass);
     return `${products} ${products === 1 ? haListManagerPanelText("ui.product", {}, this._hass) : haListManagerPanelText("ui.products", {}, this._hass)} · ${items} ${items === 1 ? haListManagerPanelText("ui.list_item", {}, this._hass) : haListManagerPanelText("ui.list_entries", {}, this._hass)}`;
   }
   _labelScopeText(label) {
+    if (label.scope === "watchlist") return haListManagerPanelText("watchlist.title", {}, this._hass);
     if (label.scope === "list") return haListManagerPanelText("ui.list_named", {p0:(this._findList(label.list_id)?.name || haListManagerPanelText("ui.no_longer_exists", {}, this._hass))}, this._hass);
     if (label.scope === "list_type") return ({ shopping: haListManagerPanelText("ui.shopping_lists", {}, this._hass), inventory: haListManagerPanelText("ui.inventory", {}, this._hass), todo: haListManagerPanelText("ui.todo", {}, this._hass) })[label.list_type] || haListManagerPanelText("ui.list_type", {}, this._hass);
     return haListManagerPanelText("ui.global", {}, this._hass);
@@ -9320,6 +9687,9 @@ class HaListManagerPanel extends HTMLElement {
   }
 
   _styles() { return `
+    .page-brand{display:flex;align-items:center;min-width:0}
+    .page-brand .sidebar-menu{display:none;flex:none;margin-inline-end:8px}
+    :host(:is([narrow],[data-sidebar-hidden]):not([data-sidebar-managed])) .sidebar-menu{display:grid}
     .picker-trigger-host.picker-paired input{padding-right:86px!important}.picker-paired>[data-picker-list-trigger]{right:44px}.picker-paired>.picker-popup-trigger{right:4px}.picker-list-trigger:disabled{opacity:.4;cursor:default}.field-selection-backdrop{z-index:150}.field-selection-dialog{width:min(680px,calc(100vw - 32px));max-height:calc(100dvh - 32px);display:flex;flex-direction:column;overflow:hidden;box-sizing:border-box}.field-selection-dialog>.field{margin:0 0 16px}.field-selection-options{display:flex;flex-wrap:wrap;align-content:flex-start;gap:9px;overflow:auto;min-height:60px;overscroll-behavior:contain;padding:2px}.field-selection-chip{display:inline-flex;align-items:center;gap:7px;max-width:100%;min-height:44px;padding:7px 12px;border:1px solid color-mix(in srgb,var(--label-color,var(--primary-color)) 55%,var(--divider-color));border-radius:22px;color:var(--primary-text-color);background:color-mix(in srgb,var(--label-color,var(--primary-color)) 14%,var(--card-background-color));cursor:pointer;text-align:left}.field-selection-chip ha-icon{flex-shrink:0;--mdc-icon-size:21px;padding:3px;box-sizing:content-box;border-radius:50%;color:var(--primary-text-color);background:color-mix(in srgb,var(--label-color,var(--primary-color)) 24%,var(--card-background-color))}.field-selection-chip>span{display:flex;flex-direction:column;min-width:0;overflow-wrap:anywhere}.field-selection-chip small{color:var(--secondary-text-color);font-size:12px}.field-selection-chip.selected{border-color:var(--primary-color);box-shadow:inset 0 0 0 1px var(--primary-color);background:color-mix(in srgb,var(--primary-color) 18%,var(--card-background-color))}.field-selection-chip:focus-visible{outline:2px solid var(--primary-color);outline-offset:1px}.field-selection-dialog .dialog-actions{flex-shrink:0}
     .legacy-import-warning-group{margin-top:10px;padding-top:10px;border-top:1px solid var(--divider-color)}.legacy-import-warning-reason{margin-top:10px}.legacy-import-warning-reason p{margin:0}.legacy-import-warning-reason ul{margin-top:6px}.legacy-import-warning-reason code{font-size:12px;overflow-wrap:anywhere;white-space:normal}.legacy-import-type-field{margin-bottom:14px}[data-legacy-inventory-help][hidden]{display:none}
     [data-legacy-input-block][hidden],[data-legacy-source-wrapper][hidden],[data-legacy-ean-section][hidden],[data-legacy-ean-source-wrapper][hidden]{display:none}.legacy-import-ean-conflicts{margin:14px 0;padding:12px;border-left:3px solid var(--warning-color,#ffa600);border-radius:6px;background:color-mix(in srgb,var(--warning-color,#ffa600) 8%,transparent)}[data-legacy-import-view] [data-legacy-source-fields][data-no-source="true"]{grid-template-columns:minmax(0,1fr)}[data-legacy-source-wrapper]{min-width:0}[data-legacy-import-view]>.content-header{padding-right:54px}[data-legacy-import-view] .settings-card{margin-top:16px}[data-legacy-import-view] p{line-height:1.5}[data-legacy-import-view] h4{margin:0 0 10px;font-size:16px}[data-legacy-import-view] h4 small{display:block;margin-top:4px;color:var(--secondary-text-color);font-weight:400}[data-legacy-import-view] .field-grid{grid-template-columns:minmax(0,1fr) minmax(0,1fr);align-items:end}[data-legacy-import-view] .field-grid>.field{margin-top:0}[data-legacy-import-view] ha-selector{min-width:0}[data-legacy-import-view] .setting-row{align-items:center;border-bottom:0}[data-legacy-import-view] .setting-row input{flex:0 0 auto;width:20px;height:20px;accent-color:var(--primary-color)}.legacy-import-yaml{font-family:var(--code-font-family,monospace)!important;font-size:13px!important;line-height:1.5;tab-size:2;white-space:pre;overflow-wrap:normal;overflow:auto}.legacy-import-source,.legacy-import-preview-list{margin-top:18px;padding:14px;border:1px solid var(--divider-color);border-radius:10px;overflow-wrap:anywhere}.legacy-import-notes{margin-top:14px;padding:10px 12px;border-left:3px solid var(--warning-color,#ffa600);border-radius:6px;background:color-mix(in srgb,var(--warning-color,#ffa600) 8%,transparent)}.legacy-import-notes summary{color:var(--warning-color,#ffa600)}.legacy-import-notes ul{padding-left:20px;margin-bottom:0}.legacy-import-notes li+li{margin-top:7px}.legacy-import-preview-list>details{margin-top:12px;padding-top:10px;border-top:1px solid var(--divider-color)}[data-legacy-import-view] summary{cursor:pointer}.legacy-import-definitions,.legacy-import-item-list{display:grid;gap:9px;margin-top:12px}.legacy-import-category{display:flex;align-items:center;gap:10px}.legacy-import-color{display:grid;place-items:center;flex:0 0 auto;width:34px;height:34px;border-radius:8px;color:var(--import-color,var(--primary-color));background:color-mix(in srgb,var(--import-color,var(--primary-color)) 16%,transparent)}.legacy-import-category>span:last-child,.legacy-import-item-list>div{display:flex;min-width:0;flex-direction:column;gap:4px}.legacy-import-category small,.legacy-import-item-list small{color:var(--secondary-text-color);line-height:1.4}.legacy-import-chip-list{display:flex;flex-wrap:wrap;gap:7px;margin-top:12px}.legacy-import-chip-list>span{padding:5px 9px;border:1px solid var(--divider-color);border-radius:999px;background:var(--secondary-background-color)}.legacy-import-chip-list>.field-help{flex-basis:100%}.legacy-import-file,.legacy-import-results>div{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:10px;padding:8px 10px;border:1px solid var(--divider-color);border-radius:8px;overflow-wrap:anywhere}.legacy-import-results>div{flex-wrap:wrap}.legacy-import-file>span{min-width:0}.legacy-import-file .icon-button{flex-shrink:0}[data-legacy-feedback]:empty{display:none}[data-legacy-feedback]{margin-top:12px}@media(max-width:600px){[data-legacy-import-view] .field-grid{grid-template-columns:minmax(0,1fr)}.legacy-import-source,.legacy-import-preview-list{padding:11px}[data-legacy-import-view] .settings-inline-actions>.ha-button{max-width:100%;white-space:normal}}
@@ -9340,7 +9710,7 @@ class HaListManagerPanel extends HTMLElement {
     .entity-history-row[hidden],.entity-history-list[hidden],[data-entity-history-empty][hidden]{display:none}.entity-sample-visibility{display:flex;align-items:center;gap:8px;margin:14px 0}.entity-sample-visibility input{width:18px;height:18px}.entity-sample-hidden{display:inline-flex;align-items:center;gap:5px;color:var(--warning-color,#ffb300);font-size:12px}.entity-sample-hidden ha-icon{--mdc-icon-size:17px}.sample-hidden{border-left:3px solid var(--warning-color,#ffb300);padding-left:9px}.entity-history-intro{margin-bottom:14px;border-left:4px solid var(--primary-color)}.entity-history-intro p{margin-top:5px;color:var(--secondary-text-color);line-height:1.5}.entity-history-recording-option{display:flex;align-items:flex-start;gap:10px;margin-top:14px;line-height:1.45}.entity-history-recording-option input{width:18px;height:18px;flex:0 0 18px;margin-top:2px}.entity-history-recording-option span{min-width:0}.entity-history-recording-option small{display:block;margin-top:4px;color:var(--secondary-text-color)}.entity-history-add>.entity-history-recording-option{grid-column:1/-1;margin-top:0}.entity-history-add{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:end;gap:12px;margin-bottom:14px}.entity-import-id{overflow-wrap:anywhere}.entity-import-status{margin:14px 0;padding:10px 12px;border-left:4px solid var(--primary-color);background:color-mix(in srgb,var(--primary-color) 10%,transparent);line-height:1.5}.entity-history-import-sources{display:flex;flex-wrap:wrap;gap:10px 22px;margin:14px 0}.entity-history-import-sources label{display:flex;align-items:center;gap:8px}.entity-history-import-sources input{width:18px;height:18px}.entity-history-list{padding:0;overflow:hidden}.dialog.entity-samples-dialog{display:flex;flex-direction:column;width:min(850px,calc(100vw - 40px))}.entity-samples-dialog>*{flex-shrink:0}.entity-samples-dialog .field-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.entity-sample-filters{margin:12px 0}.entity-sample-filters summary{cursor:pointer;color:var(--primary-color)}.entity-sample-filters[open] summary{margin-bottom:12px}@media(max-width:600px){.entity-samples-dialog .field-grid{grid-template-columns:1fr}.entity-samples-dialog .dialog-actions .ha-button{flex:1 1 auto;min-height:44px;height:auto;padding:10px 14px}}.entity-samples-list{flex:1 1 auto;min-height:0;max-height:45vh;overflow:auto;overscroll-behavior:contain;margin:16px 0}.entity-sample-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 4px;border-bottom:1px solid var(--divider-color)}.entity-sample-row>div{display:flex;min-width:0;flex-direction:column;gap:4px}.entity-sample-row strong{overflow-wrap:anywhere}.entity-sample-row small{color:var(--secondary-text-color)}.entity-sample-status{padding:12px;color:var(--success-color,#43a047)}.entity-sample-attributes{margin:14px 0}.entity-sample-attributes summary{cursor:pointer;color:var(--primary-color)}.entity-sample-attributes pre{white-space:pre-wrap;overflow-wrap:anywhere}.entity-sample-attributes textarea{width:100%;box-sizing:border-box;font:inherit}.entity-history-row{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:13px;min-height:86px;padding:10px 16px;border-bottom:1px solid var(--divider-color)}.entity-history-row:last-child{border-bottom:0}.entity-history-icon{display:grid;place-items:center;width:44px;height:44px;border-radius:50%;color:var(--primary-color);background:color-mix(in srgb,var(--primary-color) 13%,transparent)}.entity-history-details{display:flex;min-width:0;flex-direction:column;gap:3px}.entity-history-details code,.entity-history-details small{overflow:hidden;color:var(--secondary-text-color);text-overflow:ellipsis;white-space:nowrap}.entity-history-actions{display:flex;align-items:center;gap:4px}
     .bring-sync-card{margin-bottom:16px;padding:16px 18px}.bring-sync-card.error{border-left:4px solid var(--error-color)}.bring-sync-card.syncing{border-left:4px solid var(--primary-color)}.bring-sync-header,.bring-sync-header>div{display:flex;align-items:center;gap:12px}.bring-sync-header{justify-content:space-between}.bring-sync-header>div>ha-icon{--mdc-icon-size:28px;color:var(--success-color,#43a047)}.bring-sync-card.error .bring-sync-header>div>ha-icon{color:var(--error-color)}.bring-sync-card.syncing .bring-sync-header>div>ha-icon,.bring-sync-card.never .bring-sync-header>div>ha-icon{color:var(--primary-color)}.bring-sync-header span{display:flex;flex-direction:column;gap:3px}.bring-sync-header small,.bring-sync-details small{color:var(--secondary-text-color);font-size:13px}.bring-sync-details{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:13px 24px;margin-top:16px;padding-top:15px;border-top:1px solid var(--divider-color)}.bring-sync-details>span{display:flex;flex-direction:column;gap:4px;min-width:0}.bring-sync-details strong{overflow-wrap:anywhere;font-size:14px}.bring-sync-error{display:flex;align-items:flex-start;gap:8px;margin-top:14px;padding:11px 12px;border-radius:8px;color:var(--error-color);background:color-mix(in srgb,var(--error-color) 10%,transparent);line-height:1.4}.bring-sync-error ha-icon{flex:0 0 auto;--mdc-icon-size:20px}
     @media(max-width:760px){.inventory-detail-stats{grid-template-columns:repeat(2,minmax(100px,1fr))}.inventory-detail-grid,.list-scope-grid{grid-template-columns:1fr}.simulation-grid{grid-template-columns:1fr 1fr}.page{padding:16px}.page-header{align-items:flex-start}h1{font-size:23px}.layout{display:block}nav{flex-direction:row;overflow-x:auto;margin-bottom:20px;padding:6px}nav::after{content:"";flex:0 0 calc(50vw - 48px)}.nav-item{width:auto;flex:0 0 auto;padding:0 12px}.overview-grid{grid-template-columns:1fr}.bring-sync-header{align-items:flex-start;flex-direction:column}.bring-sync-details{grid-template-columns:1fr}.release-stage{font-size:12px}.content-header.with-action{align-items:flex-start}.category-order-controls{grid-template-columns:1fr}}
-    .lookup-status{display:block;margin-top:7px;font-size:13px;line-height:1.3}.lookup-status.success{color:var(--success-color,#43a047)}.lookup-status.warning{color:var(--warning-color,#f0a000)}.lookup-status.error{color:var(--error-color)}.product-dialog-top{display:grid;grid-template-columns:minmax(0,1fr) 130px;gap:18px;align-items:start}.product-preview{position:relative;display:grid;place-items:center;width:130px;height:150px;margin-top:16px;overflow:hidden;border:1px solid var(--divider-color);border-radius:10px;color:var(--secondary-text-color);background:var(--secondary-background-color)}.product-preview img,.contained-product-image{position:absolute;inset:0;display:block;width:100%;height:100%;object-fit:contain;object-position:center}.product-preview ha-icon{--mdc-icon-size:42px}.ha-button.compact{min-height:34px;padding:0 12px;font-size:14px}.ha-button.compact.active{color:var(--primary-color);border-color:var(--primary-color);background:color-mix(in srgb,var(--primary-color) 12%,transparent)}.field input[readonly]{color:var(--secondary-text-color)}.field input.invalid{border-color:var(--error-color)}.field-error{color:var(--error-color);font-size:13px}.product-category-assignments{display:grid;gap:10px;margin-top:18px;padding:14px;border:1px solid var(--divider-color);border-radius:10px}.product-category-assignments h4{margin:0;font-size:17px}.product-category-assignments>.field-help{margin:0}.product-category-combo-field{min-width:0;margin-top:10px}.product-category-combo-field input{width:100%}.product-category-overrides{border-top:1px solid var(--divider-color);padding-top:9px}.product-category-overrides summary{cursor:pointer;color:var(--primary-text-color);font-weight:500}.product-type-categories{display:grid;grid-template-columns:minmax(0,1fr);gap:4px;margin-top:4px}.product-list-exceptions{display:grid;gap:9px;margin-top:14px}.product-list-exception{display:grid;grid-template-columns:minmax(0,1fr) 42px;align-items:center;gap:0 8px;padding:10px;border:1px solid var(--divider-color);border-radius:8px}.product-list-exception .product-category-combo-field{grid-column:1/2}.product-list-exception .icon-button{grid-column:2;grid-row:1/3;align-self:center}.settings-card{max-width:760px}.settings-card+.settings-card{margin-top:16px}.settings-inline-actions{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-top:16px}.settings-inline-actions .ha-button{text-decoration:none}.settings-test-status{flex-basis:100%;margin-top:2px}.settings-card>h3{margin-bottom:6px}.setting-row{display:flex;align-items:flex-start;gap:12px;padding:16px 0;border-bottom:1px solid var(--divider-color);cursor:pointer}.setting-row>span{display:flex;flex-direction:column;gap:4px}.setting-row.checkbox-only{cursor:default}.setting-row.checkbox-only ha-checkbox{cursor:pointer}.setting-row small{color:var(--secondary-text-color);line-height:1.4}.settings-actions{margin-top:18px}.frontend-refresh-card{display:block;margin-top:24px!important}.frontend-refresh-card .field-help{margin:12px 0 18px}.product-filters{display:grid;grid-template-columns:minmax(0,1fr) minmax(190px,280px);gap:12px;align-items:start;margin-bottom:16px}.product-filters .search-field{margin-bottom:0}.picker-trigger-host{position:relative}.picker-trigger-host input{padding-right:44px!important}.picker-list-trigger{position:absolute!important;z-index:4;right:5px;top:50%;display:grid!important;place-items:center;width:34px!important;height:34px!important;min-width:34px!important;min-height:34px!important;padding:0!important;transform:translateY(-50%);border:0!important;border-radius:50%!important;color:var(--primary-color)!important;background:transparent!important;cursor:pointer}.picker-list-trigger:hover,.picker-list-trigger:focus-visible,.picker-list-trigger.active{outline:0;background:color-mix(in srgb,var(--primary-color) 16%,transparent)!important}.picker-list-trigger ha-icon{--mdc-icon-size:21px}.picker-current{box-shadow:inset 3px 0 0 var(--primary-color);background:color-mix(in srgb,var(--primary-color) 12%,var(--card-background-color))!important}.category-combo{position:relative}.category-combo>input{width:100%}.category-picker-options{position:absolute;z-index:20;top:calc(100% + 4px);left:0;right:0;max-height:260px;overflow:auto;border:1px solid var(--divider-color);border-radius:8px;background:var(--card-background-color);box-shadow:0 8px 25px rgba(0,0,0,.35);overscroll-behavior:contain}.category-picker-options button{display:grid;grid-template-columns:28px minmax(0,1fr);align-items:center;gap:8px;width:100%;padding:9px 11px;border:0;border-bottom:1px solid var(--divider-color);color:var(--primary-text-color);background:transparent;text-align:left;cursor:pointer}.category-picker-options button:hover{background:var(--secondary-background-color)}.category-picker-options button>span{display:flex;flex-direction:column;min-width:0}.category-picker-options small{color:var(--secondary-text-color)}.category-picker-options .picker-empty{padding:12px}.label-selector{display:grid;gap:8px;margin:18px 0 0;padding:0;border:0;color:var(--secondary-text-color)}.label-selector>div{display:block}.selected-labels{display:flex!important;flex-wrap:wrap;gap:7px!important}.selected-label{display:inline-flex;align-items:center;gap:6px;min-height:34px;padding:3px 8px;border:1px solid color-mix(in srgb,var(--label-color,var(--primary-color)) 58%,var(--divider-color));border-radius:18px;color:var(--primary-text-color);background:color-mix(in srgb,var(--label-color,var(--primary-color)) 24%,var(--card-background-color));cursor:pointer}.selected-label ha-icon{--mdc-icon-size:18px;color:var(--label-color,var(--primary-color))}.selected-label .remove-label{--mdc-icon-size:17px;color:var(--secondary-text-color)}.label-combo{position:relative}.label-search{display:grid!important;grid-template-columns:26px minmax(0,1fr);align-items:center;min-height:45px;padding:0 10px;border:1px solid var(--divider-color);border-radius:7px;background:var(--secondary-background-color)}.label-search ha-icon{--mdc-icon-size:21px}.label-search input{width:100%;min-height:42px!important;padding:0!important;border:0!important;outline:0;background:transparent!important;color:var(--primary-text-color)}.label-picker-options{position:absolute;z-index:21;top:calc(100% + 4px);left:0;right:0;max-height:260px;overflow:auto;border:1px solid var(--divider-color);border-radius:8px;background:var(--card-background-color);box-shadow:0 8px 25px rgba(0,0,0,.35);overscroll-behavior:contain}.label-picker-options button{display:grid;grid-template-columns:32px minmax(0,1fr);align-items:center;gap:8px;width:100%;padding:9px 11px;border:0;border-bottom:1px solid var(--divider-color);color:var(--primary-text-color);background:transparent;text-align:left;cursor:pointer}.label-picker-options button>span:last-child{display:flex;min-width:0;flex-direction:column;gap:2px}.label-picker-options button small{display:block;color:var(--secondary-text-color)}.label-picker-options button:hover{background:var(--secondary-background-color)}.label-option-icon{display:grid;place-items:center;width:28px;height:28px;border-radius:50%;color:var(--label-color,var(--primary-color));background:color-mix(in srgb,var(--label-color,var(--primary-color)) 20%,transparent)}.label-option-icon ha-icon{--mdc-icon-size:19px}.label-empty{margin:0;padding:13px;color:var(--secondary-text-color)}.label-chips{display:flex!important;flex-wrap:wrap;gap:5px;margin-top:3px}.label-chip{display:inline-flex!important;align-items:center;gap:4px;width:auto;padding:3px 7px;border-radius:999px;color:var(--primary-text-color)!important;background:color-mix(in srgb,var(--label-color,var(--primary-color)) 18%,transparent);font-size:12px!important}.label-chip ha-icon{--mdc-icon-size:15px;color:var(--label-color,var(--primary-color))}
+    .lookup-status{display:block;margin-top:7px;font-size:13px;line-height:1.3}.lookup-status.success{color:var(--success-color,#43a047)}.lookup-status.warning{color:var(--warning-color,#f0a000)}.lookup-status.error{color:var(--error-color)}.product-dialog-top{display:grid;grid-template-columns:minmax(0,1fr) 130px;gap:18px;align-items:start}.product-preview{position:relative;display:grid;place-items:center;width:130px;height:150px;margin-top:16px;overflow:hidden;border:1px solid var(--divider-color);border-radius:10px;color:var(--secondary-text-color);background:var(--secondary-background-color)}.product-preview img,.contained-product-image{position:absolute;inset:0;display:block;width:100%;height:100%;object-fit:contain;object-position:center}.product-preview ha-icon{--mdc-icon-size:42px}.ha-button.compact{min-height:34px;padding:0 12px;font-size:14px}.ha-button.compact.active{color:var(--primary-color);border-color:var(--primary-color);background:color-mix(in srgb,var(--primary-color) 12%,transparent)}.field input[readonly]{color:var(--secondary-text-color)}.field input.invalid{border-color:var(--error-color)}.field-error{color:var(--error-color);font-size:13px}.product-category-assignments{display:grid;gap:10px;margin-top:18px;padding:14px;border:1px solid var(--divider-color);border-radius:10px}.product-category-assignments h4{margin:0;font-size:17px}.product-category-assignments>.field-help{margin:0}.product-category-combo-field{min-width:0;margin-top:10px}.product-category-combo-field input{width:100%}.product-category-overrides{border-top:1px solid var(--divider-color);padding-top:9px}.product-category-overrides summary{cursor:pointer;color:var(--primary-text-color);font-weight:500}.product-type-categories{display:grid;grid-template-columns:minmax(0,1fr);gap:4px;margin-top:4px}.product-list-exceptions{display:grid;gap:9px;margin-top:14px}.product-list-exception{display:grid;grid-template-columns:minmax(0,1fr) 42px;align-items:center;gap:0 8px;padding:10px;border:1px solid var(--divider-color);border-radius:8px}.product-list-exception .product-category-combo-field{grid-column:1/2}.product-list-exception .icon-button{grid-column:2;grid-row:1/3;align-self:center}.watchlist-run-progress{width:100%;accent-color:var(--primary-color)}.watchlist-log-run{margin:10px 0}.watchlist-log-run summary{cursor:pointer}.watchlist-log-run li{margin-top:5px}.settings-card{max-width:760px}form[data-watchlist-management]{margin-top:16px}.settings-card+.settings-card{margin-top:16px}.settings-inline-actions{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-top:16px}.settings-inline-actions .ha-button{text-decoration:none}.settings-test-status{flex-basis:100%;margin-top:2px}.settings-card>h3{margin-bottom:6px}.setting-row{display:flex;align-items:flex-start;gap:12px;padding:16px 0;border-bottom:1px solid var(--divider-color);cursor:pointer}.setting-row>span{display:flex;flex-direction:column;gap:4px}.setting-row.checkbox-only{cursor:default}.setting-row.checkbox-only ha-checkbox{cursor:pointer}.setting-row small{color:var(--secondary-text-color);line-height:1.4}.settings-actions{margin-top:18px}.frontend-refresh-card{display:block;margin-top:24px!important}.frontend-refresh-card .field-help{margin:12px 0 18px}.product-filters{display:grid;grid-template-columns:minmax(0,1fr) minmax(190px,280px);gap:12px;align-items:start;margin-bottom:16px}.product-filters .search-field{margin-bottom:0}.picker-trigger-host{position:relative}.picker-trigger-host input{padding-right:44px!important}.picker-list-trigger{position:absolute!important;z-index:4;right:5px;top:50%;display:grid!important;place-items:center;width:34px!important;height:34px!important;min-width:34px!important;min-height:34px!important;padding:0!important;transform:translateY(-50%);border:0!important;border-radius:50%!important;color:var(--primary-color)!important;background:transparent!important;cursor:pointer}.picker-list-trigger:hover,.picker-list-trigger:focus-visible,.picker-list-trigger.active{outline:0;background:color-mix(in srgb,var(--primary-color) 16%,transparent)!important}.picker-list-trigger ha-icon{--mdc-icon-size:21px}.picker-current{box-shadow:inset 3px 0 0 var(--primary-color);background:color-mix(in srgb,var(--primary-color) 12%,var(--card-background-color))!important}.category-combo{position:relative}.category-combo>input{width:100%}.category-picker-options{position:absolute;z-index:20;top:calc(100% + 4px);left:0;right:0;max-height:260px;overflow:auto;border:1px solid var(--divider-color);border-radius:8px;background:var(--card-background-color);box-shadow:0 8px 25px rgba(0,0,0,.35);overscroll-behavior:contain}.category-picker-options button{display:grid;grid-template-columns:28px minmax(0,1fr);align-items:center;gap:8px;width:100%;padding:9px 11px;border:0;border-bottom:1px solid var(--divider-color);color:var(--primary-text-color);background:transparent;text-align:left;cursor:pointer}.category-picker-options button:hover{background:var(--secondary-background-color)}.category-picker-options button>span{display:flex;flex-direction:column;min-width:0}.category-picker-options small{color:var(--secondary-text-color)}.category-picker-options .picker-empty{padding:12px}.label-selector{display:grid;gap:8px;margin:18px 0 0;padding:0;border:0;color:var(--secondary-text-color)}.label-selector>div{display:block}.selected-labels{display:flex!important;flex-wrap:wrap;gap:7px!important}.selected-label{display:inline-flex;align-items:center;gap:6px;min-height:34px;padding:3px 8px;border:1px solid color-mix(in srgb,var(--label-color,var(--primary-color)) 58%,var(--divider-color));border-radius:18px;color:var(--primary-text-color);background:color-mix(in srgb,var(--label-color,var(--primary-color)) 24%,var(--card-background-color));cursor:pointer}.selected-label ha-icon{--mdc-icon-size:18px;color:var(--label-color,var(--primary-color))}.selected-label .remove-label{--mdc-icon-size:17px;color:var(--secondary-text-color)}.label-combo{position:relative}.label-search{display:grid!important;grid-template-columns:26px minmax(0,1fr);align-items:center;min-height:45px;padding:0 10px;border:1px solid var(--divider-color);border-radius:7px;background:var(--secondary-background-color)}.label-search ha-icon{--mdc-icon-size:21px}.label-search input{width:100%;min-height:42px!important;padding:0!important;border:0!important;outline:0;background:transparent!important;color:var(--primary-text-color)}.label-picker-options{position:absolute;z-index:21;top:calc(100% + 4px);left:0;right:0;max-height:260px;overflow:auto;border:1px solid var(--divider-color);border-radius:8px;background:var(--card-background-color);box-shadow:0 8px 25px rgba(0,0,0,.35);overscroll-behavior:contain}.label-picker-options button{display:grid;grid-template-columns:32px minmax(0,1fr);align-items:center;gap:8px;width:100%;padding:9px 11px;border:0;border-bottom:1px solid var(--divider-color);color:var(--primary-text-color);background:transparent;text-align:left;cursor:pointer}.label-picker-options button>span:last-child{display:flex;min-width:0;flex-direction:column;gap:2px}.label-picker-options button small{display:block;color:var(--secondary-text-color)}.label-picker-options button:hover{background:var(--secondary-background-color)}.label-option-icon{display:grid;place-items:center;width:28px;height:28px;border-radius:50%;color:var(--label-color,var(--primary-color));background:color-mix(in srgb,var(--label-color,var(--primary-color)) 20%,transparent)}.label-option-icon ha-icon{--mdc-icon-size:19px}.label-empty{margin:0;padding:13px;color:var(--secondary-text-color)}.label-chips{display:flex!important;flex-wrap:wrap;gap:5px;margin-top:3px}.label-chip{display:inline-flex!important;align-items:center;gap:4px;width:auto;padding:3px 7px;border-radius:999px;color:var(--primary-text-color)!important;background:color-mix(in srgb,var(--label-color,var(--primary-color)) 18%,transparent);font-size:12px!important}.label-chip ha-icon{--mdc-icon-size:15px;color:var(--label-color,var(--primary-color))}
     .notification-section{margin-top:24px}.notification-section>h3{margin-bottom:4px}.notification-section>p{margin:0 0 12px;color:var(--secondary-text-color)}.notification-profile-row{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;min-height:84px}.notification-profile-row.disabled{opacity:.62}.notification-profile-icon{display:grid;place-items:center;width:48px;height:48px;margin-left:14px;border-radius:50%;color:var(--primary-color);background:color-mix(in srgb,var(--primary-color) 13%,transparent)}.notification-profile-main{display:flex;flex-direction:column;gap:3px;padding:12px 14px}.notification-profile-main small,.notification-profile-main span{color:var(--secondary-text-color)}.notification-list-card{margin-bottom:12px;padding:15px}.notification-assignment-grid{display:grid;grid-template-columns:1fr;gap:8px;margin-top:13px}.notification-assignment-choice{padding:10px 12px;border:1px solid var(--divider-color);border-radius:8px;background:var(--secondary-background-color)}.notification-assignment-choice.disabled{opacity:.55}.notification-assignment-choice input{width:19px;height:19px}.notification-assignment-heading{display:flex;align-items:center;gap:10px;cursor:pointer}.notification-assignment-heading>span,.notification-inline-toggle>span{display:flex;flex-direction:column;min-width:0}.notification-assignment-choice small{color:var(--secondary-text-color)}.notification-assignment-settings{display:grid;gap:12px;margin:12px 0 2px 29px;padding-top:12px;border-top:1px solid var(--divider-color)}.notification-assignment-settings[hidden]{display:none}.notification-inline-toggle{display:flex;align-items:flex-start;gap:10px;cursor:pointer}.notification-automatic-grid{display:grid;grid-template-columns:minmax(220px,1fr) minmax(220px,280px);gap:12px}.notification-automatic-grid .field{margin-top:0}.notification-delay>div{display:grid;grid-template-columns:minmax(110px,140px) auto;justify-content:start;align-items:center;gap:10px}.notification-assignment-choice .notification-delay input{width:100%;height:48px;min-width:110px}.notification-delay>div>span{color:var(--secondary-text-color)}.notification-events{display:flex;flex-wrap:wrap;gap:8px 18px;margin:0;padding:11px 12px;border:1px solid var(--divider-color);border-radius:8px}.notification-events legend{padding:0 5px;color:var(--secondary-text-color)}.notification-events label{display:flex;align-items:center;gap:7px}.notification-events:disabled{opacity:.55}.notification-delay-help{line-height:1.4}.notification-status{display:flex;align-items:center;gap:9px;margin:12px 0;padding:11px 13px;border-left:4px solid var(--success-color,#43a047);border-radius:6px;background:color-mix(in srgb,var(--success-color,#43a047) 10%,transparent)}.notification-status ha-icon{color:var(--success-color,#43a047)}.notification-dialog{width:min(650px,100%)}.notification-dialog [data-notification-click-field][hidden],.notification-dialog [data-notification-format-help][hidden]{display:none}.notification-target-field{display:flex;flex-direction:column;gap:4px;margin-top:14px}.notification-target-field>small{min-height:18px;color:var(--secondary-text-color);font-size:12px;overflow-wrap:anywhere}.notification-message-fields{grid-template-columns:minmax(0,1fr) minmax(150px,210px)}.field select{box-sizing:border-box;width:100%;min-height:48px;padding:0 12px;border:1px solid var(--divider-color);border-radius:7px;color:var(--primary-text-color);background:var(--secondary-background-color);font:inherit}.field small{color:var(--secondary-text-color);line-height:1.4}
     .alexa-tabs{flex-wrap:nowrap;overflow-x:auto}.alexa-tabs button{flex:0 0 auto;white-space:nowrap}@media(max-width:600px){.alexa-tabs button{padding:11px 8px;gap:6px}}
     .alexa-outbound-jobs{margin-top:16px}.alexa-outbound-jobs>summary{cursor:pointer}.alexa-outbound-job{padding:14px 0;border-bottom:1px solid var(--divider-color);overflow-wrap:anywhere}.alexa-outbound-job>.ha-button{margin:6px 8px 6px 0}.alexa-outbound-job select{width:100%;min-width:0}.alexa-outbound-job>.field{min-width:0}

@@ -25,7 +25,8 @@
   }
 
   function render(card, { kind, title, summary, content, notice = "", context = "item" }) {
-    return `<div class="editor-section-wrap"><details class="editor-section" data-editor-section="${escapeHtml(kind)}" data-editor-context="${escapeHtml(context)}" ${isOpen(card, kind, context) ? "open" : ""}><summary><span class="editor-section-title">${escapeHtml(title)}</span><span class="editor-section-separator">·</span><span class="editor-section-summary" data-editor-summary>${escapeHtml(summary)}</span><ha-icon icon="mdi:chevron-down" aria-hidden="true"></ha-icon></summary><div class="editor-section-body">${content}</div></details>${notice}</div>`;
+    const summaryMarkup = summary == null ? "" : `<span class="editor-section-separator">·</span><span class="editor-section-summary" data-editor-summary>${escapeHtml(summary)}</span>`;
+    return `<div class="editor-section-wrap"><details class="editor-section" data-editor-section="${escapeHtml(kind)}" data-editor-context="${escapeHtml(context)}" ${isOpen(card, kind, context) ? "open" : ""}><summary><span class="editor-section-title">${escapeHtml(title)}</span>${summaryMarkup}<ha-icon icon="mdi:chevron-down" aria-hidden="true"></ha-icon></summary><div class="editor-section-body">${content}</div></details>${notice}</div>`;
   }
 
   function refresh(card, root = card.shadowRoot) {
@@ -79,6 +80,8 @@
       // Focusing the dialog accepts hardware Enter without a soft keyboard.
       Promise.resolve().then(() => {
         if (card._dialog !== draft || !dialog.isConnected) return;
+        const active = root.activeElement;
+        if (active && active !== dialog && dialog.contains(active)) return;
         const name = dialog.querySelector('[data-d-name],[data-field="name"],[data-product-field="name"]');
         if (card._config?.focus_dialog_input === true && name) name.focus?.({ preventScroll: true });
         else dialog.focus?.({ preventScroll: true });
@@ -127,7 +130,7 @@
       const target = event.composedPath?.()[0] || event.target;
       if (target?.getRootNode && target.getRootNode() !== dialog.getRootNode()) return;
       if (target?.closest?.(".dialog") && target.closest(".dialog") !== dialog) return;
-      if (target?.closest?.('textarea,select,button,a,[contenteditable="true"],[data-d-category],[data-category-input],[data-label-input],[role="combobox"],.picker-trigger-host input')
+      if (target?.closest?.('textarea,select,button,a,summary,[contenteditable="true"],[data-d-category],[data-category-input],[data-label-input],[role="combobox"],.picker-trigger-host input')
           || target?.disabled || target?.readOnly) return;
       const types = ["text", "search", "number", "email", "url", "tel", ...(action.checks ? ["radio", "checkbox"] : [])];
       if (target?.tagName === "INPUT" && !types.includes(target.type)) return;
@@ -217,6 +220,19 @@
     });
   }
 
+  function removeConfirmation({ title, message, actions, headingId, messageId, status = "", icon = "mdi:delete-outline" }) {
+    const id = value => value ? ` id="${escapeHtml(value)}"` : "";
+    return `<span class="confirmation-icon"><ha-icon icon="${escapeHtml(icon)}" aria-hidden="true"></ha-icon></span>
+      <h2${id(headingId)}>${escapeHtml(title)}</h2><p${id(messageId)}>${escapeHtml(message)}</p>
+      ${status}<footer>${actions}</footer>`;
+  }
+
+  function confirmationIconStyles() {
+    return `.confirmation-icon{display:grid;place-items:center;width:54px;height:54px;margin:0 auto 12px;border-radius:50%;
+      color:var(--error-color,#db4437);background:color-mix(in srgb,var(--error-color,#db4437) 14%,transparent)}
+      .confirmation-icon ha-icon{--mdc-icon-size:31px}`;
+  }
+
   function styles() {
     return `[data-quick-section-body][hidden]{display:none!important}ha-card h3>button.quick-section-toggle{display:inline-flex;align-items:center;gap:5px;min-height:32px;padding:0;border:0;border-radius:0;background:transparent;color:inherit;font:inherit;cursor:pointer}ha-card h3>button.quick-section-toggle:focus-visible{outline:2px solid var(--primary-color)}.quick-section-toggle ha-icon{--mdc-icon-size:17px}.editor-section-wrap{margin-top:14px;min-width:0;border:1px solid var(--divider-color);border-radius:9px}.editor-section{min-width:0}.editor-section-wrap>[data-editor-notice]:not(:empty){padding:0 11px 11px}.editor-section-wrap>[data-editor-notice]>.field-help:first-child{margin-top:0}.editor-section>summary{display:flex;align-items:center;gap:7px;min-height:44px;padding:9px 11px;list-style:none;cursor:pointer;color:var(--primary-text-color);font-size:14px;font-weight:400}.editor-section>summary::-webkit-details-marker{display:none}.editor-section>summary:focus-visible{outline:2px solid var(--primary-color);outline-offset:2px;border-radius:9px}.editor-section-summary{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--secondary-text-color)}.editor-section>summary>ha-icon{flex:0 0 auto;margin-left:auto;--mdc-icon-size:20px;color:var(--secondary-text-color)}.editor-section[open]>summary>ha-icon{transform:rotate(180deg)}.editor-section-body{min-width:0;padding:0 11px 11px}.editor-section-body>.dialog-field,.editor-section-body>.label-selector{margin-top:0}.editor-section-body .selection-field-heading{display:none}`;
   }
@@ -238,5 +254,5 @@
     };
   }
 
-  globalThis.HaListManagerDialogSections = { stateKey, isOpen, render, bind, refresh, styles, bindQuick, labelMarker, renderLabelGroups, handleEnter, bindActionEnter, runAction, prepareAddFocus };
+  globalThis.HaListManagerDialogSections = { stateKey, isOpen, render, bind, refresh, styles, removeConfirmation, confirmationIconStyles, bindQuick, labelMarker, renderLabelGroups, handleEnter, bindActionEnter, runAction, prepareAddFocus };
 })();
